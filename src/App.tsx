@@ -21,6 +21,7 @@ import TeacherStudents from './pages/TeacherStudents';
 import Announcements from './pages/Announcements';
 import AdminPrograms from './pages/AdminPrograms';
 import StudentProfile from './pages/StudentProfile';
+import RegistrationApplications from './pages/RegistrationApplications';
 import { LanguageProvider } from './context/LanguageContext';
 
 function AppContent() {
@@ -58,6 +59,7 @@ function AppContent() {
             <Route path="/attendance" element={<Attendance />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="/announcements" element={<Announcements role={role} />} />
+            <Route path="/registrations" element={<RegistrationApplications />} />
             <Route path="/settings" element={<Settings role={role} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
