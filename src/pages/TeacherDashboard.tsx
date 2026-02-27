@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Users, CalendarCheck, Award, BookOpen, Plus, ArrowUpRight, CheckCircle, Clock, FileText, MoreHorizontal } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { PROGRAMS } from '../constants/programs';
 
 const STATS = [
   { label: 'teacher.total_students', value: '142', trend: 'Across 3 Programs', icon: Users, color: 'text-blue-400' },
@@ -50,7 +51,7 @@ export default function TeacherDashboard() {
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('teacher.type')}</label>
-                <select className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                <select className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
                   <option>{t('teacher.quiz')}</option>
                   <option>{t('teacher.assignment')}</option>
                   <option>{t('teacher.event')}</option>
@@ -58,10 +59,10 @@ export default function TeacherDashboard() {
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('teacher.program')}</label>
-                <select className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
-                  <option>UI/UX Creative Designer</option>
-                  <option>Web Development</option>
-                  <option>Cybersecurity</option>
+                <select className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
+                  {PROGRAMS.map((program) => (
+                    <option key={program}>{program}</option>
+                  ))}
                   <option>All My Students</option>
                 </select>
               </div>

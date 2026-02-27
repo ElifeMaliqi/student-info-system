@@ -55,6 +55,28 @@ body {
   box-shadow: 0 0 0 4px rgba(252, 12, 228, 0.1);
 }
 
+/* Select Dropdowns */
+.glass-select {
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.glass-select:focus {
+  background: rgba(15, 15, 15, 0.95);
+  border-color: rgba(252, 12, 228, 0.4);
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(252, 12, 228, 0.1);
+}
+
+.glass-select option {
+  background: #0a0a0a;
+  color: #ffffff;
+  padding: 8px;
+}
+
 /* Typography */
 .text-gradient {
   background: linear-gradient(135deg, #fc0ce4 0%, #949ce4 100%);
@@ -157,6 +179,23 @@ body {
 }
 .light .glass-input::placeholder {
   color: rgba(17, 24, 39, 0.4) !important;
+}
+
+.light .glass-select {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #111827 !important;
+}
+
+.light .glass-select:focus {
+  background: #ffffff !important;
+  border-color: rgba(252, 12, 228, 0.4) !important;
+  box-shadow: 0 0 0 4px rgba(252, 12, 228, 0.1) !important;
+}
+
+.light .glass-select option {
+  background: #ffffff !important;
+  color: #111827 !important;
 }
 
 .light .hover\:bg-white\/5:hover { background-color: rgba(0, 0, 0, 0.04) !important; }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Megaphone, Plus, Users, Calendar, Clock } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { PROGRAMS } from '../constants/programs';
 
 const ANNOUNCEMENTS = [
   { id: 1, title: 'Welcome to Spring Semester 2026', message: 'We are excited to welcome everyone back to campus. Please ensure your registration is complete by Friday.', author: 'Sarah Connor', role: 'Admin', date: 'Feb 23, 2026', time: '09:00 AM', audience: 'All Users' },
@@ -43,12 +44,12 @@ export default function Announcements({ role }: { role: 'admin' | 'teacher' | 's
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('announcements.audience')}</label>
-                <select className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                <select className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
                   <option>All Users</option>
                   <option>All Students</option>
-                  <option>UI/UX Creative Designer</option>
-                  <option>Web Development</option>
-                  <option>Cybersecurity</option>
+                  {PROGRAMS.map((program) => (
+                    <option key={program}>{program}</option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-2">

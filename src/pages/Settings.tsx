@@ -81,7 +81,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.timezone')}</label>
-                    <select className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                    <select className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
                       <option>Pacific Time (PT)</option>
                       <option>Eastern Time (ET)</option>
                       <option>Central European Time (CET)</option>

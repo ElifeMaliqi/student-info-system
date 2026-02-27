@@ -2,14 +2,7 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { BookOpen, Plus, Users, DollarSign, Clock, MoreHorizontal } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-
-const PROGRAMS = [
-  { id: 'PRG-001', name: 'UI/UX Creative Designer', price: '$2,500', duration: '6', teachers: 3, students: 45, status: 'Active' },
-  { id: 'PRG-002', name: 'Web Development', price: '$3,200', duration: '8', teachers: 4, students: 62, status: 'Active' },
-  { id: 'PRG-003', name: 'Cybersecurity', price: '$4,000', duration: '12', teachers: 2, students: 28, status: 'Active' },
-  { id: 'PRG-004', name: 'UAV Engineering', price: '$3,800', duration: '9', teachers: 2, students: 15, status: 'Active' },
-  { id: 'PRG-005', name: 'Digital Marketing with AI', price: '$2,800', duration: '6', teachers: 3, students: 35, status: 'Active' },
-];
+import { PROGRAM_DETAILS } from '../constants/programs';
 
 export default function AdminPrograms() {
   const [view, setView] = useState<'list' | 'create'>('list');
@@ -89,7 +82,7 @@ export default function AdminPrograms() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {PROGRAMS.map((program) => (
+        {PROGRAM_DETAILS.map((program) => (
           <div key={program.id} className="glass-card rounded-2xl p-6 hover:bg-white/[0.02] transition-colors group flex flex-col">
             <div className="flex items-start justify-between mb-4">
               <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center border border-white/5 group-hover:bg-[#fc0ce4]/10 group-hover:border-[#fc0ce4]/20 transition-all">

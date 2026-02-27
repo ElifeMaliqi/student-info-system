@@ -6,7 +6,7 @@ const STUDENTS = [
   { id: 'STU-001', name: 'Elena Rodriguez', email: 'elena.r@example.com', program: 'UI/UX Creative Designer', status: 'Active', grade: 'A-', attendance: '98%', avatar: 'https://picsum.photos/seed/elena/100/100' },
   { id: 'STU-002', name: 'Marcus Chen', email: 'marcus.c@example.com', program: 'Web Development', status: 'Active', grade: 'B+', attendance: '85%', avatar: 'https://picsum.photos/seed/marcus/100/100' },
   { id: 'STU-003', name: 'Sarah Jenkins', email: 'sarah.j@example.com', program: 'Cybersecurity', status: 'Active', grade: 'A', attendance: '92%', avatar: 'https://picsum.photos/seed/sarah/100/100' },
-  { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering', status: 'Suspended', grade: 'C', attendance: '75%', avatar: 'https://picsum.photos/seed/david/100/100' },
+  { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering Degree', status: 'Suspended', grade: 'C', attendance: '75%', avatar: 'https://picsum.photos/seed/david/100/100' },
   { id: 'STU-005', name: 'Aisha Patel', email: 'aisha.p@example.com', program: 'Digital Marketing with AI', status: 'Active', grade: 'A+', attendance: '100%', avatar: 'https://picsum.photos/seed/aisha/100/100' },
 ];
 
