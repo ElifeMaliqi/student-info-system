@@ -15,7 +15,8 @@ const RECENT_STUDENTS = [
   { id: 'STU-001', name: 'Elena Rodriguez', program: 'UI/UX Creative Designer', status: 'Active', date: 'Today, 09:24 AM', avatar: 'https://picsum.photos/seed/elena/100/100' },
   { id: 'STU-002', name: 'Marcus Chen', program: 'Web Development', status: 'Pending', date: 'Today, 08:12 AM', avatar: 'https://picsum.photos/seed/marcus/100/100' },
   { id: 'STU-003', name: 'Sarah Jenkins', program: 'Cybersecurity', status: 'Active', date: 'Yesterday', avatar: 'https://picsum.photos/seed/sarah/100/100' },
-  { id: 'STU-004', name: 'David Kim', program: 'UAV Engineering', status: 'Active', date: 'Yesterday', avatar: 'https://picsum.photos/seed/david/100/100' },
+  { id: 'STU-004', name: 'David Kim', program: 'UAV Engineering Degree', status: 'Active', date: 'Yesterday', avatar: 'https://picsum.photos/seed/david/100/100' },
+  { id: 'STU-005', name: 'Aisha Patel', program: 'Digital Marketing with AI', status: 'Active', date: 'Yesterday', avatar: 'https://picsum.photos/seed/aisha/100/100' },
 ];
 
 export default function Dashboard() {

@@ -40,6 +40,10 @@ export const api = {
       const mockStudents: Student[] = [
         { id: 'STU-001', name: 'Elena Rodriguez', email: 'elena.r@example.com', program: 'UI/UX Creative Designer', status: 'Active', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/elena/100/100' },
         { id: 'STU-002', name: 'Marcus Chen', email: 'marcus.c@example.com', program: 'Web Development', status: 'Pending', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/marcus/100/100' },
+        { id: 'STU-003', name: 'Sarah Jenkins', email: 'sarah.j@example.com', program: 'Cybersecurity', status: 'Active', date: 'Feb 22, 2026', avatar: 'https://picsum.photos/seed/sarah/100/100' },
+        { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering Degree', status: 'Active', date: 'Feb 20, 2026', avatar: 'https://picsum.photos/seed/david/100/100' },
+        { id: 'STU-005', name: 'James Wilson', email: 'james.w@example.com', program: 'Internet of Things (UAV/IoT)', status: 'Active', date: 'Feb 18, 2026', avatar: 'https://picsum.photos/seed/james/100/100' },
+        { id: 'STU-006', name: 'Nina Costa', email: 'nina.c@example.com', program: '3D Creative Artist', status: 'Active', date: 'Feb 19, 2026', avatar: 'https://picsum.photos/seed/nina/100/100' },
       ];
       return { data: mockStudents, total: 142 };
     },

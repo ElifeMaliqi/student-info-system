@@ -6,13 +6,17 @@ import { useLanguage } from '../context/LanguageContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
+import { PROGRAMS } from '../constants/programs';
 
 const STUDENTS = [
   { id: 'STU-001', name: 'Elena Rodriguez', email: 'elena.r@example.com', program: 'UI/UX Creative Designer', status: 'Active', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/elena/100/100' },
   { id: 'STU-002', name: 'Marcus Chen', email: 'marcus.c@example.com', program: 'Web Development', status: 'Pending', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/marcus/100/100' },
   { id: 'STU-003', name: 'Sarah Jenkins', email: 'sarah.j@example.com', program: 'Cybersecurity', status: 'Active', date: 'Feb 22, 2026', avatar: 'https://picsum.photos/seed/sarah/100/100' },
-  { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering', status: 'Suspended', date: 'Feb 20, 2026', avatar: 'https://picsum.photos/seed/david/100/100' },
+  { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering Degree', status: 'Suspended', date: 'Feb 20, 2026', avatar: 'https://picsum.photos/seed/david/100/100' },
   { id: 'STU-005', name: 'Aisha Patel', email: 'aisha.p@example.com', program: 'Digital Marketing with AI', status: 'Graduated', date: 'Feb 15, 2026', avatar: 'https://picsum.photos/seed/aisha/100/100' },
+  { id: 'STU-006', name: 'James Wilson', email: 'james.w@example.com', program: 'Internet of Things (UAV/IoT)', status: 'Active', date: 'Feb 18, 2026', avatar: 'https://picsum.photos/seed/james/100/100' },
+  { id: 'STU-007', name: 'Nina Costa', email: 'nina.c@example.com', program: '3D Creative Artist', status: 'Active', date: 'Feb 19, 2026', avatar: 'https://picsum.photos/seed/nina/100/100' },
+  { id: 'STU-008', name: 'Alex Turner', email: 'alex.t@example.com', program: 'Entrepreneurship', status: 'Active', date: 'Feb 21, 2026', avatar: 'https://picsum.photos/seed/alex/100/100' },
 ];
 
 export default function Students() {
@@ -145,7 +149,7 @@ export default function Students() {
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.gender')}</label>
-                <select name="gender" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                <select name="gender" className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
                   <option>{t('students.select_gender')}</option>
                   <option>{t('students.male')}</option>
                   <option>{t('students.female')}</option>
@@ -154,13 +158,11 @@ export default function Students() {
               </div>
               <div className="space-y-2 md:col-span-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.select_program')}</label>
-                <select name="program" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                <select name="program" className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
                   <option value="">Select Program</option>
-                  <option value="Web Development">Web Development</option>
-                  <option value="Digital Marketing with AI">Digital Marketing with AI</option>
-                  <option value="UI/UX Creative Designer">UI/UX Creative Designer</option>
-                  <option value="Internet of Things (UAV/IoT)">Internet of Things (UAV/IoT)</option>
-                  <option value="Cybersecurity">Cybersecurity</option>
+                  {PROGRAMS.map((program) => (
+                    <option key={program} value={program}>{program}</option>
+                  ))}
                 </select>
               </div>
             </div>
