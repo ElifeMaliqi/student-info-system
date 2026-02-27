@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint, Sparkles } from 'lucide-react';
 import StudentWaitingPage from './StudentWaitingPage';
+import { PROGRAMS } from '../constants/programs';
 
 export default function Login({ onLogin }: { onLogin: (role: string) => void }) {
   const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('admin');
@@ -72,13 +73,13 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
             of innovators.
           </motion.h1>
           
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.4 }}
             className="flex flex-wrap gap-2 mt-12"
           >
-            {['Web Development', 'AI & Digital Marketing', 'UI/UX Design', 'UAV Engineering', 'Cybersecurity'].map((program) => (
+            {PROGRAMS.map((program) => (
               <div key={program} className="px-4 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-sm text-[11px] font-medium tracking-wider text-white/70 uppercase">
                 {program}
               </div>
@@ -251,11 +252,11 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
 
                     <div className="space-y-2">
                       <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Program of Interest</label>
-                      <select className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white bg-[#0a0a0a] appearance-none" required>
+                      <select className="glass-select w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm appearance-none" required>
                         <option value="">Select a program...</option>
-                        <option>UI/UX Creative Designer</option>
-                        <option>Web Development</option>
-                        <option>Cybersecurity</option>
+                        {PROGRAMS.map((program) => (
+                          <option key={program} value={program}>{program}</option>
+                        ))}
                       </select>
                     </div>
 
