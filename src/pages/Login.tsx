@@ -3,34 +3,45 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint, Sparkles } from 'lucide-react';
 import StudentWaitingPage from './StudentWaitingPage';
 import { PROGRAMS } from '../constants/programs';
+import { api } from '../services/api';
 
 export default function Login({ onLogin }: { onLogin: (role: string) => void }) {
   const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('admin');
   const [isHoveringBtn, setIsHoveringBtn] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
-  
+  const [isLoading, setIsLoading] = useState(false);
+
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
     if (!email || !email.includes('@')) {
       setError('Please enter a valid email address.');
+      setIsLoading(false);
       return;
     }
 
     if (!password || password.length < 6) {
       setError('Password must be at least 6 characters.');
+      setIsLoading(false);
       return;
     }
 
-    // Simulate API call
-    onLogin(role);
+    try {
+      await api.auth.login(email, password, role);
+      onLogin(role);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isWaiting) {
@@ -185,19 +196,22 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
                       </div>
                     </div>
 
-                    <button 
+                    <button
                       type="submit"
-                      className="w-full mt-6 lg:mt-8 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(252,12,228,0.2)]"
+                      disabled={isLoading}
+                      className="w-full mt-6 lg:mt-8 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(252,12,228,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
                       onMouseEnter={() => setIsHoveringBtn(true)}
                       onMouseLeave={() => setIsHoveringBtn(false)}
                     >
-                      <span>Sign In to Portal</span>
-                      <motion.div
-                        animate={{ x: isHoveringBtn ? 4 : 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                      </motion.div>
+                      <span>{isLoading ? 'Signing In...' : 'Sign In to Portal'}</span>
+                      {!isLoading && (
+                        <motion.div
+                          animate={{ x: isHoveringBtn ? 4 : 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </motion.div>
+                      )}
                     </button>
                   </form>
 
