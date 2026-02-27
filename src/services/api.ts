@@ -1,35 +1,60 @@
 import { Student, User, Role, Invoice, Quiz } from '../types';
-
-// ============================================================================
-// BACKEND TEAM INSTRUCTIONS:
-// 1. Replace the `delay` mock logic with actual `fetch` or `axios` calls.
-// 2. Set up your base URL (e.g., const BASE_URL = import.meta.env.VITE_API_URL).
-// 3. Add JWT token handling in an interceptor or headers.
-// ============================================================================
+import { supabase } from '../lib/supabase';
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const api = {
   auth: {
     login: async (email: string, password: string, requestedRole: Role): Promise<{ user: User, token: string }> => {
-      await delay(1000); // Simulate network latency
-      
-      // Mock successful login
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (!data.user || !data.session) {
+        throw new Error('Authentication failed');
+      }
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        throw new Error(profileError.message);
+      }
+
+      if (!profile) {
+        throw new Error('User profile not found');
+      }
+
+      if (profile.role !== requestedRole) {
+        await supabase.auth.signOut();
+        throw new Error(`Access denied. This login is for ${requestedRole}s only.`);
+      }
+
       return {
         user: {
-          id: 'USR-123',
-          email,
-          firstName: 'Admin',
-          lastName: 'User',
-          role: requestedRole,
-          avatar: 'https://picsum.photos/seed/admin/100/100'
+          id: profile.id,
+          email: data.user.email!,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          role: profile.role as Role,
+          avatar: profile.avatar_url || `https://picsum.photos/seed/${profile.id}/100/100`
         },
-        token: 'mock_jwt_token_12345'
+        token: data.session.access_token
       };
     },
     logout: async (): Promise<void> => {
-      await delay(500);
-      // Clear tokens here
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw new Error(error.message);
+      }
     }
   },
 
