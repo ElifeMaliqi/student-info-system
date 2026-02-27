@@ -10,15 +10,17 @@ import { useLanguage } from '../context/LanguageContext';
 import { CommandPalette } from '../components/CommandPalette';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
+import { User } from '../types';
 
 interface AdminLayoutProps {
   children: ReactNode;
   onLogout: () => void;
   role: 'admin' | 'teacher' | 'student';
   setRole: (role: 'admin' | 'teacher' | 'student') => void;
+  currentUser: User | null;
 }
 
-export default function AdminLayout({ children, onLogout, role, setRole }: AdminLayoutProps) {
+export default function AdminLayout({ children, onLogout, role, setRole, currentUser }: AdminLayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isFaqOpen, setIsFaqOpen] = useState(false);

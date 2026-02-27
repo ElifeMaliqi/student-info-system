@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint, Sparkles } from 'lucide-react';
 import StudentWaitingPage from './StudentWaitingPage';
-import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
+import { Program } from '../types';
 
 export default function Login({ onLogin }: { onLogin: (role: string) => void }) {
   const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('admin');
@@ -11,11 +11,34 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
   const [isApplying, setIsApplying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [programs, setPrograms] = useState<Program[]>([]);
 
-  // Form State
+  // Login Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  // Registration Form State
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regProgramId, setRegProgramId] = useState('');
+  const [regRole, setRegRole] = useState<'student' | 'teacher'>('student');
+
+  useEffect(() => {
+    loadPrograms();
+  }, []);
+
+  const loadPrograms = async () => {
+    try {
+      const data = await api.programs.getAll();
+      setPrograms(data);
+    } catch (error) {
+      console.error('Failed to load programs:', error);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +62,47 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
       onLogin(role);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    if (!regEmail || !regEmail.includes('@')) {
+      setError('Please enter a valid email address.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (!regPassword || regPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (regRole === 'student' && !regProgramId) {
+      setError('Please select a program.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      await api.auth.register({
+        email: regEmail,
+        firstName: regFirstName,
+        lastName: regLastName,
+        passwordHash: regPassword,
+        role: regRole,
+        programId: regRole === 'student' ? regProgramId : undefined,
+        phone: regPhone
+      });
+      setIsWaiting(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Registration failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -247,46 +311,141 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
                 </div>
 
                 <div className="glass-panel p-6 lg:p-8 rounded-[2rem] shadow-2xl shadow-black/50">
-                  <form className="space-y-4 lg:space-y-5" onSubmit={(e) => { e.preventDefault(); setIsWaiting(true); }}>
+                  <form className="space-y-4 lg:space-y-5" onSubmit={handleRegistration}>
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium text-center"
+                      >
+                        {error}
+                      </motion.div>
+                    )}
+
+                    <div className="flex p-1 bg-white/5 rounded-2xl mb-4 border border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => setRegRole('student')}
+                        className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-widest rounded-xl transition-all duration-300 ${
+                          regRole === 'student'
+                            ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white shadow-lg'
+                            : 'text-white/40 hover:text-white/80'
+                        }`}
+                      >
+                        Student
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRegRole('teacher')}
+                        className={`flex-1 py-2 text-[10px] font-semibold uppercase tracking-widest rounded-xl transition-all duration-300 ${
+                          regRole === 'teacher'
+                            ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white shadow-lg'
+                            : 'text-white/40 hover:text-white/80'
+                        }`}
+                      >
+                        Teacher
+                      </button>
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">First Name</label>
-                        <input type="text" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="John" required />
+                        <input
+                          type="text"
+                          value={regFirstName}
+                          onChange={(e) => setRegFirstName(e.target.value)}
+                          className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                          placeholder="John"
+                          required
+                        />
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Last Name</label>
-                        <input type="text" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="Doe" required />
+                        <input
+                          type="text"
+                          value={regLastName}
+                          onChange={(e) => setRegLastName(e.target.value)}
+                          className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                          placeholder="Doe"
+                          required
+                        />
                       </div>
                     </div>
 
                     <div className="space-y-2">
                       <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address</label>
-                      <input type="email" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="john@example.com" required />
+                      <input
+                        type="email"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                        placeholder="john@example.com"
+                        required
+                      />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Program of Interest</label>
-                      <select className="glass-select w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm appearance-none" required>
-                        <option value="">Select a program...</option>
-                        {PROGRAMS.map((program) => (
-                          <option key={program} value={program}>{program}</option>
-                        ))}
-                      </select>
+                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Password</label>
+                      <div className="relative group">
+                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-white">
+                          <Lock className="h-4 w-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
+                        </div>
+                        <input
+                          type="password"
+                          value={regPassword}
+                          onChange={(e) => setRegPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="glass-input w-full pl-11 pr-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                          required
+                        />
+                      </div>
+                      <p className="text-[10px] text-white/40 ml-1">Minimum 6 characters</p>
                     </div>
 
-                    <button 
+                    <div className="space-y-2">
+                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Phone Number (Optional)</label>
+                      <input
+                        type="tel"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                        placeholder="+20 123 456 7890"
+                      />
+                    </div>
+
+                    {regRole === 'student' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Program of Interest</label>
+                        <select
+                          value={regProgramId}
+                          onChange={(e) => setRegProgramId(e.target.value)}
+                          className="glass-select w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm appearance-none"
+                          required
+                        >
+                          <option value="">Select a program...</option>
+                          {programs.map((program) => (
+                            <option key={program.id} value={program.id}>{program.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <button
                       type="submit"
-                      className="w-full mt-6 lg:mt-8 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(252,12,228,0.2)]"
+                      disabled={isLoading}
+                      className="w-full mt-6 lg:mt-8 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(252,12,228,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
                       onMouseEnter={() => setIsHoveringBtn(true)}
                       onMouseLeave={() => setIsHoveringBtn(false)}
                     >
-                      <span>Submit Application</span>
-                      <motion.div
-                        animate={{ x: isHoveringBtn ? 4 : 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                      </motion.div>
+                      <span>{isLoading ? 'Submitting...' : 'Submit Application'}</span>
+                      {!isLoading && (
+                        <motion.div
+                          animate={{ x: isHoveringBtn ? 4 : 0 }}
+                          transition={{ duration: 0.2 }}
+                        >
+                          <ArrowRight className="w-4 h-4" />
+                        </motion.div>
+                      )}
                     </button>
                   </form>
                 </div>
@@ -294,7 +453,7 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
                 <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">
                   <p className="text-sm text-white/40">
                     Already have an account?{' '}
-                    <button onClick={() => setIsApplying(false)} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
+                    <button onClick={() => { setIsApplying(false); setError(''); }} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
                       Sign In
                     </button>
                   </p>
