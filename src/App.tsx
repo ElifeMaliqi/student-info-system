@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Login from './pages/Login';
 import AdminLayout from './layouts/AdminLayout';
@@ -23,30 +23,107 @@ import AdminPrograms from './pages/AdminPrograms';
 import StudentProfile from './pages/StudentProfile';
 import RegistrationApplications from './pages/RegistrationApplications';
 import { LanguageProvider } from './context/LanguageContext';
+import { supabase } from './lib/supabase';
+import { User } from './types';
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [role, setRole] = useState<'admin' | 'teacher' | 'student'>('admin');
   const navigate = useNavigate();
 
+  useEffect(() => {
+    checkAuth();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        await loadUserProfile(session.user.id);
+      } else if (event === 'SIGNED_OUT') {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setRole('admin');
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await loadUserProfile(session.user.id);
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadUserProfile = async (userId: string) => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (profile) {
+        const user: User = {
+          id: profile.id,
+          email: profile.email,
+          firstName: profile.first_name,
+          lastName: profile.last_name,
+          role: profile.role,
+          avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email}`
+        };
+
+        setCurrentUser(user);
+        setRole(profile.role);
+        setIsAuthenticated(true);
+      }
+    } catch (error) {
+      console.error('Failed to load profile:', error);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="text-white/50">Loading...</div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) {
     return (
-      <Login onLogin={(selectedRole) => {
-        setRole(selectedRole as 'admin' | 'teacher' | 'student');
-        setIsAuthenticated(true);
-        navigate('/dashboard', { replace: true });
+      <Login onLogin={async (selectedRole) => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await loadUserProfile(session.user.id);
+          navigate('/dashboard', { replace: true });
+        }
       }} />
     );
   }
 
   return (
-    <AdminLayout 
-      onLogout={() => {
+    <AdminLayout
+      onLogout={async () => {
+        await supabase.auth.signOut();
         setIsAuthenticated(false);
+        setCurrentUser(null);
         navigate('/', { replace: true });
       }}
       role={role}
       setRole={setRole}
+      currentUser={currentUser}
     >
       <Routes>
         {role === 'admin' && (
