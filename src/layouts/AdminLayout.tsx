@@ -1,10 +1,10 @@
 import { useState, useEffect, ReactNode, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  LayoutDashboard, Users, CalendarCheck, CreditCard, 
-  Settings, Bell, Search, Plus, LogOut, Menu, X, 
-  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle
+import {
+  LayoutDashboard, Users, CalendarCheck, CreditCard,
+  Settings, Bell, Search, Plus, LogOut, Menu, X,
+  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { CommandPalette } from '../components/CommandPalette';
@@ -50,6 +50,7 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
     { id: 'students', label: t('nav.students'), icon: Users },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
+    { id: 'registrations', label: 'Registrations', icon: UserPlus },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
     { id: 'finance', label: t('nav.finance'), icon: CreditCard },
     { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
