@@ -182,6 +182,7 @@ Deno.serve(async (req: Request) => {
           country: app.country,
           emergency_contact_name: app.emergency_contact_name,
           emergency_contact_phone: app.emergency_contact_phone,
+          enrollment_date: new Date().toISOString().split('T')[0],
           status: "active",
         });
 
