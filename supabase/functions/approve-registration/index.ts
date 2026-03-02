@@ -33,13 +33,24 @@ Deno.serve(async (req: Request) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const { data: { user: adminUser }, error: authError } = await supabaseAdmin.auth.getUser(token);
+
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      }
+    );
+
+    const { data: { user: adminUser }, error: authError } = await supabaseClient.auth.getUser();
 
     if (authError || !adminUser) {
       throw new Error("Unauthorized");
     }
 
-    const { data: adminProfile } = await supabaseAdmin
+    const { data: adminProfile } = await supabaseClient
       .from("profiles")
       .select("role")
       .eq("id", adminUser.id)
