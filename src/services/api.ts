@@ -96,7 +96,7 @@ export const api = {
           parent_first_name: applicationData.parentFirstName,
           password_hash: applicationData.passwordHash,
           role: applicationData.role,
-          program_id: applicationData.programId,
+          program: applicationData.program,
           phone: applicationData.phone,
           id_document_url: applicationData.idDocumentUrl
         }]);
@@ -499,7 +499,6 @@ export const api = {
         .from('registration_applications')
         .select(`
           *,
-          program:programs!registration_applications_program_id_fkey(name),
           reviewer:profiles!registration_applications_reviewed_by_fkey(first_name, last_name)
         `)
         .order('created_at', { ascending: false });
@@ -513,8 +512,7 @@ export const api = {
         lastName: app.last_name,
         parentFirstName: app.parent_first_name,
         role: app.role,
-        program: app.program?.name,
-        programId: app.program_id,
+        program: app.program,
         phone: app.phone,
         status: app.status,
         createdAt: formatDate(app.created_at),

@@ -116,7 +116,6 @@ export interface RegistrationApplication {
   passwordHash: string;
   role: 'teacher' | 'student';
   program?: string;
-  programId?: string;
   parentFirstName?: string;
   phone?: string;
   dateOfBirth?: string;

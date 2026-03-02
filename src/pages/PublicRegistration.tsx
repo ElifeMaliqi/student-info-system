@@ -1,7 +1,8 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { motion } from 'motion/react';
-import { ArrowRight, Upload, CheckCircle, XCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { ArrowRight, Upload, CheckCircle, XCircle, Loader2, ArrowLeft, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
+import { useLanguage } from '../context/LanguageContext';
 
 interface RegistrationFormData {
   firstName: string;
@@ -11,7 +12,7 @@ interface RegistrationFormData {
   password: string;
   confirmPassword: string;
   phone: string;
-  programId: string;
+  program: string;
   idDocument?: File;
 }
 
@@ -20,6 +21,8 @@ interface PublicRegistrationProps {
 }
 
 export default function PublicRegistration({ onBack }: PublicRegistrationProps) {
+  const { t } = useLanguage();
+
   const [formData, setFormData] = useState<RegistrationFormData>({
     firstName: '',
     lastName: '',
@@ -28,14 +31,14 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     password: '',
     confirmPassword: '',
     phone: '',
-    programId: '',
+    program: '',
   });
   const [idDocument, setIdDocument] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<'idle' | 'success' | 'pending' | 'rejected' | 'already_approved'>('idle');
 
-  const programNames = [
+  const programs = [
     'Web Development',
     'Digital Marketing with AI',
     'UI/UX Creative Designer',
@@ -45,23 +48,6 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     '3D Creative Artist',
     'Entrepreneurship'
   ];
-
-  const [programs, setPrograms] = useState<Array<{ id: string; name: string }>>([]);
-  const [isLoadingPrograms, setIsLoadingPrograms] = useState(true);
-
-  useEffect(() => {
-    api.programs.getAll().then(progs => {
-      const sortedPrograms = programNames
-        .map(name => progs.find(p => p.name === name))
-        .filter((p): p is { id: string; name: string } => p !== undefined);
-
-      setPrograms(sortedPrograms);
-      setIsLoadingPrograms(false);
-    }).catch(err => {
-      console.error('Failed to load programs:', err);
-      setIsLoadingPrograms(false);
-    });
-  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -119,7 +105,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
       setError('Phone number is required');
       return false;
     }
-    if (!formData.programId) {
+    if (!formData.program) {
       setError('Please select a program');
       return false;
     }
@@ -144,7 +130,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
         parentFirstName: formData.parentFirstName,
         passwordHash: formData.password,
         role: 'student',
-        programId: formData.programId,
+        program: formData.program,
         phone: formData.phone,
       });
 
@@ -440,23 +426,27 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
 
                 <div className="space-y-2">
                   <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
-                    Program *
+                    {t('students.select_program')} *
                   </label>
-                  <select
-                    name="programId"
-                    value={formData.programId}
-                    onChange={handleInputChange}
-                    className="glass-select w-full px-4 py-3 rounded-2xl text-sm appearance-none"
-                    required
-                    disabled={isLoadingPrograms}
-                  >
-                    <option value="">{isLoadingPrograms ? 'Loading programs...' : 'Select a program...'}</option>
-                    {programs.map((program) => (
-                      <option key={program.id} value={program.id}>
-                        {program.name}
+                  <div className="relative">
+                    <select
+                      name="program"
+                      value={formData.program}
+                      onChange={handleInputChange}
+                      className="glass-select w-full px-4 py-3 pr-10 rounded-2xl text-sm appearance-none cursor-pointer hover:bg-white/10 transition-all focus:outline-none focus:ring-2 focus:ring-[#fc0ce4]/50"
+                      required
+                    >
+                      <option value="" className="bg-[#0a0a0a] text-white/60">
+                        {t('students.select_program')}...
                       </option>
-                    ))}
-                  </select>
+                      {programs.map((program) => (
+                        <option key={program} value={program} className="bg-[#0a0a0a] text-white py-2">
+                          {program}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40 pointer-events-none" />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
