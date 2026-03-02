@@ -82,20 +82,43 @@ Deno.serve(async (req: Request) => {
       throw new Error(`Failed to create user: ${createUserError.message}`);
     }
 
-    const { error: profileError } = await supabaseAdmin
+    const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
-      .insert({
-        id: authUser.user.id,
-        email: app.email,
-        first_name: app.first_name,
-        last_name: app.last_name,
-        role: app.role,
-        phone: app.phone,
-      });
+      .select("id")
+      .eq("id", authUser.user.id)
+      .maybeSingle();
 
-    if (profileError) {
-      await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
-      throw new Error(`Failed to create profile: ${profileError.message}`);
+    if (existingProfile) {
+      const { error: updateProfileError } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          first_name: app.first_name,
+          last_name: app.last_name,
+          role: app.role,
+          phone: app.phone,
+        })
+        .eq("id", authUser.user.id);
+
+      if (updateProfileError) {
+        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+        throw new Error(`Failed to update profile: ${updateProfileError.message}`);
+      }
+    } else {
+      const { error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .insert({
+          id: authUser.user.id,
+          email: app.email,
+          first_name: app.first_name,
+          last_name: app.last_name,
+          role: app.role,
+          phone: app.phone,
+        });
+
+      if (profileError) {
+        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+        throw new Error(`Failed to create profile: ${profileError.message}`);
+      }
     }
 
     if (app.role === "student") {
