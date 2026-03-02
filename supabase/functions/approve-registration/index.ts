@@ -73,6 +73,9 @@ Deno.serve(async (req: Request) => {
         first_name: app.first_name,
         last_name: app.last_name,
       },
+      app_metadata: {
+        role: app.role,
+      },
     });
 
     if (createUserError) {
@@ -169,10 +172,12 @@ Deno.serve(async (req: Request) => {
       }
     );
   } catch (error) {
+    console.error("Error in approve-registration:", error);
     return new Response(
       JSON.stringify({
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
+        details: error instanceof Error ? error.stack : undefined,
       }),
       {
         status: 400,
