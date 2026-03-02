@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,28 +33,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const token = authHeader.replace("Bearer ", "");
-
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
-      }
-    );
-
-    const { data: { user: adminUser }, error: authError } = await supabaseClient.auth.getUser();
+    const { data: { user: adminUser }, error: authError } = await supabaseAdmin.auth.getUser(token);
 
     if (authError || !adminUser) {
       throw new Error("Unauthorized");
     }
 
-    const { data: adminProfile } = await supabaseClient
+    const { data: adminProfile } = await supabaseAdmin
       .from("profiles")
       .select("role")
       .eq("id", adminUser.id)
-      .maybeSingle();
+      .single();
 
     if (adminProfile?.role !== "admin") {
       throw new Error("Only admins can approve registrations");
@@ -66,13 +55,13 @@ Deno.serve(async (req: Request) => {
       throw new Error("Application ID is required");
     }
 
-    const { data: app, error: appError } = await supabaseAdmin
+    const { data: app, error: fetchError } = await supabaseAdmin
       .from("registration_applications")
       .select("*")
       .eq("id", applicationId)
-      .maybeSingle();
+      .single();
 
-    if (appError || !app) {
+    if (fetchError || !app) {
       throw new Error("Application not found");
     }
 
@@ -80,82 +69,54 @@ Deno.serve(async (req: Request) => {
       throw new Error(`Application already ${app.status}`);
     }
 
-    const { data: existingAuthUser } = await supabaseAdmin.auth.admin.listUsers();
-    const userExists = existingAuthUser?.users?.some(u => u.email === app.email);
+    const { data: existingUser } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .eq("email", app.email)
+      .maybeSingle();
 
-    if (userExists) {
-      throw new Error("A user with this email already exists");
+    if (existingUser) {
+      throw new Error("User with this email already exists");
     }
 
-    const { data: authUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
+    const { data: authData, error: createAuthError } = await supabaseAdmin.auth.admin.createUser({
       email: app.email,
       password: app.password_hash,
       email_confirm: true,
-      user_metadata: {
-        first_name: app.first_name,
-        last_name: app.last_name,
-      },
-      app_metadata: {
-        role: app.role,
-      },
     });
 
-    if (createUserError) {
-      throw new Error(`Failed to create user: ${createUserError.message}`);
+    if (createAuthError || !authData.user) {
+      throw new Error(`Failed to create auth user: ${createAuthError?.message}`);
     }
 
-    if (!authUser?.user) {
-      throw new Error("User creation failed - no user returned");
-    }
+    const userId = authData.user.id;
 
-    const { data: existingProfile } = await supabaseAdmin
+    const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .select("id")
-      .eq("id", authUser.user.id)
-      .maybeSingle();
+      .insert({
+        id: userId,
+        email: app.email,
+        first_name: app.first_name,
+        last_name: app.last_name,
+        role: app.role,
+        phone: app.phone,
+        date_of_birth: app.date_of_birth,
+        address: app.address,
+        city: app.city,
+        country: app.country,
+        emergency_contact_name: app.emergency_contact_name,
+        emergency_contact_phone: app.emergency_contact_phone,
+        specialization: app.specialization,
+        qualifications: app.qualifications,
+        experience_years: app.experience_years,
+        parent_first_name: app.parent_first_name,
+        id_document_url: app.id_document_url,
+        program: app.program,
+      });
 
-    const profileData = {
-      first_name: app.first_name,
-      last_name: app.last_name,
-      role: app.role,
-      phone: app.phone,
-      date_of_birth: app.date_of_birth,
-      address: app.address,
-      city: app.city,
-      country: app.country,
-      emergency_contact_name: app.emergency_contact_name,
-      emergency_contact_phone: app.emergency_contact_phone,
-      specialization: app.specialization,
-      qualifications: app.qualifications,
-      experience_years: app.experience_years,
-      parent_first_name: app.parent_first_name,
-      id_document_url: app.id_document_url,
-      program: app.program,
-    };
-
-    if (existingProfile) {
-      const { error: updateProfileError } = await supabaseAdmin
-        .from("profiles")
-        .update(profileData)
-        .eq("id", authUser.user.id);
-
-      if (updateProfileError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
-        throw new Error(`Failed to update profile: ${updateProfileError.message}`);
-      }
-    } else {
-      const { error: profileError } = await supabaseAdmin
-        .from("profiles")
-        .insert({
-          id: authUser.user.id,
-          email: app.email,
-          ...profileData,
-        });
-
-      if (profileError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
-        throw new Error(`Failed to create profile: ${profileError.message}`);
-      }
+    if (profileError) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+      throw new Error(`Failed to create profile: ${profileError.message}`);
     }
 
     if (app.role === "student") {
@@ -165,7 +126,7 @@ Deno.serve(async (req: Request) => {
         const { data: program } = await supabaseAdmin
           .from("programs")
           .select("id")
-          .eq("name", app.program)
+          .ilike("name", `%${app.program}%`)
           .maybeSingle();
 
         programId = program?.id;
@@ -174,7 +135,7 @@ Deno.serve(async (req: Request) => {
       const { error: studentError } = await supabaseAdmin
         .from("students")
         .insert({
-          user_id: authUser.user.id,
+          user_id: userId,
           program_id: programId,
           date_of_birth: app.date_of_birth,
           address: app.address,
@@ -182,28 +143,39 @@ Deno.serve(async (req: Request) => {
           country: app.country,
           emergency_contact_name: app.emergency_contact_name,
           emergency_contact_phone: app.emergency_contact_phone,
-          enrollment_date: new Date().toISOString().split('T')[0],
           status: "active",
         });
 
       if (studentError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+        await supabaseAdmin.auth.admin.deleteUser(userId);
         throw new Error(`Failed to create student record: ${studentError.message}`);
       }
-    } else if (app.role === "teacher") {
-      const { error: teacherError } = await supabaseAdmin
-        .from("teachers")
-        .insert({
-          user_id: authUser.user.id,
-          specialization: app.specialization,
-          qualifications: app.qualifications,
-          experience_years: app.experience_years,
-          status: "active",
-        });
+    }
 
-      if (teacherError) {
-        await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
-        throw new Error(`Failed to create teacher record: ${teacherError.message}`);
+    if (app.role === "teacher") {
+      let programId = null;
+
+      if (app.program) {
+        const { data: program } = await supabaseAdmin
+          .from("programs")
+          .select("id")
+          .ilike("name", `%${app.program}%`)
+          .maybeSingle();
+
+        programId = program?.id;
+      }
+
+      if (programId) {
+        const { error: teacherProgramError } = await supabaseAdmin
+          .from("teacher_programs")
+          .insert({
+            teacher_id: userId,
+            program_id: programId,
+          });
+
+        if (teacherProgramError) {
+          console.error("Failed to assign teacher to program:", teacherProgramError.message);
+        }
       }
     }
 
@@ -217,7 +189,7 @@ Deno.serve(async (req: Request) => {
       .eq("id", applicationId);
 
     if (updateError) {
-      throw new Error(`Failed to update application: ${updateError.message}`);
+      console.error("Failed to update application status:", updateError.message);
     }
 
     return new Response(
@@ -230,22 +202,23 @@ Deno.serve(async (req: Request) => {
           ...corsHeaders,
           "Content-Type": "application/json",
         },
+        status: 200,
       }
     );
   } catch (error) {
-    console.error("Error in approve-registration:", error);
+    console.error("Error approving registration:", error);
+
     return new Response(
       JSON.stringify({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-        details: error instanceof Error ? error.stack : undefined,
+        error: error instanceof Error ? error.message : "Unknown error occurred",
       }),
       {
-        status: 400,
         headers: {
           ...corsHeaders,
           "Content-Type": "application/json",
         },
+        status: 400,
       }
     );
   }
