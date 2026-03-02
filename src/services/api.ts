@@ -534,89 +534,28 @@ export const api = {
     },
 
     approve: async (applicationId: string) => {
-      const { data: app } = await supabase
-        .from('registration_applications')
-        .select('*')
-        .eq('id', applicationId)
-        .maybeSingle();
+      const { data: { session } } = await supabase.auth.getSession();
 
-      if (!app) throw new Error('Application not found');
-
-      const { data: user } = await supabase.auth.getUser();
-
-      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-        email: app.email,
-        password: app.password_hash,
-        email_confirm: true
-      });
-
-      if (authError) throw new Error(authError.message);
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert([{
-          id: authUser.user.id,
-          email: app.email,
-          first_name: app.first_name,
-          last_name: app.last_name,
-          role: app.role,
-          phone: app.phone
-        }]);
-
-      if (profileError) throw new Error(profileError.message);
-
-      if (app.role === 'student') {
-        let programId = null;
-
-        if (app.program) {
-          const { data: program } = await supabase
-            .from('programs')
-            .select('id')
-            .eq('name', app.program)
-            .maybeSingle();
-
-          programId = program?.id;
-        }
-
-        const { error: studentError } = await supabase
-          .from('students')
-          .insert([{
-            user_id: authUser.user.id,
-            program_id: programId,
-            date_of_birth: app.date_of_birth,
-            address: app.address,
-            city: app.city,
-            country: app.country,
-            emergency_contact_name: app.emergency_contact_name,
-            emergency_contact_phone: app.emergency_contact_phone,
-            status: 'active'
-          }]);
-
-        if (studentError) throw new Error(studentError.message);
-      } else if (app.role === 'teacher') {
-        const { error: teacherError } = await supabase
-          .from('teachers')
-          .insert([{
-            user_id: authUser.user.id,
-            specialization: app.specialization,
-            qualifications: app.qualifications,
-            experience_years: app.experience_years,
-            status: 'active'
-          }]);
-
-        if (teacherError) throw new Error(teacherError.message);
+      if (!session) {
+        throw new Error('Not authenticated');
       }
 
-      const { error: updateError } = await supabase
-        .from('registration_applications')
-        .update({
-          status: 'approved',
-          reviewed_by: user.user?.id,
-          reviewed_at: new Date().toISOString()
-        })
-        .eq('id', applicationId);
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approve-registration`;
 
-      if (updateError) throw new Error(updateError.message);
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ applicationId }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to approve application');
+      }
     },
 
     reject: async (applicationId: string, notes?: string) => {
