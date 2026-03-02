@@ -34,11 +34,23 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<'idle' | 'success' | 'pending' | 'rejected' | 'already_approved'>('idle');
-  const [programs, setPrograms] = useState<Array<{ id: string; name: string }>>([]);
+
+  const programs = [
+    'Web Development',
+    'Digital Marketing with AI',
+    'UI/UX Creative Designer',
+    'Internet of Things (UAV/IoT)',
+    'UAV Engineering Degree',
+    'Cybersecurity',
+    '3D Creative Artist',
+    'Entrepreneurship'
+  ];
+
+  const [programsData, setProgramsData] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     api.programs.getAll().then(progs => {
-      setPrograms(progs.map(p => ({ id: p.id, name: p.name })));
+      setProgramsData(progs.map(p => ({ id: p.id, name: p.name })));
     }).catch(err => {
       console.error('Failed to load programs:', err);
     });
@@ -431,9 +443,14 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
                     required
                   >
                     <option value="">Select a program...</option>
-                    {programs.map((program) => (
-                      <option key={program.id} value={program.id}>{program.name}</option>
-                    ))}
+                    {programs.map((programName) => {
+                      const programData = programsData.find(p => p.name === programName);
+                      return (
+                        <option key={programName} value={programData?.id || programName}>
+                          {programName}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
 
