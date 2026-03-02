@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint, Sparkles } from 'lucide-react';
 import StudentWaitingPage from './StudentWaitingPage';
+import PublicRegistration from './PublicRegistration';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 
@@ -46,6 +47,10 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
 
   if (isWaiting) {
     return <StudentWaitingPage onBack={() => { setIsWaiting(false); setIsApplying(false); }} />;
+  }
+
+  if (isApplying) {
+    return <PublicRegistration onBack={() => setIsApplying(false)} />;
   }
 
   return (
@@ -117,16 +122,12 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
         </div>
 
         <div className="w-full max-w-[400px] relative z-10">
-          <AnimatePresence mode="wait">
-            {!isApplying ? (
-              <motion.div
-                key="login"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.4 }}
-                className="w-full"
-              >
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4 }}
+            className="w-full"
+          >
                 <div className="mb-8 lg:mb-10 text-center lg:text-left">
                   <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">Welcome back</h2>
                   <p className="text-white/50 text-sm">Enter your credentials to access the portal.</p>
@@ -223,85 +224,15 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
                   </div>
                 </div>
 
-                <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">
-                  <p className="text-sm text-white/40">
-                    Don't have an account?{' '}
-                    <button onClick={() => setIsApplying(true)} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
-                      Apply for Admission
-                    </button>
-                  </p>
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="apply"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.4 }}
-                className="w-full"
-              >
-                <div className="mb-8 lg:mb-10 text-center lg:text-left">
-                  <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">Apply for Admission</h2>
-                  <p className="text-white/50 text-sm">Join Future Minds Academy today.</p>
-                </div>
-
-                <div className="glass-panel p-6 lg:p-8 rounded-[2rem] shadow-2xl shadow-black/50">
-                  <form className="space-y-4 lg:space-y-5" onSubmit={(e) => { e.preventDefault(); setIsWaiting(true); }}>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">First Name</label>
-                        <input type="text" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="John" required />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Last Name</label>
-                        <input type="text" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="Doe" required />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address</label>
-                      <input type="email" className="glass-input w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5" placeholder="john@example.com" required />
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Program of Interest</label>
-                      <select className="glass-select w-full px-4 py-3 lg:py-3.5 rounded-2xl text-sm appearance-none" required>
-                        <option value="">Select a program...</option>
-                        {PROGRAMS.map((program) => (
-                          <option key={program} value={program}>{program}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <button 
-                      type="submit"
-                      className="w-full mt-6 lg:mt-8 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(252,12,228,0.2)]"
-                      onMouseEnter={() => setIsHoveringBtn(true)}
-                      onMouseLeave={() => setIsHoveringBtn(false)}
-                    >
-                      <span>Submit Application</span>
-                      <motion.div
-                        animate={{ x: isHoveringBtn ? 4 : 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <ArrowRight className="w-4 h-4" />
-                      </motion.div>
-                    </button>
-                  </form>
-                </div>
-
-                <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">
-                  <p className="text-sm text-white/40">
-                    Already have an account?{' '}
-                    <button onClick={() => setIsApplying(false)} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
-                      Sign In
-                    </button>
-                  </p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">
+              <p className="text-sm text-white/40">
+                Don't have an account?{' '}
+                <button onClick={() => setIsApplying(true)} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
+                  Apply for Admission
+                </button>
+              </p>
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>

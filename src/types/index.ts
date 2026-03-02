@@ -117,6 +117,7 @@ export interface RegistrationApplication {
   role: 'teacher' | 'student';
   program?: string;
   programId?: string;
+  parentFirstName?: string;
   phone?: string;
   dateOfBirth?: string;
   address?: string;
@@ -127,6 +128,7 @@ export interface RegistrationApplication {
   specialization?: string;
   qualifications?: string;
   experienceYears?: number;
+  idDocumentUrl?: string;
   status: 'pending' | 'approved' | 'rejected';
   notes?: string;
   reviewedBy?: string;

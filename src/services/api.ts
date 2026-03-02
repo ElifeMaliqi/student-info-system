@@ -73,17 +73,33 @@ export const api = {
 
       const { data: existingApp } = await supabase
         .from('registration_applications')
-        .select('email')
+        .select('status')
         .eq('email', applicationData.email)
         .maybeSingle();
 
       if (existingApp) {
-        throw new Error('An application with this email is already pending');
+        if (existingApp.status === 'pending') {
+          throw new Error('An application with this email is already pending');
+        } else if (existingApp.status === 'approved') {
+          throw new Error('This email is already registered');
+        } else if (existingApp.status === 'rejected') {
+          throw new Error('Your previous application was denied');
+        }
       }
 
       const { error } = await supabase
         .from('registration_applications')
-        .insert([applicationData]);
+        .insert([{
+          email: applicationData.email,
+          first_name: applicationData.firstName,
+          last_name: applicationData.lastName,
+          parent_first_name: applicationData.parentFirstName,
+          password_hash: applicationData.passwordHash,
+          role: applicationData.role,
+          program_id: applicationData.programId,
+          phone: applicationData.phone,
+          id_document_url: applicationData.idDocumentUrl
+        }]);
 
       if (error) {
         throw new Error(error.message);
@@ -495,6 +511,7 @@ export const api = {
         email: app.email,
         firstName: app.first_name,
         lastName: app.last_name,
+        parentFirstName: app.parent_first_name,
         role: app.role,
         program: app.program?.name,
         programId: app.program_id,
@@ -513,6 +530,7 @@ export const api = {
         country: app.country,
         emergencyContactName: app.emergency_contact_name,
         emergencyContactPhone: app.emergency_contact_phone,
+        idDocumentUrl: app.id_document_url,
         passwordHash: app.password_hash
       }));
     },

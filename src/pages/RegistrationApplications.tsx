@@ -258,12 +258,38 @@ export default function RegistrationApplications() {
                 </div>
               )}
 
+              {selectedApp.parentFirstName && (
+                <div>
+                  <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
+                    Parent's First Name
+                  </label>
+                  <p className="text-white">{selectedApp.parentFirstName}</p>
+                </div>
+              )}
+
               {selectedApp.program && (
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
                     Program
                   </label>
                   <p className="text-white">{selectedApp.program}</p>
+                </div>
+              )}
+
+              {selectedApp.idDocumentUrl && (
+                <div>
+                  <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
+                    ID Document
+                  </label>
+                  <a
+                    href={selectedApp.idDocumentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#fc0ce4] hover:underline flex items-center gap-2"
+                  >
+                    <FileText className="w-4 h-4" />
+                    View Document
+                  </a>
                 </div>
               )}
 
