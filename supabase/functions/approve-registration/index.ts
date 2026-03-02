@@ -76,6 +76,17 @@ Deno.serve(async (req: Request) => {
       throw new Error("Application not found");
     }
 
+    if (app.status !== "pending") {
+      throw new Error(`Application already ${app.status}`);
+    }
+
+    const { data: existingAuthUser } = await supabaseAdmin.auth.admin.listUsers();
+    const userExists = existingAuthUser?.users?.some(u => u.email === app.email);
+
+    if (userExists) {
+      throw new Error("A user with this email already exists");
+    }
+
     const { data: authUser, error: createUserError } = await supabaseAdmin.auth.admin.createUser({
       email: app.email,
       password: app.password_hash,
@@ -91,6 +102,10 @@ Deno.serve(async (req: Request) => {
 
     if (createUserError) {
       throw new Error(`Failed to create user: ${createUserError.message}`);
+    }
+
+    if (!authUser?.user) {
+      throw new Error("User creation failed - no user returned");
     }
 
     const { data: existingProfile } = await supabaseAdmin
