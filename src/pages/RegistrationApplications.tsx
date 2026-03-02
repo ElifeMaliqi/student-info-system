@@ -77,10 +77,10 @@ export default function RegistrationApplications() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">
-            Registration Applications
+            {t('registrations.title')}
           </h1>
           <p className="text-white/50 text-sm">
-            Review and approve registration requests
+            {t('registrations.desc')}
           </p>
         </div>
 
@@ -237,13 +237,13 @@ export default function RegistrationApplications() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
-                    Email
+                    {t('students.email')}
                   </label>
                   <p className="text-white">{selectedApp.email}</p>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
-                    Role
+                    {t('registrations.role')}
                   </label>
                   <p className="text-white capitalize">{selectedApp.role}</p>
                 </div>
@@ -252,7 +252,7 @@ export default function RegistrationApplications() {
               {selectedApp.phone && (
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
-                    Phone
+                    {t('students.phone')}
                   </label>
                   <p className="text-white">{selectedApp.phone}</p>
                 </div>
@@ -261,7 +261,7 @@ export default function RegistrationApplications() {
               {selectedApp.parentFirstName && (
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
-                    Parent's First Name
+                    {t('registrations.parent_name')}
                   </label>
                   <p className="text-white">{selectedApp.parentFirstName}</p>
                 </div>
@@ -270,7 +270,7 @@ export default function RegistrationApplications() {
               {selectedApp.program && (
                 <div>
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
-                    Program
+                    {t('registrations.program')}
                   </label>
                   <p className="text-white">{selectedApp.program}</p>
                 </div>
@@ -373,18 +373,18 @@ export default function RegistrationApplications() {
                   <button
                     onClick={() => handleApprove(selectedApp.id)}
                     disabled={processingId === selectedApp.id}
-                    className="flex-1 btn-primary py-3 disabled:opacity-50"
+                    className="flex-1 py-3 px-6 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <CheckCircle className="w-5 h-5 mr-2" />
-                    Approve Application
+                    <CheckCircle className="w-5 h-5" />
+                    {t('registrations.approve')}
                   </button>
                   <button
                     onClick={() => handleReject(selectedApp.id)}
                     disabled={processingId === selectedApp.id}
-                    className="flex-1 py-3 px-6 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors disabled:opacity-50"
+                    className="flex-1 py-3 px-6 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <XCircle className="w-5 h-5 mr-2 inline" />
-                    Reject
+                    <XCircle className="w-5 h-5" />
+                    {t('registrations.reject')}
                   </button>
                 </div>
               )}

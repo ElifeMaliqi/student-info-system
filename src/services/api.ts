@@ -566,11 +566,23 @@ export const api = {
       if (profileError) throw new Error(profileError.message);
 
       if (app.role === 'student') {
+        let programId = null;
+
+        if (app.program) {
+          const { data: program } = await supabase
+            .from('programs')
+            .select('id')
+            .eq('name', app.program)
+            .maybeSingle();
+
+          programId = program?.id;
+        }
+
         const { error: studentError } = await supabase
           .from('students')
           .insert([{
             user_id: authUser.user.id,
-            program_id: app.program_id,
+            program_id: programId,
             date_of_birth: app.date_of_birth,
             address: app.address,
             city: app.city,

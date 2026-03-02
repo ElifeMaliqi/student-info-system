@@ -261,6 +261,15 @@ const translations = {
     'dash.pending_apps': 'Pending Applications',
     'dash.overdue_inv': 'Overdue Invoices',
     'dash.at_risk': 'Students at Risk (Attendance)',
+
+    // Registration Applications
+    'registrations.title': 'Registration Applications',
+    'registrations.desc': 'Review and approve registration requests',
+    'registrations.approve': 'Approve Application',
+    'registrations.reject': 'Reject',
+    'registrations.role': 'Role',
+    'registrations.parent_name': "Parent's First Name",
+    'registrations.program': 'Program',
   },
   AL: {
     // Navigation
@@ -514,6 +523,15 @@ const translations = {
     'dash.pending_apps': 'Aplikime në Pritje',
     'dash.overdue_inv': 'Fatura të Vonuara',
     'dash.at_risk': 'Studentë në Rrezik (Pjesëmarrja)',
+
+    // Registration Applications
+    'registrations.title': 'Aplikime për Regjistrim',
+    'registrations.desc': 'Shqyrto dhe mirато kërkesa për regjistrim',
+    'registrations.approve': 'Mirато Aplikimin',
+    'registrations.reject': 'Refuzo',
+    'registrations.role': 'Roli',
+    'registrations.parent_name': 'Emri i Prindit',
+    'registrations.program': 'Programi',
   }
 };
 
