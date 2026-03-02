@@ -88,15 +88,29 @@ Deno.serve(async (req: Request) => {
       .eq("id", authUser.user.id)
       .maybeSingle();
 
+    const profileData = {
+      first_name: app.first_name,
+      last_name: app.last_name,
+      role: app.role,
+      phone: app.phone,
+      date_of_birth: app.date_of_birth,
+      address: app.address,
+      city: app.city,
+      country: app.country,
+      emergency_contact_name: app.emergency_contact_name,
+      emergency_contact_phone: app.emergency_contact_phone,
+      specialization: app.specialization,
+      qualifications: app.qualifications,
+      experience_years: app.experience_years,
+      parent_first_name: app.parent_first_name,
+      id_document_url: app.id_document_url,
+      program: app.program,
+    };
+
     if (existingProfile) {
       const { error: updateProfileError } = await supabaseAdmin
         .from("profiles")
-        .update({
-          first_name: app.first_name,
-          last_name: app.last_name,
-          role: app.role,
-          phone: app.phone,
-        })
+        .update(profileData)
         .eq("id", authUser.user.id);
 
       if (updateProfileError) {
@@ -109,10 +123,7 @@ Deno.serve(async (req: Request) => {
         .insert({
           id: authUser.user.id,
           email: app.email,
-          first_name: app.first_name,
-          last_name: app.last_name,
-          role: app.role,
-          phone: app.phone,
+          ...profileData,
         });
 
       if (profileError) {
