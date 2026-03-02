@@ -35,7 +35,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
   const [error, setError] = useState('');
   const [status, setStatus] = useState<'idle' | 'success' | 'pending' | 'rejected' | 'already_approved'>('idle');
 
-  const programs = [
+  const programNames = [
     'Web Development',
     'Digital Marketing with AI',
     'UI/UX Creative Designer',
@@ -46,13 +46,20 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     'Entrepreneurship'
   ];
 
-  const [programsData, setProgramsData] = useState<Array<{ id: string; name: string }>>([]);
+  const [programs, setPrograms] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLoadingPrograms, setIsLoadingPrograms] = useState(true);
 
   useEffect(() => {
     api.programs.getAll().then(progs => {
-      setProgramsData(progs.map(p => ({ id: p.id, name: p.name })));
+      const sortedPrograms = programNames
+        .map(name => progs.find(p => p.name === name))
+        .filter((p): p is { id: string; name: string } => p !== undefined);
+
+      setPrograms(sortedPrograms);
+      setIsLoadingPrograms(false);
     }).catch(err => {
       console.error('Failed to load programs:', err);
+      setIsLoadingPrograms(false);
     });
   }, []);
 
@@ -441,16 +448,14 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
                     onChange={handleInputChange}
                     className="glass-select w-full px-4 py-3 rounded-2xl text-sm appearance-none"
                     required
+                    disabled={isLoadingPrograms}
                   >
-                    <option value="">Select a program...</option>
-                    {programs.map((programName) => {
-                      const programData = programsData.find(p => p.name === programName);
-                      return (
-                        <option key={programName} value={programData?.id || programName}>
-                          {programName}
-                        </option>
-                      );
-                    })}
+                    <option value="">{isLoadingPrograms ? 'Loading programs...' : 'Select a program...'}</option>
+                    {programs.map((program) => (
+                      <option key={program.id} value={program.id}>
+                        {program.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
