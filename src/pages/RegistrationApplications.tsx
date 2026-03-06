@@ -13,6 +13,8 @@ export default function RegistrationApplications() {
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | null>(null);
+  const [rejectNotes, setRejectNotes] = useState('');
 
   useEffect(() => {
     loadApplications();
@@ -30,14 +32,32 @@ export default function RegistrationApplications() {
     }
   };
 
-  const handleApprove = async (id: string) => {
-    if (!confirm('Are you sure you want to approve this application? This will create a new user account.')) return;
+  const closeModal = () => {
+    setSelectedApp(null);
+    setConfirmAction(null);
+    setRejectNotes('');
+  };
 
+  const openApproveConfirm = (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    setSelectedApp(app);
+    setConfirmAction('approve');
+  };
+
+  const openRejectConfirm = (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    setSelectedApp(app);
+    setRejectNotes('');
+    setConfirmAction('reject');
+  };
+
+  const doApprove = async () => {
+    if (!selectedApp) return;
     try {
-      setProcessingId(id);
-      await api.registrations.approve(id);
+      setProcessingId(selectedApp.id);
+      await api.registrations.approve(selectedApp.id);
       await loadApplications();
-      setSelectedApp(null);
+      closeModal();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to approve application');
     } finally {
@@ -45,15 +65,13 @@ export default function RegistrationApplications() {
     }
   };
 
-  const handleReject = async (id: string) => {
-    const notes = prompt('Enter rejection reason (optional):');
-    if (notes === null) return;
-
+  const doReject = async () => {
+    if (!selectedApp) return;
     try {
-      setProcessingId(id);
-      await api.registrations.reject(id, notes);
+      setProcessingId(selectedApp.id);
+      await api.registrations.reject(selectedApp.id, rejectNotes);
       await loadApplications();
-      setSelectedApp(null);
+      closeModal();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to reject application');
     } finally {
@@ -177,22 +195,18 @@ export default function RegistrationApplications() {
                 {app.status === 'pending' && (
                   <div className="flex gap-2">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleApprove(app.id);
-                      }}
-                      disabled={processingId === app.id}
-                      className="p-2 rounded-xl bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20 transition-colors disabled:opacity-50"
+                      onClick={(e) => openApproveConfirm(app, e)}
+                      disabled={!!processingId}
+                      className="p-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                      title={t('registrations.approve')}
                     >
                       <CheckCircle className="w-5 h-5" />
                     </button>
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleReject(app.id);
-                      }}
-                      disabled={processingId === app.id}
+                      onClick={(e) => openRejectConfirm(app, e)}
+                      disabled={!!processingId}
                       className="p-2 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors disabled:opacity-50"
+                      title={t('registrations.reject')}
                     >
                       <XCircle className="w-5 h-5" />
                     </button>
@@ -207,7 +221,7 @@ export default function RegistrationApplications() {
       {selectedApp && (
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedApp(null)}
+          onClick={closeModal}
         >
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -226,7 +240,7 @@ export default function RegistrationApplications() {
                 </span>
               </div>
               <button
-                onClick={() => setSelectedApp(null)}
+                onClick={closeModal}
                 className="text-white/50 hover:text-white transition-colors"
               >
                 <XCircle className="w-6 h-6" />
@@ -368,24 +382,98 @@ export default function RegistrationApplications() {
                 </div>
               )}
 
-              {selectedApp.status === 'pending' && (
+              {selectedApp.status === 'pending' && !confirmAction && (
                 <div className="flex gap-3 pt-4 border-t border-white/10">
                   <button
-                    onClick={() => handleApprove(selectedApp.id)}
-                    disabled={processingId === selectedApp.id}
-                    className="flex-1 py-3 px-6 rounded-xl bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setConfirmAction('approve')}
+                    disabled={!!processingId}
+                    className="flex-1 py-3 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <CheckCircle className="w-5 h-5" />
                     {t('registrations.approve')}
                   </button>
                   <button
-                    onClick={() => handleReject(selectedApp.id)}
-                    disabled={processingId === selectedApp.id}
+                    onClick={() => { setRejectNotes(''); setConfirmAction('reject'); }}
+                    disabled={!!processingId}
                     className="flex-1 py-3 px-6 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <XCircle className="w-5 h-5" />
                     {t('registrations.reject')}
                   </button>
+                </div>
+              )}
+
+              {selectedApp.status === 'pending' && confirmAction === 'approve' && (
+                <div className="pt-4 border-t border-white/10 space-y-4">
+                  <p className="text-sm text-white/70">{t('registrations.confirm_approve_msg')}</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={doApprove}
+                      disabled={processingId === selectedApp.id}
+                      className="flex-1 py-3 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {processingId === selectedApp.id ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                          {t('registrations.processing')}
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="w-5 h-5" />
+                          {t('registrations.confirm_approve')}
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setConfirmAction(null)}
+                      disabled={processingId === selectedApp.id}
+                      className="px-6 py-3 rounded-xl border border-white/10 text-white/60 hover:text-white hover:bg-white/5 transition-colors font-medium disabled:opacity-50"
+                    >
+                      {t('registrations.cancel')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {selectedApp.status === 'pending' && confirmAction === 'reject' && (
+                <div className="pt-4 border-t border-white/10 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-white/40 uppercase tracking-wider block">
+                      {t('registrations.reject_reason')}
+                    </label>
+                    <textarea
+                      value={rejectNotes}
+                      onChange={(e) => setRejectNotes(e.target.value)}
+                      placeholder={t('registrations.reject_reason_placeholder')}
+                      className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20 h-24 resize-none"
+                    />
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={doReject}
+                      disabled={processingId === selectedApp.id}
+                      className="flex-1 py-3 px-6 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {processingId === selectedApp.id ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                          {t('registrations.processing')}
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-5 h-5" />
+                          {t('registrations.confirm_reject')}
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setConfirmAction(null)}
+                      disabled={processingId === selectedApp.id}
+                      className="px-6 py-3 rounded-xl border border-white/10 text-white/60 hover:text-white hover:bg-white/5 transition-colors font-medium disabled:opacity-50"
+                    >
+                      {t('registrations.cancel')}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

@@ -1,6 +1,9 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { BookOpen, CalendarCheck, CreditCard, Award, ArrowUpRight, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useUser } from '../context/UserContext';
+import { api } from '../services/api';
 
 const STATS = [
   { label: 'student.overall_grade', value: 'A-', trend: 'Top 10%', icon: Award, color: 'text-emerald-400' },
@@ -22,6 +25,17 @@ const INVOICES = [
 
 export default function StudentDashboard() {
   const { t } = useLanguage();
+  const { user } = useUser();
+  const [program, setProgram] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    api.students.getById(user.id)
+      .then(data => {
+        if (data?.program?.name) setProgram(data.program.name);
+      })
+      .catch(() => {});
+  }, [user]);
 
   return (
     <div className="space-y-8">
@@ -33,12 +47,14 @@ export default function StudentDashboard() {
         className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"
       >
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('student.welcome')}, Elena!</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('student.welcome')}, {user?.firstName || 'Student'}!</h1>
           <p className="text-white/50 text-sm">{t('student.desc')}</p>
         </div>
-        <div className="text-sm font-medium text-[#fc0ce4] bg-[#fc0ce4]/10 px-4 py-2 rounded-full border border-[#fc0ce4]/20 self-start sm:self-auto">
-          UI/UX Creative Designer
-        </div>
+        {program && (
+          <div className="text-sm font-medium text-[#fc0ce4] bg-[#fc0ce4]/10 px-4 py-2 rounded-full border border-[#fc0ce4]/20 self-start sm:self-auto">
+            {program}
+          </div>
+        )}
       </motion.div>
 
       {/* Stats Grid */}

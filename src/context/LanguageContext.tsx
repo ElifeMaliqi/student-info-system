@@ -270,6 +270,13 @@ const translations = {
     'registrations.role': 'Role',
     'registrations.parent_name': "Parent's First Name",
     'registrations.program': 'Program',
+    'registrations.confirm_approve': 'Confirm Approval',
+    'registrations.confirm_approve_msg': 'This will create a new user account and enroll them in the selected program.',
+    'registrations.confirm_reject': 'Confirm Rejection',
+    'registrations.reject_reason': 'Reason for Rejection',
+    'registrations.reject_reason_placeholder': 'Enter rejection reason (optional)...',
+    'registrations.cancel': 'Cancel',
+    'registrations.processing': 'Processing...',
   },
   AL: {
     // Navigation
@@ -532,6 +539,13 @@ const translations = {
     'registrations.role': 'Roli',
     'registrations.parent_name': 'Emri i Prindit',
     'registrations.program': 'Programi',
+    'registrations.confirm_approve': 'Konfirmo Miratimin',
+    'registrations.confirm_approve_msg': 'Kjo do të krijojë një llogari dhe do të regjistrojë studentin në programin e zgjedhur.',
+    'registrations.confirm_reject': 'Konfirmo Refuzimin',
+    'registrations.reject_reason': 'Arsyeja e Refuzimit',
+    'registrations.reject_reason_placeholder': 'Shkruaj arsyen e refuzimit (opsionale)...',
+    'registrations.cancel': 'Anulo',
+    'registrations.processing': 'Duke procesuar...',
   }
 };
 

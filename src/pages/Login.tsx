@@ -5,6 +5,7 @@ import StudentWaitingPage from './StudentWaitingPage';
 import PublicRegistration from './PublicRegistration';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
+import { useUser } from '../context/UserContext';
 
 export default function Login({ onLogin }: { onLogin: (role: string) => void }) {
   const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('admin');
@@ -12,6 +13,7 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
   const [isApplying, setIsApplying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { setUser } = useUser();
 
   // Form State
   const [email, setEmail] = useState('');
@@ -36,7 +38,8 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
     }
 
     try {
-      await api.auth.login(email, password, role);
+      const result = await api.auth.login(email, password, role);
+      setUser(result.user);
       onLogin(role);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');

@@ -23,10 +23,12 @@ import AdminPrograms from './pages/AdminPrograms';
 import StudentProfile from './pages/StudentProfile';
 import RegistrationApplications from './pages/RegistrationApplications';
 import { LanguageProvider } from './context/LanguageContext';
+import { UserProvider, useUser } from './context/UserContext';
 
 function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [role, setRole] = useState<'admin' | 'teacher' | 'student'>('admin');
+  const { setUser } = useUser();
   const navigate = useNavigate();
 
   if (!isAuthenticated) {
@@ -43,6 +45,7 @@ function AppContent() {
     <AdminLayout 
       onLogout={() => {
         setIsAuthenticated(false);
+        setUser(null);
         navigate('/', { replace: true });
       }}
       role={role}
@@ -97,9 +100,11 @@ function AppContent() {
 export default function App() {
   return (
     <LanguageProvider>
+      <UserProvider>
       <BrowserRouter>
         <AppContent />
       </BrowserRouter>
+      </UserProvider>
     </LanguageProvider>
   );
 }

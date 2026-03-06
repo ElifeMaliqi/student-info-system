@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Save, Shield, Database, Bell, User, Building, Globe, Lock } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useUser } from '../context/UserContext';
 
 export default function Settings({ role }: { role: 'admin' | 'teacher' | 'student' }) {
   const [activeSection, setActiveSection] = useState('general');
   const { t } = useLanguage();
+  const { user } = useUser();
 
   const adminSections = [
     { id: 'general', label: t('settings.general'), icon: Building },
@@ -114,15 +116,15 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.first_name')}</label>
-                    <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={role === 'teacher' ? 'Alan' : 'John'} />
+                    <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={user?.firstName || ''} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.last_name')}</label>
-                    <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={role === 'teacher' ? 'Turing' : 'Doe'} />
+                    <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={user?.lastName || ''} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.email')}</label>
-                    <input type="email" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={role === 'teacher' ? 'alan@futureminds.io' : 'john@student.futureminds.io'} />
+                    <input type="email" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" defaultValue={user?.email || ''} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.phone')}</label>
@@ -131,8 +133,8 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.avatar')}</label>
                     <div className="flex items-center gap-4">
-                      <img src={`https://picsum.photos/seed/${role}/100/100`} alt="Avatar" className="w-12 h-12 rounded-full border border-white/10" referrerPolicy="no-referrer" />
-                      <input type="url" className="glass-input flex-1 px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="https://..." defaultValue={`https://picsum.photos/seed/${role}/100/100`} />
+                      <img src={user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id || role}`} alt="Avatar" className="w-12 h-12 rounded-full border border-white/10" referrerPolicy="no-referrer" />
+                      <input type="url" className="glass-input flex-1 px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="https://..." defaultValue={user?.avatar || ''} />
                     </div>
                   </div>
                 </div>

@@ -7,6 +7,7 @@ import {
   Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useUser } from '../context/UserContext';
 import { CommandPalette } from '../components/CommandPalette';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
@@ -25,6 +26,7 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const scrollRef = useRef<HTMLDivElement>(null);
   const { language, setLanguage, t } = useLanguage();
+  const { user } = useUser();
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -142,10 +144,15 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
         </div>
 
         <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-colors cursor-pointer group">
-          <img src="https://picsum.photos/seed/admin/100/100" alt="User" className="w-9 h-9 rounded-full border border-white/10" referrerPolicy="no-referrer" />
+          <img
+            src={user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id || role}`}
+            alt="User"
+            className="w-9 h-9 rounded-full border border-white/10"
+            referrerPolicy="no-referrer"
+          />
           <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-white truncate group-hover:text-[#fc0ce4] transition-colors">
-              {role === 'admin' ? 'Sarah Connor' : role === 'teacher' ? 'Prof. Alan Turing' : 'Elena Rodriguez'}
+              {user ? `${user.firstName} ${user.lastName}` : role}
             </div>
             <div className="text-[11px] text-white/40 truncate capitalize">{t(`role.${role}`)}</div>
           </div>

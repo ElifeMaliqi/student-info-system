@@ -534,28 +534,12 @@ export const api = {
     },
 
     approve: async (applicationId: string) => {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        throw new Error('Not authenticated');
-      }
-
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/approve-registration`;
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ applicationId }),
+      const { data, error } = await supabase.rpc('approve_registration_application', {
+        application_id: applicationId,
       });
 
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to approve application');
-      }
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error('Failed to approve application');
     },
 
     reject: async (applicationId: string, notes?: string) => {
