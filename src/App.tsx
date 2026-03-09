@@ -18,10 +18,13 @@ import StudentGrades from './pages/StudentGrades';
 import StudentInvoices from './pages/StudentInvoices';
 import TeacherQuizzes from './pages/TeacherQuizzes';
 import TeacherStudents from './pages/TeacherStudents';
+import TeacherCalendar from './pages/TeacherCalendar';
+import StudentCalendar from './pages/StudentCalendar';
 import Announcements from './pages/Announcements';
 import AdminPrograms from './pages/AdminPrograms';
 import StudentProfile from './pages/StudentProfile';
 import RegistrationApplications from './pages/RegistrationApplications';
+import AdminCalendar from './pages/AdminCalendar';
 import { LanguageProvider } from './context/LanguageContext';
 import { UserProvider, useUser } from './context/UserContext';
 
@@ -63,6 +66,7 @@ function AppContent() {
             <Route path="/finance" element={<Finance />} />
             <Route path="/announcements" element={<Announcements role={role} />} />
             <Route path="/registrations" element={<RegistrationApplications />} />
+            <Route path="/calendar" element={<AdminCalendar />} />
             <Route path="/settings" element={<Settings role={role} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
@@ -75,6 +79,7 @@ function AppContent() {
             <Route path="/quizzes" element={<TeacherQuizzes />} />
             <Route path="/students" element={<TeacherStudents />} />
             <Route path="/students/:id" element={<StudentProfile />} />
+            <Route path="/calendar" element={<TeacherCalendar />} />
             <Route path="/announcements" element={<Announcements role={role} />} />
             <Route path="/settings" element={<Settings role={role} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -87,6 +92,7 @@ function AppContent() {
             <Route path="/dashboard" element={<StudentDashboard />} />
             <Route path="/grades" element={<StudentGrades />} />
             <Route path="/invoices" element={<StudentInvoices />} />
+            <Route path="/calendar" element={<StudentCalendar />} />
             <Route path="/announcements" element={<Announcements role={role} />} />
             <Route path="/settings" element={<Settings role={role} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

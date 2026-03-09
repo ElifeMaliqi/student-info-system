@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication } from '../types';
+import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -556,6 +556,61 @@ export const api = {
         .eq('id', applicationId);
 
       if (error) throw new Error(error.message);
+    },
+
+    adminEnroll: async (enrollData: {
+      email: string;
+      firstName: string;
+      lastName: string;
+      parentFirstName: string;
+      password: string;
+      phone: string;
+      program: string;
+    }): Promise<void> => {
+      // Guard: email must not already have a profile
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('email', enrollData.email)
+        .maybeSingle();
+      if (existingProfile) throw new Error('An account with this email already exists.');
+
+      // Guard: no conflicting application
+      const { data: existingApp } = await supabase
+        .from('registration_applications')
+        .select('status')
+        .eq('email', enrollData.email)
+        .maybeSingle();
+      if (existingApp && (existingApp.status === 'pending' || existingApp.status === 'approved')) {
+        throw new Error('A registration for this email already exists.');
+      }
+
+      // Insert as a pending application
+      const { data: newApp, error: insertError } = await supabase
+        .from('registration_applications')
+        .insert([{
+          email:             enrollData.email,
+          first_name:        enrollData.firstName,
+          last_name:         enrollData.lastName,
+          parent_first_name: enrollData.parentFirstName,
+          password_hash:     enrollData.password,
+          role:              'student',
+          program:           enrollData.program,
+          phone:             enrollData.phone,
+          status:            'pending',
+        }])
+        .select('id')
+        .single();
+
+      if (insertError || !newApp) throw new Error(insertError?.message ?? 'Failed to create application.');
+
+      // Immediately approve — this creates the auth user, profile, and student record
+      const { data: result, error: approveError } = await supabase.rpc('approve_registration_application', {
+        application_id: newApp.id,
+      });
+
+      if (approveError) throw new Error(approveError.message);
+      if (!result?.success) throw new Error('Approval step failed. The account may not have been created.');
     }
   },
 
@@ -616,5 +671,136 @@ export const api = {
 
       return null;
     }
+  },
+
+  calendar: {
+    getEvents: async (year: number, month: number): Promise<CalendarEvent[]> => {
+      // Fetch range slightly wider than the month to catch multi-day events
+      const rangeStart = new Date(year, month - 1, 24).toISOString();
+      const rangeEnd   = new Date(year, month + 1,  7).toISOString();
+
+      const { data, error } = await supabase
+        .from('calendar_events')
+        .select(`
+          *,
+          creator_profile:profiles!created_by(first_name, last_name, email, avatar_url),
+          participants:calendar_event_participants(
+            *,
+            profile:profiles(first_name, last_name, email, avatar_url, role)
+          )
+        `)
+        .lte('start_time', rangeEnd)
+        .gte('end_time',   rangeStart)
+        .order('start_time');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((e: any) => ({
+        ...e,
+        creator_profile: e.creator_profile ? {
+          firstName: e.creator_profile.first_name,
+          lastName:  e.creator_profile.last_name,
+          email:     e.creator_profile.email,
+          avatar:    e.creator_profile.avatar_url,
+        } : undefined,
+        participants: (e.participants || []).map((p: any) => ({
+          id:          p.id,
+          event_id:    e.id,
+          user_id:     p.user_id,
+          rsvp_status: (p.rsvp_status ?? 'pending') as 'attending' | 'pending' | 'declined',
+          profile:     p.profile ? {
+            firstName: p.profile.first_name,
+            lastName:  p.profile.last_name,
+            email:     p.profile.email,
+            avatar:    p.profile.avatar_url,
+            role:      p.profile.role,
+          } : undefined,
+        } as CalendarParticipant)),
+      } as CalendarEvent));
+    },
+
+    createEvent: async (payload: {
+      title: string;
+      description?: string;
+      start_time: string;
+      end_time: string;
+      all_day?: boolean;
+      color?: string;
+      event_type?: string;
+      participants?: string[]; // user_ids
+    }): Promise<CalendarEvent> => {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('Not authenticated');
+
+      const { data: event, error } = await supabase
+        .from('calendar_events')
+        .insert({
+          title:       payload.title,
+          description: payload.description,
+          start_time:  payload.start_time,
+          end_time:    payload.end_time,
+          all_day:     payload.all_day ?? false,
+          color:       payload.color ?? '#fc0ce4',
+          event_type:  payload.event_type ?? 'meeting',
+          created_by:  user.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw new Error(error.message);
+
+      // Add creator + invited participants
+      const ids = [...new Set([user.id, ...(payload.participants ?? [])])];
+      await supabase
+        .from('calendar_event_participants')
+        .insert(ids.map(uid => ({ event_id: event.id, user_id: uid })));
+
+      return event as CalendarEvent;
+    },
+
+    deleteEvent: async (eventId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('calendar_events')
+        .delete()
+        .eq('id', eventId);
+      if (error) throw new Error(error.message);
+    },
+
+    updateRsvp: async (eventId: string, status: 'attending' | 'pending' | 'declined'): Promise<void> => {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('Not authenticated');
+      const { error } = await supabase
+        .from('calendar_event_participants')
+        .update({ rsvp_status: status })
+        .eq('event_id', eventId)
+        .eq('user_id', user.id);
+      if (error) throw new Error(error.message);
+    },
+
+    getUsersByRole: async (role: 'admin' | 'teacher' | 'student' | 'all'): Promise<{ id: string; firstName: string; lastName: string; email: string }[]> => {
+      let query = supabase.from('profiles').select('id, first_name, last_name, email');
+      if (role !== 'all') query = (query as any).eq('role', role);
+      const { data, error } = await query.order('first_name');
+      if (error) throw new Error(error.message);
+      return (data || []).map((u: any) => ({
+        id:        u.id,
+        firstName: u.first_name,
+        lastName:  u.last_name,
+        email:     u.email,
+      }));
+    },
+
+    lookupUserByEmail: async (email: string): Promise<{ id: string; firstName: string; lastName: string } | null> => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name')
+        .eq('email', email.toLowerCase().trim())
+        .maybeSingle();
+
+      if (error) throw new Error(error.message);
+      if (!data) return null;
+
+      return { id: data.id, firstName: data.first_name, lastName: data.last_name };
+    },
   }
 };

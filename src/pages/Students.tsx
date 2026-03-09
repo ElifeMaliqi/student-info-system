@@ -1,12 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Search, Plus, Filter, MoreHorizontal, FileText, CheckCircle, XCircle, Clock, ChevronLeft, ChevronRight, Download, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Search, Plus, Filter, MoreHorizontal, FileText, CheckCircle, XCircle, Clock, ChevronLeft, ChevronRight, Download, User, Loader2, AlertCircle, UserPlus } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
 import { PROGRAMS } from '../constants/programs';
+import { api } from '../services/api';
 
 const STUDENTS = [
   { id: 'STU-001', name: 'Elena Rodriguez', email: 'elena.r@example.com', program: 'UI/UX Creative Designer', status: 'Active', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/elena/100/100' },
@@ -19,18 +20,52 @@ const STUDENTS = [
   { id: 'STU-008', name: 'Alex Turner', email: 'alex.t@example.com', program: 'Entrepreneurship', status: 'Active', date: 'Feb 21, 2026', avatar: 'https://picsum.photos/seed/alex/100/100' },
 ];
 
+interface EnrollForm {
+  firstName: string;
+  lastName: string;
+  parentFirstName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  phone: string;
+  program: string;
+}
+
+const BLANK_FORM: EnrollForm = {
+  firstName: '', lastName: '', parentFirstName: '',
+  email: '', password: '', confirmPassword: '', phone: '', program: '',
+};
+
 export default function Students() {
-  const [view, setView] = useState<'list' | 'add'>('list');
+  const [view, setView] = useState<'list' | 'add' | 'success'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [formError, setFormError] = useState('');
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
   const [selectedStudentForPanel, setSelectedStudentForPanel] = useState<any | null>(null);
   const itemsPerPage = 5;
   const navigate = useNavigate();
-  
+
+  // ── Admin-enroll form state ────────────────────────────────────────────────
+  const [form, setForm] = useState<EnrollForm>(BLANK_FORM);
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
+  const [enrolledName, setEnrolledName] = useState('');
+
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { t } = useLanguage();
+  const location = useLocation();
+
+  // Open the enroll form when navigated here with ?enroll=1
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('enroll') === '1') {
+      setView('add');
+      setEnrollError('');
+      setForm(BLANK_FORM);
+      // Clean the query param without pushing history
+      navigate('/students', { replace: true });
+    }
+  }, [location.search]);
 
   const filteredStudents = useMemo(() => {
     return STUDENTS.filter(student => 
@@ -65,49 +100,95 @@ export default function Students() {
     currentPage * itemsPerPage
   );
 
-  const handleAddStudent = (e: React.FormEvent<HTMLFormElement>) => {
+  function setField(key: keyof EnrollForm, value: string) {
+    setForm(f => ({ ...f, [key]: value }));
+    setEnrollError('');
+  }
+
+  async function handleAdminEnroll(e: React.FormEvent) {
     e.preventDefault();
-    setFormError('');
-    
-    const formData = new FormData(e.currentTarget);
-    const firstName = formData.get('firstName') as string;
-    const lastName = formData.get('lastName') as string;
-    const email = formData.get('email') as string;
-    const program = formData.get('program') as string;
+    setEnrollError('');
 
-    if (!firstName || !lastName) {
-      setFormError('First and Last name are required.');
-      return;
+    if (!form.firstName.trim())  { setEnrollError('First name is required.'); return; }
+    if (!form.lastName.trim())   { setEnrollError('Last name is required.'); return; }
+    if (!form.parentFirstName.trim()) { setEnrollError("Parent's first name is required."); return; }
+    if (!form.email.includes('@')) { setEnrollError('Please enter a valid email address.'); return; }
+    if (form.password.length < 6) { setEnrollError('Password must be at least 6 characters.'); return; }
+    if (form.password !== form.confirmPassword) { setEnrollError('Passwords do not match.'); return; }
+    if (!form.phone.trim()) { setEnrollError('Phone number is required.'); return; }
+    if (!form.program) { setEnrollError('Please select a program.'); return; }
+
+    setEnrolling(true);
+    try {
+      await api.registrations.adminEnroll({
+        email:            form.email.trim().toLowerCase(),
+        firstName:        form.firstName.trim(),
+        lastName:         form.lastName.trim(),
+        parentFirstName:  form.parentFirstName.trim(),
+        password:         form.password,
+        phone:            form.phone.trim(),
+        program:          form.program,
+      });
+      setEnrolledName(`${form.firstName.trim()} ${form.lastName.trim()}`);
+      setForm(BLANK_FORM);
+      setView('success');
+    } catch (err) {
+      setEnrollError(err instanceof Error ? err.message : 'Enrollment failed. Please try again.');
+    } finally {
+      setEnrolling(false);
     }
+  }
 
-    if (!email || !email.includes('@')) {
-      setFormError('Please enter a valid email address.');
-      return;
-    }
-
-    if (!program || program === 'Select Program') {
-      setFormError('Please select a program.');
-      return;
-    }
-
-    // Simulate success
-    setView('list');
-  };
+  if (view === 'success') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="h-full flex items-center justify-center p-6"
+      >
+        <div className="glass-card rounded-3xl p-10 max-w-md w-full text-center">
+          <div className="w-16 h-16 rounded-full bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-8 h-8 text-emerald-400" />
+          </div>
+          <h2 className="font-display text-2xl font-medium mb-2">Enrollment Successful</h2>
+          <p className="text-white/50 text-sm mb-1">
+            <span className="text-white/80 font-medium">{enrolledName}</span> has been enrolled and their account is active.
+          </p>
+          <p className="text-white/35 text-xs mb-8">They can log in immediately with the credentials you set.</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => { setView('add'); }}
+              className="px-5 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
+            >
+              Enroll Another
+            </button>
+            <button
+              onClick={() => setView('list')}
+              className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all"
+            >
+              Back to Students
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
 
   if (view === 'add') {
+    const inp = 'glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20';
     return (
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="space-y-6"
       >
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('students.new_registration')}</h1>
-            <p className="text-white/50 text-sm">{t('students.new_registration_desc')}</p>
+            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">Manual Enrollment</h1>
+            <p className="text-white/50 text-sm">Create and immediately activate a student account.</p>
           </div>
-          <button 
-            onClick={() => setView('list')}
+          <button
+            onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); }}
             className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
           >
             {t('students.cancel')}
@@ -115,73 +196,130 @@ export default function Students() {
         </div>
 
         <div className="glass-card rounded-3xl p-6 lg:p-8">
-          <form className="space-y-8" onSubmit={handleAddStudent}>
-            {formError && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium"
+          <form className="space-y-6" onSubmit={handleAdminEnroll}>
+
+            {enrollError && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
               >
-                {formError}
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                {enrollError}
               </motion.div>
             )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            {/* Name row */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.first_name')}</label>
-                <input name="firstName" type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="John" />
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">First Name *</label>
+                <input
+                  type="text" value={form.firstName}
+                  onChange={e => setField('firstName', e.target.value)}
+                  className={inp} placeholder="John"
+                />
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.last_name')}</label>
-                <input name="lastName" type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="Doe" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.email')}</label>
-                <input name="email" type="email" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="john@example.com" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.phone')}</label>
-                <input name="phone" type="tel" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="+1 (555) 000-0000" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.parent_phone')}</label>
-                <input name="parentPhone" type="tel" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="+1 (555) 000-0000" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.gender')}</label>
-                <select name="gender" className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
-                  <option>{t('students.select_gender')}</option>
-                  <option>{t('students.male')}</option>
-                  <option>{t('students.female')}</option>
-                  <option>{t('students.other')}</option>
-                </select>
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.select_program')}</label>
-                <select name="program" className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none">
-                  <option value="">Select Program</option>
-                  {PROGRAMS.map((program) => (
-                    <option key={program} value={program}>{program}</option>
-                  ))}
-                </select>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Last Name *</label>
+                <input
+                  type="text" value={form.lastName}
+                  onChange={e => setField('lastName', e.target.value)}
+                  className={inp} placeholder="Doe"
+                />
               </div>
             </div>
 
-            <div className="pt-6 border-t border-white/5">
-              <h3 className="text-sm font-medium mb-4">{t('students.doc_upload')}</h3>
-              <div className="border-2 border-dashed border-white/10 rounded-2xl p-8 text-center hover:bg-white/5 hover:border-[#fc0ce4]/30 transition-colors cursor-pointer">
-                <FileText className="w-8 h-8 text-white/30 mx-auto mb-3" />
-                <p className="text-sm text-white/70">{t('students.drag_drop')}</p>
-                <p className="text-[11px] text-white/40 mt-1">{t('students.doc_types')}</p>
+            {/* Parent name */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name *</label>
+              <input
+                type="text" value={form.parentFirstName}
+                onChange={e => setField('parentFirstName', e.target.value)}
+                className={inp} placeholder="Parent's name"
+              />
+            </div>
+
+            {/* Email + Phone */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address *</label>
+                <input
+                  type="email" value={form.email}
+                  onChange={e => setField('email', e.target.value)}
+                  className={inp} placeholder="john@example.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Phone Number *</label>
+                <input
+                  type="tel" value={form.phone}
+                  onChange={e => setField('phone', e.target.value)}
+                  className={inp} placeholder="+1 (555) 000-0000"
+                />
               </div>
             </div>
 
-            <div className="flex justify-end gap-4 pt-6 border-t border-white/5">
-              <button type="button" className="px-6 py-3 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">
-                {t('students.save_draft')}
+            {/* Passwords */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Initial Password *</label>
+                <input
+                  type="password" value={form.password}
+                  onChange={e => setField('password', e.target.value)}
+                  className={inp} placeholder="Min. 6 characters"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Confirm Password *</label>
+                <input
+                  type="password" value={form.confirmPassword}
+                  onChange={e => setField('confirmPassword', e.target.value)}
+                  className={inp} placeholder="Repeat password"
+                />
+              </div>
+            </div>
+
+            {/* Program */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.select_program')} *</label>
+              <select
+                value={form.program}
+                onChange={e => setField('program', e.target.value)}
+                className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
+              >
+                <option value="">Select Program</option>
+                {PROGRAMS.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Document upload (optional) */}
+            <div className="pt-2 border-t border-white/5">
+              <h3 className="text-sm font-medium mb-3">{t('students.doc_upload')} <span className="text-white/30 font-normal text-xs">(optional)</span></h3>
+              <div className="border-2 border-dashed border-white/10 rounded-2xl p-6 text-center hover:bg-white/5 hover:border-[#fc0ce4]/30 transition-colors cursor-pointer">
+                <FileText className="w-7 h-7 text-white/30 mx-auto mb-2" />
+                <p className="text-sm text-white/60">{t('students.drag_drop')}</p>
+                <p className="text-[11px] text-white/35 mt-1">{t('students.doc_types')}</p>
+              </div>
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
+              <button
+                type="button"
+                onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); }}
+                className="px-6 py-3 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
+              >
+                {t('students.cancel')}
               </button>
-              <button type="submit" className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]">
-                {t('students.register')}
+              <button
+                type="submit"
+                disabled={enrolling}
+                className="flex items-center gap-2 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
+              >
+                {enrolling ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                {enrolling ? 'Enrolling...' : 'Enroll Student'}
               </button>
             </div>
           </form>

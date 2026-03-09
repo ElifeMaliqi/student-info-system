@@ -134,3 +134,36 @@ export interface RegistrationApplication {
   reviewedAt?: string;
   createdAt?: string;
 }
+
+export interface CalendarParticipant {
+  id: string;
+  event_id: string;
+  user_id: string;
+  rsvp_status?: 'attending' | 'pending' | 'declined';
+  profile?: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatar?: string;
+    role?: string;
+  };
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description?: string;
+  start_time: string;
+  end_time: string;
+  all_day: boolean;
+  color: string;
+  event_type: 'meeting' | 'class' | 'personal' | 'holiday';
+  created_by: string;
+  creator_profile?: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatar?: string;
+  };
+  participants?: CalendarParticipant[];
+}

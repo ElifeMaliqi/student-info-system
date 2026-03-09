@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
-  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus
+  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -53,23 +53,26 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
     { id: 'students', label: t('nav.students'), icon: Users },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
     { id: 'registrations', label: 'Registrations', icon: UserPlus },
+    { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
     { id: 'finance', label: t('nav.finance'), icon: CreditCard },
     { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
   ];
 
   const teacherNavItems = [
-    { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
-    { id: 'quizzes', label: t('nav.quizzes'), icon: CalendarCheck },
-    { id: 'students', label: t('nav.my_students'), icon: Users },
-    { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
+    { id: 'dashboard',     label: t('nav.dashboard'),     icon: LayoutDashboard },
+    { id: 'quizzes',       label: t('nav.quizzes'),       icon: CalendarCheck   },
+    { id: 'students',      label: t('nav.my_students'),   icon: Users           },
+    { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays    },
+    { id: 'announcements', label: t('nav.announcements'), icon: Megaphone       },
   ];
 
   const studentNavItems = [
-    { id: 'dashboard', label: t('nav.my_portal'), icon: LayoutDashboard },
-    { id: 'grades', label: t('nav.grades'), icon: CalendarCheck },
-    { id: 'invoices', label: t('nav.invoices'), icon: CreditCard },
-    { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
+    { id: 'dashboard',     label: t('nav.my_portal'),      icon: LayoutDashboard },
+    { id: 'grades',        label: t('nav.grades'),         icon: CalendarCheck   },
+    { id: 'invoices',      label: t('nav.invoices'),       icon: CreditCard      },
+    { id: 'calendar',      label: t('nav.calendar'),       icon: CalendarDays    },
+    { id: 'announcements', label: t('nav.announcements'),  icon: Megaphone       },
   ];
 
   const navItems = role === 'admin' ? adminNavItems : role === 'teacher' ? teacherNavItems : studentNavItems;
@@ -275,7 +278,10 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
             </button>
             
             {role === 'admin' && (
-              <button className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]">
+              <button
+                onClick={() => navigate('/students?enroll=1')}
+                className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
+              >
                 <Plus className="w-4 h-4 hidden sm:block" />
                 <span className="hidden sm:block">{t('header.new_enrollment')}</span>
                 <span className="sm:hidden">{t('header.new')}</span>
