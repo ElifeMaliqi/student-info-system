@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronLeft, ChevronRight, Plus, X, Clock,
-  Users, Trash2, Mail, Loader2, Check, AlertCircle, CheckCircle2, XCircle, Minus,
+  Users, Trash2, Mail, Loader2, Check, AlertCircle, CheckCircle2, XCircle, Minus, GraduationCap,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent } from '../types';
+import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -136,17 +137,22 @@ function layoutWeek(weekDays: Date[], events: CalendarEvent[]): EventLayout[] {
     }
 
     const span = endCol - startCol + 1;
+    const slotsNeeded = ev.event_type === 'class' ? 2 : 1;
 
-    // Find first slot that's free across the entire span
+    // Find first contiguous block of slotsNeeded free rows across the entire span
     let slot = 0;
     outerLoop: while (true) {
-      for (let c = startCol; c <= endCol; c++) {
-        if (occ[c][slot]) { slot++; continue outerLoop; }
+      for (let extra = 0; extra < slotsNeeded; extra++) {
+        for (let c = startCol; c <= endCol; c++) {
+          if (occ[c][slot + extra]) { slot++; continue outerLoop; }
+        }
       }
       break;
     }
 
-    for (let c = startCol; c <= endCol; c++) occ[c][slot] = true;
+    for (let extra = 0; extra < slotsNeeded; extra++) {
+      for (let c = startCol; c <= endCol; c++) occ[c][slot + extra] = true;
+    }
 
     result.push({ event: ev, startCol, span, slot, continuesLeft, continuesRight });
   }
@@ -164,12 +170,21 @@ function EventPill({ layout, onClick }: {
   const { event, startCol, span, slot, continuesLeft, continuesRight } = layout;
   const leftPct  = (startCol / 7) * 100;
   const widthPct = (span / 7) * 100;
+  
+  const isClass = event.event_type === 'class';
+  const heightMultiplier = isClass ? 2 : 1;
+  const color = isClass ? '#3b82f6' : event.color;
+  
   const padL = continuesLeft  ? 0 : 3;
   const padR = continuesRight ? 0 : 3;
 
   const radius = continuesLeft
     ? (continuesRight ? '0px' : '0 4px 4px 0')
     : (continuesRight ? '4px 0 0 4px' : '4px');
+
+  const fontSize = isClass ? 'text-xs' : 'text-[11px]';
+  const fontWeight = isClass ? 'font-bold' : 'font-semibold';
+  const borderWidth = isClass ? '4px' : '3px';
 
   return (
     <div
@@ -179,15 +194,17 @@ function EventPill({ layout, onClick }: {
         left:            `calc(${leftPct}% + ${padL}px)`,
         width:           `calc(${widthPct}% - ${padL}px - ${padR}px)`,
         top:             `${slot * SLOT_H + 2}px`,
-        height:          `${SLOT_H - 4}px`,
-        backgroundColor: event.color + '28',
-        borderLeft:      continuesLeft ? 'none' : `3px solid ${event.color}`,
+        height:          `${(SLOT_H - 4) * heightMultiplier}px`,
+        backgroundColor: color + '28',
+        borderLeft:      continuesLeft ? 'none' : `${borderWidth} solid ${color}`,
         borderRadius:    radius,
+        boxShadow:       isClass ? `0 4px 12px ${color}33` : 'none',
       }}
       className="flex items-center px-1.5 cursor-pointer hover:brightness-125 transition-all z-10 select-none overflow-hidden"
       title={event.title}
     >
-      <span style={{ color: event.color }} className="text-[11px] font-semibold truncate leading-none">
+      {isClass && <GraduationCap className="w-3.5 h-3.5 mr-1 flex-shrink-0" style={{ color }} />}
+      <span style={{ color }} className={`${fontSize} ${fontWeight} truncate leading-none`}>
         {!continuesLeft && !event.all_day && (
           <span className="opacity-60 mr-1 font-normal">{fmtTime(event.start_time)}</span>
         )}
@@ -318,6 +335,7 @@ export default function AdminCalendar() {
   const [deleting,   setDeleting  ] = useState(false);
   const [updatingRsvp, setUpdatingRsvp] = useState(false);
   const [dayViewDay, setDayViewDay] = useState<Date | null>(null);
+  const [classAttEvent, setClassAttEvent] = useState<CalendarEvent | null>(null);
 
   const { t } = useLanguage();
   const { user } = useUser();
@@ -370,8 +388,12 @@ export default function AdminCalendar() {
   // ── Open detail ───────────────────────────────────────────────────────────
   function openDetail(ev: CalendarEvent, e: React.MouseEvent<HTMLDivElement>) {
     e.stopPropagation();
-    setSelEvent(ev);
-    setShowDetail(true);
+    if (ev.event_type === 'class' && ev.class_id) {
+      setClassAttEvent(ev);
+    } else {
+      setSelEvent(ev);
+      setShowDetail(true);
+    }
   }
 
   // ── Audience preset ───────────────────────────────────────────────────────
@@ -642,6 +664,18 @@ export default function AdminCalendar() {
           )}
         </div>
       </div>
+
+      {/* ── Class Attendance Modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {classAttEvent && user && (
+          <ClassAttendanceModal
+            event={classAttEvent}
+            viewerRole="admin"
+            viewerUserId={user.id}
+            onClose={() => setClassAttEvent(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── Create Event Modal ─────────────────────────────────────────────── */}
       <AnimatePresence>

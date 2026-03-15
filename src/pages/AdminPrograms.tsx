@@ -1,121 +1,662 @@
-import { useState } from 'react';
-import { motion } from 'motion/react';
-import { BookOpen, Plus, Users, DollarSign, Clock, MoreHorizontal } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { PROGRAM_DETAILS } from '../constants/programs';
+import { api } from '../services/api';
+import { Class, ClassSession, ClassEnrollment } from '../types';
+
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPrograms() {
-  const [view, setView] = useState<'list' | 'create'>('list');
   const { t } = useLanguage();
+  const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  const [enrollments, setEnrollments] = useState<ClassEnrollment[]>([]);
+  const [showCreateClass, setShowCreateClass] = useState(false);
+  const [showTeacherModal, setShowTeacherModal] = useState(false);
+  const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [availableStudents, setAvailableStudents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  const [newClass, setNewClass] = useState({
+    title: '',
+    teacherId: '',
+    sessions: [
+      { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
+      { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
+    ]
+  });
 
-  if (view === 'create') {
+  useEffect(() => {
+    if (selectedProgram) {
+      loadClasses();
+      loadTeachers();
+    }
+  }, [selectedProgram]);
+
+  useEffect(() => {
+    if (selectedClass) {
+      loadEnrollments();
+    }
+  }, [selectedClass]);
+
+  const loadClasses = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const data = await api.classes.getByProgram(selectedProgram!);
+      setClasses(data);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to load classes';
+      if (errorMsg.includes("relation \"public.classes\" does not exist")) {
+        setError('Database tables not initialized. Please run the migration SQL first. See APPLY_MIGRATION.sql in your project root.');
+      } else {
+        setError(errorMsg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTeachers = async () => {
+    try {
+      const data = await api.classes.getAvailableTeachers();
+      setTeachers(data);
+    } catch (err) {
+      console.error('Failed to load teachers');
+    }
+  };
+
+  const loadAvailableStudents = async () => {
+    if (!selectedClass) return;
+    try {
+      const data = await api.classes.getAvailableStudents(selectedClass.id);
+      setAvailableStudents(data);
+    } catch (err) {
+      console.error('Failed to load available students');
+    }
+  };
+
+  const loadEnrollments = async () => {
+    if (!selectedClass) return;
+    try {
+      const data = await api.classes.getEnrollments(selectedClass.id);
+      setEnrollments(data);
+    } catch (err) {
+      console.error('Failed to load enrollments');
+    }
+  };
+
+  const handleCreateClass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProgram || !newClass.title || !newClass.teacherId) {
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    if (enrollments.length >= 40) {
+      setError('Class is at maximum capacity (40 students)');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.classes.create(
+        selectedProgram,
+        newClass.title,
+        newClass.teacherId,
+        newClass.sessions.map(s => ({
+          dayOfWeek: s.dayOfWeek,
+          startTime: s.startTime,
+          endTime: s.endTime
+        }))
+      );
+
+      setNewClass({
+        title: '',
+        teacherId: '',
+        sessions: [
+          { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
+          { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
+        ]
+      });
+      setShowCreateClass(false);
+      setError('');
+      await loadClasses();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create class');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAssignTeacher = async (teacherId: string) => {
+    if (!selectedClass) return;
+    try {
+      setLoading(true);
+      await api.classes.assignTeacher(selectedClass.id, teacherId);
+      setSelectedClass({
+        ...selectedClass,
+        teacher_id: teacherId,
+        teacher: teachers.find(t => t.id === teacherId)
+      });
+      setShowTeacherModal(false);
+      await loadClasses();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to assign teacher');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEnrollStudent = async (studentId: string) => {
+    if (!selectedClass) return;
+    
+    if (enrollments.length >= 40) {
+      setError('Class is at maximum capacity (40 students)');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.classes.enrollStudent(selectedClass.id, studentId);
+      await loadEnrollments();
+      await loadAvailableStudents();
+      setShowEnrollmentModal(false);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enroll student');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveStudent = async (enrollmentId: string) => {
+    try {
+      setLoading(true);
+      await api.classes.removeStudent(enrollmentId);
+      await loadEnrollments();
+      await loadAvailableStudents();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove student');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteClass = async (classId: string) => {
+    if (confirm('Are you sure you want to delete this class?')) {
+      try {
+        setLoading(true);
+        await api.classes.delete(classId);
+        setSelectedClass(null);
+        await loadClasses();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete class');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Program Grid View
+  if (!selectedProgram) {
     return (
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="space-y-6"
       >
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('programs.new')}</h1>
-            <p className="text-white/50 text-sm">Create a new academic program and set its pricing.</p>
+            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">Programs</h1>
+            <p className="text-white/50 text-sm">Manage programs, create classes, and assign teachers & students.</p>
           </div>
-          <button 
-            onClick={() => setView('list')}
-            className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
-          >
-            {t('teacher.cancel')}
-          </button>
         </div>
 
-        <div className="glass-card rounded-3xl p-6 lg:p-8">
-          <form className="space-y-8" onSubmit={(e) => { e.preventDefault(); setView('list'); }}>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('programs.name')}</label>
-                <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="e.g. Data Science Bootcamp" required />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {PROGRAM_DETAILS.map((program, idx) => (
+            <motion.button
+              key={program.id}
+              onClick={() => setSelectedProgram(program.name)}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05 }}
+              className="glass-card rounded-2xl p-6 text-left hover:bg-white/10 transition-colors group"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
+                  <BookOpen size={20} className="text-white" />
+                </div>
+                <ChevronDown size={16} className="text-white/30 group-hover:text-white/70 transition-colors" />
               </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('programs.price')}</label>
-                <input type="number" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="0.00" required />
+              <h3 className="font-semibold mb-2 text-white">{program.name}</h3>
+              <div className="space-y-1 text-xs text-white/60">
+                <p>Duration: {program.duration} months</p>
+                <p>Price: {program.price}</p>
               </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('programs.duration')}</label>
-                <input type="number" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="6" required />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('teacher.description')}</label>
-                <textarea className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20 h-32 resize-none" placeholder="Program overview and curriculum details..." />
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-6 border-t border-white/5">
-              <button type="submit" className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]">
-                {t('programs.save')}
-              </button>
-            </div>
-          </form>
+            </motion.button>
+          ))}
         </div>
       </motion.div>
     );
   }
 
+  // Program Detail View
+  const currentProgram = PROGRAM_DETAILS.find(p => p.name === selectedProgram);
+
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('programs.title')}</h1>
-          <p className="text-white/50 text-sm">{t('programs.desc')}</p>
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={() => {
+                setSelectedProgram(null);
+                setSelectedClass(null);
+              }}
+              className="px-3 py-1 rounded-lg border border-white/10 text-sm hover:bg-white/5 transition-colors"
+            >
+              ←
+            </button>
+            <h1 className="font-display text-3xl font-medium tracking-tight">{selectedProgram}</h1>
+          </div>
+          <p className="text-white/50 text-sm ml-14">Manage classes for this program</p>
         </div>
-        <button 
-          onClick={() => setView('create')}
-          className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] self-start sm:self-auto"
+        <button
+          onClick={() => setShowCreateClass(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
         >
-          <Plus className="w-4 h-4" />
-          {t('programs.new')}
+          <Plus size={18} />
+          New Class
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {PROGRAM_DETAILS.map((program) => (
-          <div key={program.id} className="glass-card rounded-2xl p-6 hover:bg-white/[0.02] transition-colors group flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center border border-white/5 group-hover:bg-[#fc0ce4]/10 group-hover:border-[#fc0ce4]/20 transition-all">
-                <BookOpen className="w-6 h-6 text-white/40 group-hover:text-[#fc0ce4] transition-colors" />
-              </div>
-              <button className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white">
-                <MoreHorizontal className="w-4 h-4" />
+      {error && (
+        <div className="glass-card rounded-xl p-4 border border-red-500/20 bg-red-500/5 text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Classes Grid */}
+      {!selectedClass ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {classes.length === 0 ? (
+            <div className="col-span-full glass-card rounded-2xl p-12 text-center text-white/50">
+              <BookOpen size={32} className="mx-auto mb-4 opacity-50" />
+              <p>No classes created yet</p>
+            </div>
+          ) : (
+            classes.map((cls) => (
+              <motion.button
+                key={cls.id}
+                onClick={() => setSelectedClass(cls)}
+                whileHover={{ y: -2 }}
+                className="glass-card rounded-2xl p-6 text-left hover:bg-white/5 transition-colors text-nowrap overflow-hidden"
+              >
+                <h3 className="font-semibold mb-3 text-white truncate">{cls.title}</h3>
+                <div className="space-y-2 text-xs text-white/70">
+                  <p className="truncate">
+                    Teacher: {cls.teacher ? `${cls.teacher.firstName} ${cls.teacher.lastName}` : 'Not assigned'}
+                  </p>
+                  <p>Students: {cls.enrollmentCount || 0}/40</p>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {cls.sessions?.slice(0, 2).map((session, i) => (
+                      <span key={i} className="text-[10px] bg-white/10 px-2 py-1 rounded">
+                        {DAYS[session.day_of_week]} {session.start_time}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </motion.button>
+            ))
+          )}
+        </div>
+      ) : (
+        // Class Detail View
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="space-y-6"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <button
+                onClick={() => {
+                  setSelectedClass(null);
+                  setEnrollments([]);
+                }}
+                className="px-3 py-1 rounded-lg border border-white/10 text-sm hover:bg-white/5 transition-colors mb-2"
+              >
+                ← Back to Classes
+              </button>
+              <h2 className="font-display text-2xl font-medium tracking-tight">{selectedClass.title}</h2>
+            </div>
+            <button
+              onClick={() => handleDeleteClass(selectedClass.id)}
+              className="p-2 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
+
+          {/* Teacher Assignment */}
+          <div className="glass-card rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-white">Teacher</h3>
+              <button
+                onClick={() => {
+                  loadTeachers();
+                  setShowTeacherModal(true);
+                }}
+                className="text-sm px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                {selectedClass.teacher ? 'Change' : 'Assign'}
               </button>
             </div>
-            <h3 className="text-lg font-medium text-white/90 mb-1">{program.name}</h3>
-            <div className="text-[11px] text-white/40 font-mono mb-4">{program.id}</div>
-            
-            <div className="grid grid-cols-2 gap-4 mt-auto">
-              <div className="flex items-center gap-2 text-sm text-white/60">
-                <DollarSign className="w-4 h-4 text-emerald-400" />
-                {program.price}
+            {selectedClass.teacher ? (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-semibold">
+                  {selectedClass.teacher.firstName[0]}{selectedClass.teacher.lastName[0]}
+                </div>
+                <div>
+                  <p className="font-medium text-white">{selectedClass.teacher.firstName} {selectedClass.teacher.lastName}</p>
+                  <p className="text-xs text-white/60">{selectedClass.teacher.email}</p>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-sm text-white/60">
-                <Clock className="w-4 h-4 text-amber-400" />
-                {program.duration} Months
-              </div>
-              <div className="flex items-center gap-2 text-sm text-white/60">
-                <Users className="w-4 h-4 text-blue-400" />
-                {program.students} Students
-              </div>
-              <div className="flex items-center gap-2 text-sm text-white/60">
-                <Users className="w-4 h-4 text-purple-400" />
-                {program.teachers} Teachers
-              </div>
+            ) : (
+              <p className="text-white/50 text-sm">No teacher assigned</p>
+            )}
+          </div>
+
+          {/* Sessions */}
+          <div className="glass-card rounded-2xl p-6">
+            <h3 className="font-semibold text-white mb-4">Weekly Sessions</h3>
+            <div className="space-y-2">
+              {selectedClass.sessions?.map((session) => (
+                <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-white/5">
+                  <Clock size={16} className="text-blue-400" />
+                  <span className="text-white">{DAYS[session.day_of_week]}</span>
+                  <span className="text-white/60">{session.start_time} - {session.end_time}</span>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
+
+          {/* Enrollment */}
+          <div className="glass-card rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Users size={20} className="text-blue-400" />
+                <h3 className="font-semibold text-white">
+                  Enrolled Students ({enrollments.length}/40)
+                </h3>
+              </div>
+              {enrollments.length < 40 && (
+                <button
+                  onClick={() => {
+                    loadAvailableStudents();
+                    setShowEnrollmentModal(true);
+                  }}
+                  className="text-sm px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-1"
+                >
+                  <UserPlus size={16} />
+                  Add Student
+                </button>
+              )}
+            </div>
+
+            {enrollments.length === 0 ? (
+              <p className="text-white/50 text-sm">No students enrolled yet</p>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {enrollments.map((enrollment) => (
+                  <div key={enrollment.id} className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
+                        {enrollment.student?.firstName[0]}{enrollment.student?.lastName[0]}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-white truncate">{enrollment.student?.firstName} {enrollment.student?.lastName}</p>
+                        <p className="text-xs text-white/60 truncate">{enrollment.student?.email}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveStudent(enrollment.id)}
+                      className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors ml-2"
+                      title="Remove student"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </motion.div>
+      )}
+
+      {/* Create Class Modal */}
+      <AnimatePresence>
+        {showCreateClass && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowCreateClass(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-card rounded-3xl p-8 max-w-md w-full space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-2xl font-medium">Create Class</h2>
+                <button
+                  onClick={() => setShowCreateClass(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateClass} className="space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                    Class Title
+                  </label>
+                  <input
+                    type="text"
+                    value={newClass.title}
+                    onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
+                    placeholder="e.g., Web Dev - Batch 1"
+                    className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                    Assign Teacher
+                  </label>
+                  <select
+                    value={newClass.teacherId}
+                    onChange={(e) => setNewClass({ ...newClass, teacherId: e.target.value })}
+                    className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
+                    required
+                  >
+                    <option value="">Select a teacher...</option>
+                    {teachers.map((teacher) => (
+                      <option key={teacher.id} value={teacher.id}>
+                        {teacher.firstName} {teacher.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block">
+                    Weekly Sessions
+                  </label>
+                  {newClass.sessions.map((session, idx) => (
+                    <div key={idx} className="space-y-2 p-3 rounded-lg bg-white/5">
+                      <select
+                        value={session.dayOfWeek}
+                        onChange={(e) => {
+                          const updated = [...newClass.sessions];
+                          updated[idx].dayOfWeek = parseInt(e.target.value);
+                          setNewClass({ ...newClass, sessions: updated });
+                        }}
+                        className="glass-select w-full px-3 py-2 rounded-lg text-xs text-white"
+                      >
+                        {DAYS.map((day, i) => (
+                          <option key={i} value={i}>{day}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <input
+                          type="time"
+                          value={session.startTime}
+                          onChange={(e) => {
+                            const updated = [...newClass.sessions];
+                            updated[idx].startTime = e.target.value;
+                            setNewClass({ ...newClass, sessions: updated });
+                          }}
+                          className="glass-input flex-1 px-3 py-2 rounded-lg text-xs text-white"
+                        />
+                        <input
+                          type="time"
+                          value={session.endTime}
+                          onChange={(e) => {
+                            const updated = [...newClass.sessions];
+                            updated[idx].endTime = e.target.value;
+                            setNewClass({ ...newClass, sessions: updated });
+                          }}
+                          className="glass-input flex-1 px-3 py-2 rounded-lg text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
+                >
+                  {loading ? 'Creating...' : 'Create Class'}
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Teacher Assignment Modal */}
+      <AnimatePresence>
+        {showTeacherModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowTeacherModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-card rounded-3xl p-8 max-w-md w-full max-h-96 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-2xl font-medium">Select Teacher</h2>
+                <button
+                  onClick={() => setShowTeacherModal(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-2 overflow-y-auto max-h-64">
+                {teachers.map((teacher) => (
+                  <button
+                    key={teacher.id}
+                    onClick={() => handleAssignTeacher(teacher.id)}
+                    disabled={loading}
+                    className="w-full text-left p-3 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50"
+                  >
+                    <p className="font-medium text-white">{teacher.firstName} {teacher.lastName}</p>
+                    <p className="text-xs text-white/60">{teacher.email}</p>
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Enrollment Modal */}
+      <AnimatePresence>
+        {showEnrollmentModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowEnrollmentModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-card rounded-3xl p-8 max-w-md w-full max-h-96 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-2xl font-medium">Add Student</h2>
+                <button
+                  onClick={() => setShowEnrollmentModal(false)}
+                  className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {availableStudents.length === 0 ? (
+                <p className="text-white/50 text-sm text-center py-8">No available students</p>
+              ) : (
+                <div className="space-y-2 overflow-y-auto max-h-64">
+                  {availableStudents.map((student) => (
+                    <button
+                      key={student.id}
+                      onClick={() => handleEnrollStudent(student.id)}
+                      disabled={loading}
+                      className="w-full text-left p-3 rounded-lg hover:bg-white/10 transition-colors disabled:opacity-50"
+                    >
+                      <p className="font-medium text-white">{student.firstName} {student.lastName}</p>
+                      <p className="text-xs text-white/60">{student.email}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

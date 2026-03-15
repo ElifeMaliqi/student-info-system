@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant } from '../types';
+import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -351,41 +351,80 @@ export const api = {
   },
 
   announcements: {
-    getAll: async (role?: Role): Promise<Announcement[]> => {
-      let query = supabase
+    getAll: async (role: Role, userId: string): Promise<Announcement[]> => {
+      // Pre-fetch role-specific IDs for client-side audience filtering.
+      // Client-side filtering is safe here — the RLS SELECT policy already
+      // allows all authenticated users to read all active announcements.
+      let teacherClassIds: string[] = [];
+      let studentClassIds: string[] = [];
+      let studentProgramIds: string[] = [];
+
+      if (role === 'teacher') {
+        const { data } = await supabase.from('classes').select('id').eq('teacher_id', userId);
+        teacherClassIds = (data || []).map((c: any) => c.id);
+      } else if (role === 'student') {
+        const { data } = await supabase
+          .from('class_enrollments')
+          .select('class_id, class:classes(program_id)')
+          .eq('student_id', userId)
+          .eq('status', 'active');
+        studentClassIds = (data || []).map((e: any) => e.class_id).filter(Boolean);
+        studentProgramIds = [...new Set((data || []).map((e: any) => e.class?.program_id).filter(Boolean))] as string[];
+      }
+
+      const { data, error } = await supabase
         .from('announcements')
         .select(`
           *,
-          author:profiles!announcements_author_id_fkey(first_name, last_name),
-          program:programs!announcements_program_id_fkey(name)
+          author:profiles!announcements_author_id_fkey(first_name, last_name, role),
+          program:programs!announcements_program_id_fkey(name),
+          class:classes(title)
         `)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (role) {
-        query = query.or(`audience.eq.all,audience.eq.${role}s`);
-      }
-
-      const { data, error } = await query;
       if (error) throw new Error(error.message);
 
-      return (data || []).map(ann => ({
+      const rows = (data || []) as any[];
+
+      const relevant = rows.filter(ann => {
+        if (role === 'admin') return true;
+        if (role === 'teacher') {
+          return (
+            ann.audience === 'all' ||
+            ann.audience === 'teachers' ||
+            (ann.audience === 'class_specific' && teacherClassIds.includes(ann.class_id))
+          );
+        }
+        // student
+        return (
+          ann.audience === 'all' ||
+          ann.audience === 'students' ||
+          (ann.audience === 'class_specific' && studentClassIds.includes(ann.class_id)) ||
+          (ann.audience === 'program_specific' && studentProgramIds.includes(ann.program_id))
+        );
+      });
+
+      return relevant.map((ann: any) => ({
         id: ann.id,
         title: ann.title,
         content: ann.content,
         priority: ann.priority,
         audience: ann.audience,
         program: ann.program?.name,
+        programId: ann.program_id,
+        classId: ann.class_id,
+        className: ann.class?.title,
         author: ann.author ? `${ann.author.first_name} ${ann.author.last_name}` : 'System',
+        authorRole: ann.author?.role,
         date: formatDate(ann.created_at),
         startDate: ann.start_date,
-        endDate: ann.end_date
+        endDate: ann.end_date,
       }));
     },
 
     create: async (announcement: Omit<Announcement, 'id' | 'date'>) => {
-      const { data: user } = await supabase.auth.getUser();
-
+      const { data: authData } = await supabase.auth.getUser();
       const { error } = await supabase
         .from('announcements')
         .insert([{
@@ -393,12 +432,21 @@ export const api = {
           content: announcement.content,
           priority: announcement.priority,
           audience: announcement.audience,
-          program_id: announcement.programId,
-          author_id: user.user?.id
+          program_id: announcement.programId ?? null,
+          class_id: announcement.classId ?? null,
+          author_id: authData.user?.id,
+          is_active: true,
         }]);
-
       if (error) throw new Error(error.message);
-    }
+    },
+
+    getAvailableClasses: async (role: Role, userId: string): Promise<{ id: string; title: string }[]> => {
+      let query = supabase.from('classes').select('id, title').order('title');
+      if (role === 'teacher') query = (query as any).eq('teacher_id', userId);
+      const { data, error } = await query;
+      if (error) throw new Error(error.message);
+      return data || [];
+    },
   },
 
   teacher: {
@@ -433,7 +481,8 @@ export const api = {
     },
 
     getStudents: async (teacherId: string) => {
-      const { data, error } = await supabase
+      // Get students from teacher_programs relationship (legacy)
+      const { data: programData, error: programError } = await supabase
         .from('teacher_programs')
         .select(`
           program:programs!teacher_programs_program_id_fkey(
@@ -447,27 +496,214 @@ export const api = {
         `)
         .eq('teacher_id', teacherId);
 
-      if (error) throw new Error(error.message);
+      if (programError) throw new Error(programError.message);
 
       const students: Student[] = [];
-      (data || []).forEach(tp => {
+      const studentIds = new Set<string>();
+
+      // Add students from programs
+      (programData || []).forEach(tp => {
         if (tp.program?.students) {
           tp.program.students.forEach((s: any) => {
-            students.push({
-              id: s.student_id || `STU-${s.id.slice(0, 8)}`,
-              name: s.user ? `${s.user.first_name} ${s.user.last_name}` : 'Unknown',
-              email: s.user?.email || '',
-              program: tp.program?.name || 'No Program',
-              status: statusMap[s.status] || 'Active',
-              date: formatDate(s.enrollment_date || s.created_at),
-              avatar: s.user?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.id}`
-            });
+            const sid = s.id;
+            if (!studentIds.has(sid)) {
+              studentIds.add(sid);
+              students.push({
+                id: s.student_id || `STU-${s.id.slice(0, 8)}`,
+                name: s.user ? `${s.user.first_name} ${s.user.last_name}` : 'Unknown',
+                email: s.user?.email || '',
+                program: tp.program?.name || 'No Program',
+                status: statusMap[s.status] || 'Active',
+                date: formatDate(s.enrollment_date || s.created_at),
+                avatar: s.user?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.id}`
+              });
+            }
+          });
+        }
+      });
+
+      // Get students from classes taught by this teacher
+      const { data: classData, error: classError } = await supabase
+        .from('classes')
+        .select(`
+          title,
+          program_id,
+          enrollments:class_enrollments(
+            student:profiles(id, first_name, last_name, email, avatar_url)
+          )
+        `)
+        .eq('teacher_id', teacherId);
+
+      if (classError) throw new Error(classError.message);
+
+      // Add students from classes
+      (classData || []).forEach(cls => {
+        if (cls.enrollments) {
+          cls.enrollments.forEach((e: any) => {
+            if (e.student && !studentIds.has(e.student.id)) {
+              studentIds.add(e.student.id);
+              students.push({
+                id: `STU-${e.student.id.slice(0, 8)}`,
+                name: `${e.student.first_name} ${e.student.last_name}`,
+                email: e.student.email || '',
+                program: cls.program_id || 'No Program',
+                status: 'Active',
+                date: formatDate(new Date().toISOString()),
+                avatar: e.student.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student.id}`
+              });
+            }
           });
         }
       });
 
       return students;
-    }
+    },
+
+    // Returns one row per class-enrollment so the teacher sees each student per class.
+    getClassStudents: async (teacherId: string): Promise<{
+      studentId: string; studentName: string; email: string;
+      avatar: string; className: string; classId: string;
+    }[]> => {
+      const { data, error } = await supabase
+        .from('classes')
+        .select(`
+          id,
+          title,
+          enrollments:class_enrollments(
+            student_id,
+            student:profiles!class_enrollments_student_id_fkey(id, first_name, last_name, email, avatar_url)
+          )
+        `)
+        .eq('teacher_id', teacherId);
+
+      if (error) throw new Error(error.message);
+
+      const rows: { studentId: string; studentName: string; email: string; avatar: string; className: string; classId: string }[] = [];
+      (data || []).forEach((cls: any) => {
+        (cls.enrollments || []).forEach((e: any) => {
+          if (!e.student) return;
+          rows.push({
+            studentId:   e.student.id,
+            studentName: `${e.student.first_name} ${e.student.last_name}`,
+            email:       e.student.email || '',
+            avatar:      e.student.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student.id}`,
+            className:   cls.title,
+            classId:     cls.id,
+          });
+        });
+      });
+      return rows;
+    },
+
+    // Returns a map of studentId → note text for all notes this teacher has written.
+    getStudentNotes: async (teacherId: string): Promise<Record<string, string>> => {
+      const { data, error } = await supabase
+        .from('teacher_student_notes')
+        .select('student_id, note')
+        .eq('teacher_id', teacherId);
+
+      if (error) throw new Error(error.message);
+
+      const map: Record<string, string> = {};
+      (data || []).forEach((n: any) => { map[n.student_id] = n.note; });
+      return map;
+    },
+
+    // Creates or updates a private note for a student.
+    upsertStudentNote: async (teacherId: string, studentId: string, note: string): Promise<void> => {
+      const { error } = await supabase
+        .from('teacher_student_notes')
+        .upsert(
+          { teacher_id: teacherId, student_id: studentId, note, updated_at: new Date().toISOString() },
+          { onConflict: 'teacher_id,student_id' }
+        );
+      if (error) throw new Error(error.message);
+    },
+
+    /** Fetch all students (profiles with role=student) with their classes, programs, and attendance stats. */
+    getStudentsWithDetails: async (): Promise<{
+      id: string;
+      name: string;
+      email: string;
+      avatar: string;
+      classes: { classId: string; className: string; programId: string; programName: string; enrolledAt: string }[];
+      programs: { programId: string; programName: string }[];
+      attStats: { total: number; present: number; late: number; absent: number } | null;
+    }[]> => {
+      // 1. All student profiles
+      const { data: profiles, error: profErr } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, avatar_url')
+        .eq('role', 'student')
+        .order('first_name');
+      if (profErr) throw new Error(profErr.message);
+      if (!profiles || profiles.length === 0) return [];
+
+      const studentIds = profiles.map((p: any) => p.id);
+
+      // 2. Class enrollments with class + program info
+      const { data: enrollments, error: enrErr } = await supabase
+        .from('class_enrollments')
+        .select(`
+          student_id,
+          enrolled_at,
+          class:classes!class_enrollments_class_id_fkey(
+            id,
+            title,
+            program_id
+          )
+        `)
+        .in('student_id', studentIds)
+        .eq('status', 'active');
+      if (enrErr) throw new Error(enrErr.message);
+
+      // 3. Attendance stats (non-fatal — table may not exist yet)
+      const { data: attData } = await supabase
+        .from('class_attendance')
+        .select('student_id, status')
+        .in('student_id', studentIds);
+
+      // Build attendance map
+      const attMap: Record<string, { total: number; present: number; late: number; absent: number }> = {};
+      (attData || []).forEach((r: any) => {
+        if (!attMap[r.student_id]) attMap[r.student_id] = { total: 0, present: 0, late: 0, absent: 0 };
+        attMap[r.student_id].total++;
+        if (r.status === 'present')     attMap[r.student_id].present++;
+        else if (r.status === 'late')   attMap[r.student_id].late++;
+        else if (r.status === 'absent') attMap[r.student_id].absent++;
+      });
+
+      // Build enrollment map keyed by student
+      const enrMap: Record<string, { classId: string; className: string; programId: string; programName: string; enrolledAt: string }[]> = {};
+      (enrollments || []).forEach((e: any) => {
+        if (!e.class) return;
+        if (!enrMap[e.student_id]) enrMap[e.student_id] = [];
+        enrMap[e.student_id].push({
+          classId:     e.class.id,
+          className:   e.class.title,
+          programId:   e.class.program_id || '',
+          programName: e.class.program_id || 'Unknown',
+          enrolledAt:  e.enrolled_at,
+        });
+      });
+
+      return profiles.map((p: any) => {
+        const classes = enrMap[p.id] || [];
+        // Unique programs
+        const progMap: Record<string, string> = {};
+        classes.forEach(c => { if (c.programId) progMap[c.programId] = c.programName; });
+        const programs = Object.entries(progMap).map(([programId, programName]) => ({ programId, programName }));
+        return {
+          id:       p.id,
+          name:     `${p.first_name} ${p.last_name}`,
+          email:    p.email || '',
+          avatar:   p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.id}`,
+          classes,
+          programs,
+          attStats: attMap[p.id] || null,
+        };
+      });
+    },
   },
 
   programs: {
@@ -679,6 +915,10 @@ export const api = {
       const rangeStart = new Date(year, month - 1, 24).toISOString();
       const rangeEnd   = new Date(year, month + 1,  7).toISOString();
 
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('Not authenticated');
+
+      // Get regular calendar events
       const { data, error } = await supabase
         .from('calendar_events')
         .select(`
@@ -695,7 +935,7 @@ export const api = {
 
       if (error) throw new Error(error.message);
 
-      return (data || []).map((e: any) => ({
+      let events: CalendarEvent[] = (data || []).map((e: any) => ({
         ...e,
         creator_profile: e.creator_profile ? {
           firstName: e.creator_profile.first_name,
@@ -717,6 +957,106 @@ export const api = {
           } : undefined,
         } as CalendarParticipant)),
       } as CalendarEvent));
+
+      // Get class sessions and convert to calendar events
+      try {
+        const classEvents = await api.calendar.getClassEventsForUser(user.id, year, month);
+        events = [...events, ...classEvents];
+      } catch (e) {
+        console.error('Failed to fetch class events:', e);
+        // Continue without class events if fetch fails
+      }
+
+      return events.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+    },
+
+    getClassEventsForUser: async (userId: string, year: number, month: number): Promise<CalendarEvent[]> => {
+      // month is 0-based (same as JS Date), matching the value passed from getEvents
+      const startDate = new Date(year, month, 1);
+      const endDate = new Date(year, month + 1, 0);
+
+      // Get classes where user is teacher
+      const { data: teacherClasses, error: tcError } = await supabase
+        .from('classes')
+        .select(`
+          id,
+          title,
+          program_id,
+          teacher_id,
+          sessions:class_sessions(id, day_of_week, start_time, end_time),
+          teacher:profiles!classes_teacher_id_fkey(first_name, last_name, email, avatar_url)
+        `)
+        .eq('teacher_id', userId);
+
+      if (tcError) throw new Error(tcError.message);
+
+      // Get classes where user is enrolled as student
+      const { data: studentClasses, error: scError } = await supabase
+        .from('class_enrollments')
+        .select(`
+          class:classes(
+            id,
+            title,
+            program_id,
+            teacher_id,
+            sessions:class_sessions(id, day_of_week, start_time, end_time),
+            teacher:profiles!classes_teacher_id_fkey(first_name, last_name, email, avatar_url)
+          )
+        `)
+        .eq('student_id', userId);
+
+      if (scError) throw new Error(scError.message);
+
+      const allClasses = [
+        ...(teacherClasses || []),
+        ...(studentClasses || []).map((sc: any) => sc.class)
+      ].filter(Boolean);
+
+      const calendarEvents: CalendarEvent[] = [];
+
+      allClasses.forEach((cls: any) => {
+        if (!cls.sessions) return;
+
+        cls.sessions.forEach((session: any) => {
+          // Create event for each week in the month
+          const current = new Date(year, month, 1);
+          while (current <= endDate) {
+            // Convert JS getDay() (0=Sun) to match stored day_of_week (0=Mon from AdminPrograms)
+            if ((current.getDay() + 6) % 7 === session.day_of_week) {
+              const [startHour, startMin] = session.start_time.split(':').map(Number);
+              const [endHour, endMin] = session.end_time.split(':').map(Number);
+
+              const eventStart = new Date(current);
+              eventStart.setHours(startHour, startMin, 0);
+              const eventEnd = new Date(current);
+              eventEnd.setHours(endHour, endMin, 0);
+
+              calendarEvents.push({
+                id: `class-${cls.id}-${session.id}-${current.getTime()}`,
+                title: cls.title,
+                description: `${cls.program_id} | Teacher: ${cls.teacher?.first_name} ${cls.teacher?.last_name}`,
+                start_time: eventStart.toISOString(),
+                end_time: eventEnd.toISOString(),
+                all_day: false,
+                color: '#3b82f6',
+                event_type: 'class',
+                class_id: cls.id,
+                created_by: cls.teacher_id,
+                creator_profile: cls.teacher ? {
+                  firstName: cls.teacher.first_name,
+                  lastName: cls.teacher.last_name,
+                  email: cls.teacher.email,
+                  avatar: cls.teacher.avatar_url
+                } : undefined,
+                participants: []
+              });
+            }
+            current.setDate(current.getDate() + 1);
+          }
+        });
+      });
+
+      return calendarEvents;
     },
 
     createEvent: async (payload: {
@@ -802,5 +1142,421 @@ export const api = {
 
       return { id: data.id, firstName: data.first_name, lastName: data.last_name };
     },
+  },
+
+  classAttendance: {
+    /** Enrolled (active) students for a class. */
+    getStudentsForClass: async (classId: string): Promise<{ id: string; name: string; avatar: string }[]> => {
+      const { data, error } = await supabase
+        .from('class_enrollments')
+        .select('student_id, student:profiles!class_enrollments_student_id_fkey(id, first_name, last_name, avatar_url)')
+        .eq('class_id', classId)
+        .eq('status', 'active');
+      if (error) throw new Error(error.message);
+      return (data || []).map((e: any) => ({
+        id:     e.student.id,
+        name:   `${e.student.first_name} ${e.student.last_name}`,
+        avatar: e.student.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student.id}`,
+      }));
+    },
+
+    /** Attendance marks for a class on a date. Returns studentId → status map. */
+    getForClassDate: async (classId: string, date: string): Promise<Record<string, 'present' | 'absent' | 'late'>> => {
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('student_id, status')
+        .eq('class_id', classId)
+        .eq('date', date);
+      if (error) throw new Error(error.message);
+      const map: Record<string, 'present' | 'absent' | 'late'> = {};
+      (data || []).forEach((r: any) => { map[r.student_id] = r.status; });
+      return map;
+    },
+
+    /** Upsert one attendance mark. */
+    mark: async (classId: string, studentId: string, date: string, status: 'present' | 'absent' | 'late'): Promise<void> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('class_attendance')
+        .upsert(
+          { class_id: classId, student_id: studentId, date, status, recorded_by: user?.id, updated_at: new Date().toISOString() },
+          { onConflict: 'class_id,student_id,date' }
+        );
+      if (error) throw new Error(error.message);
+    },
+
+    /** All attendance records for one student, newest first. */
+    getForStudent: async (studentId: string): Promise<{ classId: string; className: string; date: string; status: 'present' | 'absent' | 'late' }[]> => {
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('class_id, date, status, class:classes(title)')
+        .eq('student_id', studentId)
+        .order('date', { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data || []).map((r: any) => ({
+        classId:   r.class_id,
+        className: r.class?.title || 'Unknown Class',
+        date:      r.date,
+        status:    r.status,
+      }));
+    },
+
+    /** Per-day attendance totals for a calendar month (for admin calendar view). */
+    getMonthCounts: async (year: number, month: number): Promise<Record<string, { present: number; absent: number; late: number }>> => {
+      const startDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const endDate   = `${year}-${String(month + 1).padStart(2, '0')}-${new Date(year, month + 1, 0).getDate()}`;
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('date, status')
+        .gte('date', startDate)
+        .lte('date', endDate);
+      if (error) throw new Error(error.message);
+      const counts: Record<string, { present: number; absent: number; late: number }> = {};
+      (data || []).forEach((r: any) => {
+        if (!counts[r.date]) counts[r.date] = { present: 0, absent: 0, late: 0 };
+        counts[r.date][r.status as 'present' | 'absent' | 'late']++;
+      });
+      return counts;
+    },
+
+    /** All classes that have any attendance records on a given date + per-class counts and student breakdowns. */
+    getDateClasses: async (date: string): Promise<{
+      classId: string;
+      className: string;
+      teacherName: string;
+      present: number;
+      absent: number;
+      late: number;
+      records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[];
+    }[]> => {
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select(`
+          class_id, student_id, status,
+          class:classes(id, title, teacher:profiles!classes_teacher_id_fkey(first_name, last_name)),
+          student:profiles!class_attendance_student_id_fkey(id, first_name, last_name, avatar_url)
+        `)
+        .eq('date', date);
+      if (error) throw new Error(error.message);
+      const grouped: Record<string, { classId: string; className: string; teacherName: string; records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[] }> = {};
+      (data || []).forEach((r: any) => {
+        if (!grouped[r.class_id]) {
+          grouped[r.class_id] = {
+            classId:     r.class_id,
+            className:   r.class?.title || 'Unknown',
+            teacherName: r.class?.teacher ? `${r.class.teacher.first_name} ${r.class.teacher.last_name}` : 'Unknown',
+            records:     [],
+          };
+        }
+        grouped[r.class_id].records.push({
+          studentId:   r.student_id,
+          studentName: r.student ? `${r.student.first_name} ${r.student.last_name}` : 'Unknown',
+          avatar:      r.student?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.student_id}`,
+          status:      r.status,
+        });
+      });
+      return Object.values(grouped).map(c => ({
+        ...c,
+        present: c.records.filter(r => r.status === 'present').length,
+        absent:  c.records.filter(r => r.status === 'absent').length,
+        late:    c.records.filter(r => r.status === 'late').length,
+      }));
+    },
+
+    /** All attendance sessions (every class × date combination that has records), sorted by date desc. */
+    getAllAttendanceSessions: async (): Promise<{
+      classId: string;
+      className: string;
+      teacherName: string;
+      date: string;
+      present: number;
+      absent: number;
+      late: number;
+      records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[];
+    }[]> => {
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select(`
+          class_id, student_id, status, date,
+          class:classes(id, title, teacher:profiles!classes_teacher_id_fkey(first_name, last_name)),
+          student:profiles!class_attendance_student_id_fkey(id, first_name, last_name, avatar_url)
+        `)
+        .order('date', { ascending: false });
+      if (error) throw new Error(error.message);
+      const grouped: Record<string, { classId: string; className: string; teacherName: string; date: string; records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[] }> = {};
+      (data || []).forEach((r: any) => {
+        const key = `${r.class_id}::${r.date}`;
+        if (!grouped[key]) {
+          grouped[key] = {
+            classId:     r.class_id,
+            className:   r.class?.title || 'Unknown',
+            teacherName: r.class?.teacher ? `${r.class.teacher.first_name} ${r.class.teacher.last_name}` : 'Unknown',
+            date:        r.date,
+            records:     [],
+          };
+        }
+        grouped[key].records.push({
+          studentId:   r.student_id,
+          studentName: r.student ? `${r.student.first_name} ${r.student.last_name}` : 'Unknown',
+          avatar:      r.student?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.student_id}`,
+          status:      r.status,
+        });
+      });
+      return Object.values(grouped)
+        .map(g => ({
+          ...g,
+          present: g.records.filter(r => r.status === 'present').length,
+          absent:  g.records.filter(r => r.status === 'absent').length,
+          late:    g.records.filter(r => r.status === 'late').length,
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+    },
+
+    /** Today's total present/absent/late counts across all classes. */
+    getTodayCounts: async (): Promise<{ present: number; absent: number; late: number }> => {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('status')
+        .eq('date', today);
+      if (error) throw new Error(error.message);
+      return {
+        present: (data || []).filter((r: any) => r.status === 'present').length,
+        absent:  (data || []).filter((r: any) => r.status === 'absent').length,
+        late:    (data || []).filter((r: any) => r.status === 'late').length,
+      };
+    },
+
+    /** Per-student attendance totals for all classes taught by a teacher. */
+    getSummaryForTeacher: async (teacherId: string): Promise<Record<string, { total: number; present: number; late: number; absent: number }>> => {
+      const { data: classData, error: classError } = await supabase
+        .from('classes')
+        .select('id')
+        .eq('teacher_id', teacherId);
+      if (classError) throw new Error(classError.message);
+      const classIds = (classData || []).map((c: any) => c.id);
+      if (classIds.length === 0) return {};
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('student_id, status')
+        .in('class_id', classIds);
+      if (error) throw new Error(error.message);
+      const summary: Record<string, { total: number; present: number; late: number; absent: number }> = {};
+      (data || []).forEach((r: any) => {
+        if (!summary[r.student_id]) summary[r.student_id] = { total: 0, present: 0, late: 0, absent: 0 };
+        summary[r.student_id].total++;
+        if (r.status === 'present')      summary[r.student_id].present++;
+        else if (r.status === 'late')    summary[r.student_id].late++;
+        else if (r.status === 'absent')  summary[r.student_id].absent++;
+      });
+      return summary;
+    },
+  },
+
+  classes: {
+    getByProgram: async (programId: string): Promise<Class[]> => {
+      const { data, error } = await supabase
+        .from('classes')
+        .select(`
+          *,
+          teacher:profiles!classes_teacher_id_fkey(id, first_name, last_name, email, avatar_url),
+          sessions:class_sessions(id, day_of_week, start_time, end_time),
+          enrollments:class_enrollments(count)
+        `)
+        .eq('program_id', programId)
+        .order('title');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(c => ({
+        id: c.id,
+        program_id: c.program_id,
+        title: c.title,
+        teacher_id: c.teacher_id,
+        teacher: c.teacher ? {
+          firstName: c.teacher.first_name,
+          lastName: c.teacher.last_name,
+          email: c.teacher.email,
+          avatar: c.teacher.avatar_url
+        } : undefined,
+        sessions: (c.sessions || []).map((s: any) => ({
+          id: s.id,
+          class_id: s.class_id,
+          day_of_week: s.day_of_week,
+          start_time: s.start_time,
+          end_time: s.end_time
+        })),
+        enrollmentCount: c.enrollments?.[0]?.count || 0,
+        created_at: c.created_at,
+        updated_at: c.updated_at
+      }));
+    },
+
+    create: async (programId: string, title: string, teacherId: string, sessions: { dayOfWeek: number; startTime: string; endTime: string }[]): Promise<Class> => {
+      const { data: classData, error: classError } = await supabase
+        .from('classes')
+        .insert([{
+          program_id: programId,
+          title,
+          teacher_id: teacherId
+        }])
+        .select()
+        .single();
+
+      if (classError) throw new Error(classError.message);
+
+      const sessionsToInsert = sessions.map(s => ({
+        class_id: classData.id,
+        day_of_week: s.dayOfWeek,
+        start_time: s.startTime,
+        end_time: s.endTime
+      }));
+
+      const { error: sessionsError } = await supabase
+        .from('class_sessions')
+        .insert(sessionsToInsert);
+
+      if (sessionsError) throw new Error(sessionsError.message);
+
+      return {
+        id: classData.id,
+        program_id: classData.program_id,
+        title: classData.title,
+        teacher_id: classData.teacher_id,
+        sessions: sessions.map((s, i) => ({
+          id: `temp-${i}`,
+          class_id: classData.id,
+          day_of_week: s.dayOfWeek,
+          start_time: s.startTime,
+          end_time: s.endTime
+        })),
+        enrollmentCount: 0
+      };
+    },
+
+    delete: async (classId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('classes')
+        .delete()
+        .eq('id', classId);
+
+      if (error) throw new Error(error.message);
+    },
+
+    assignTeacher: async (classId: string, teacherId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('classes')
+        .update({ teacher_id: teacherId })
+        .eq('id', classId);
+
+      if (error) throw new Error(error.message);
+    },
+
+    enrollStudent: async (classId: string, studentId: string): Promise<ClassEnrollment> => {
+      const { data: enrollmentData, error } = await supabase
+        .from('class_enrollments')
+        .insert([{
+          class_id: classId,
+          student_id: studentId,
+          status: 'active'
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        if (error.message.includes('violates unique constraint')) {
+          throw new Error('Student is already enrolled in this class');
+        }
+        throw new Error(error.message);
+      }
+
+      return {
+        id: enrollmentData.id,
+        class_id: enrollmentData.class_id,
+        student_id: enrollmentData.student_id,
+        enrolled_at: enrollmentData.enrolled_at,
+        status: enrollmentData.status
+      };
+    },
+
+    getEnrollments: async (classId: string): Promise<ClassEnrollment[]> => {
+      const { data, error } = await supabase
+        .from('class_enrollments')
+        .select(`
+          *,
+          student:profiles!class_enrollments_student_id_fkey(id, first_name, last_name, email, avatar_url)
+        `)
+        .eq('class_id', classId)
+        .order('enrolled_at');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(e => ({
+        id: e.id,
+        class_id: e.class_id,
+        student_id: e.student_id,
+        enrolled_at: e.enrolled_at,
+        status: e.status,
+        student: e.student ? {
+          firstName: e.student.first_name,
+          lastName: e.student.last_name,
+          email: e.student.email,
+          avatar: e.student.avatar_url
+        } : undefined
+      }));
+    },
+
+    removeStudent: async (enrollmentId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('class_enrollments')
+        .delete()
+        .eq('id', enrollmentId);
+
+      if (error) throw new Error(error.message);
+    },
+
+    getAvailableTeachers: async (): Promise<{ id: string; firstName: string; lastName: string; email: string }[]> => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .eq('role', 'teacher')
+        .order('first_name');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(t => ({
+        id: t.id,
+        firstName: t.first_name,
+        lastName: t.last_name,
+        email: t.email
+      }));
+    },
+
+    getAvailableStudents: async (classId: string): Promise<{ id: string; firstName: string; lastName: string; email: string }[]> => {
+      const { data: enrolledIds, error: enrollError } = await supabase
+        .from('class_enrollments')
+        .select('student_id')
+        .eq('class_id', classId);
+
+      if (enrollError) throw new Error(enrollError.message);
+
+      const enrolledStudentIds = enrolledIds?.map(e => e.student_id) || [];
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .eq('role', 'student')
+        .not('id', 'in', `(${enrolledStudentIds.map(() => '?').join(',')})`)
+        .order('first_name');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(s => ({
+        id: s.id,
+        firstName: s.first_name,
+        lastName: s.last_name,
+        email: s.email
+      }));
+    }
   }
 };

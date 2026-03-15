@@ -8,6 +8,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent } from '../types';
+import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -126,14 +127,19 @@ function layoutWeek(weekDays: Date[], events: CalendarEvent[]): EventLayout[] {
     }
 
     const span = endCol - startCol + 1;
-    let slot    = 0;
+    const slotsNeeded = ev.event_type === 'class' ? 2 : 1;
+    let slot = 0;
     outerLoop: while (true) {
-      for (let c = startCol; c <= endCol; c++) {
-        if (occ[c][slot]) { slot++; continue outerLoop; }
+      for (let extra = 0; extra < slotsNeeded; extra++) {
+        for (let c = startCol; c <= endCol; c++) {
+          if (occ[c][slot + extra]) { slot++; continue outerLoop; }
+        }
       }
       break;
     }
-    for (let c = startCol; c <= endCol; c++) occ[c][slot] = true;
+    for (let extra = 0; extra < slotsNeeded; extra++) {
+      for (let c = startCol; c <= endCol; c++) occ[c][slot + extra] = true;
+    }
     result.push({ event: ev, startCol, span, slot, continuesLeft, continuesRight });
   }
   return result;
@@ -156,6 +162,13 @@ function EventPill({ layout, onClick }: {
   const radius   = continuesLeft
     ? (continuesRight ? '0px' : '0 4px 4px 0')
     : (continuesRight ? '4px 0 0 4px' : '4px');
+  
+  // Class events are larger and more prominent
+  const heightMultiplier = isClass ? 2 : 1;
+  const fontSize = isClass ? 'text-xs' : 'text-[11px]';
+  const fontWeight = isClass ? 'font-bold' : 'font-semibold';
+  const borderWidth = isClass ? '4px' : '3px';
+  const opacity = isClass ? 0.5 : 0.28;
 
   return (
     <div
@@ -165,18 +178,19 @@ function EventPill({ layout, onClick }: {
         left:            `calc(${leftPct}% + ${padL}px)`,
         width:           `calc(${widthPct}% - ${padL}px - ${padR}px)`,
         top:             `${slot * SLOT_H + 2}px`,
-        height:          `${SLOT_H - 4}px`,
-        backgroundColor: color + (isClass ? '35' : '28'),
-        borderLeft:      continuesLeft ? 'none' : `3px solid ${color}`,
+        height:          `${(SLOT_H - 4) * heightMultiplier}px`,
+        backgroundColor: color + (isClass ? '45' : '28'),
+        borderLeft:      continuesLeft ? 'none' : `${borderWidth} solid ${color}`,
         borderRadius:    radius,
+        boxShadow:       isClass ? `0 4px 12px ${color}33` : 'none',
       }}
-      className="flex items-center px-1.5 cursor-pointer hover:brightness-125 transition-all z-10 select-none overflow-hidden"
+      className={`flex items-center px-2 cursor-pointer hover:brightness-125 transition-all z-20 select-none overflow-hidden ${isClass ? 'ring-2 ring-offset-1 ring-offset-[#0a0a0a]' : ''}`}
       title={event.title}
     >
-      {isClass && <GraduationCap style={{ color }} className="w-2.5 h-2.5 mr-1 shrink-0" />}
-      <span style={{ color }} className="text-[11px] font-semibold truncate leading-none">
+      {isClass && <GraduationCap style={{ color }} className={`w-3.5 h-3.5 mr-1.5 shrink-0`} />}
+      <span style={{ color }} className={`${fontSize} ${fontWeight} truncate leading-tight`}>
         {!continuesLeft && !event.all_day && (
-          <span className="opacity-60 mr-1 font-normal">{fmtTime(event.start_time)}</span>
+          <span className="opacity-70 mr-1 font-normal text-[10px]">{fmtTime(event.start_time)}</span>
         )}
         {event.title}
       </span>
@@ -277,6 +291,7 @@ export default function TeacherCalendar() {
   const [deleting,   setDeleting  ] = useState(false);
   const [updatingRsvp, setUpdatingRsvp] = useState(false);
   const [dayViewDay, setDayViewDay] = useState<Date | null>(null);
+  const [classAttEvent, setClassAttEvent] = useState<CalendarEvent | null>(null);
 
   const { t } = useLanguage();
   const { user } = useUser();
@@ -320,8 +335,12 @@ export default function TeacherCalendar() {
 
   function openDetail(ev: CalendarEvent, e: React.MouseEvent<HTMLDivElement>) {
     e.stopPropagation();
-    setSelEvent(ev);
-    setShowDetail(true);
+    if (ev.event_type === 'class' && ev.class_id) {
+      setClassAttEvent(ev);
+    } else {
+      setSelEvent(ev);
+      setShowDetail(true);
+    }
   }
 
   async function createEvent() {
@@ -543,7 +562,17 @@ export default function TeacherCalendar() {
           )}
         </div>
       </div>
-
+      {/* ── Class Attendance Modal ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {classAttEvent && user && (
+          <ClassAttendanceModal
+            event={classAttEvent}
+            viewerRole="teacher"
+            viewerUserId={user.id}
+            onClose={() => setClassAttEvent(null)}
+          />
+        )}
+      </AnimatePresence>
       {/* ── Create Event Modal ──────────────────────────────────────────────── */}
       <AnimatePresence>
         {showCreate && (
@@ -879,7 +908,7 @@ export default function TeacherCalendar() {
                     onClick={() => { setDayViewDay(null); setSelEvent(ev); setShowDetail(true); }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] transition-colors text-left group"
                   >
-                    <div style={{ backgroundColor: ev.color }} className="w-1 h-8 rounded-full shrink-0" />
+                    <div style={{ backgroundColor: ev.event_type === 'class' ? CLASS_COLOR : ev.color }} className="w-1 h-8 rounded-full shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-white/80 group-hover:text-white truncate transition-colors">
                         {ev.title}

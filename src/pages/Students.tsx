@@ -1,6 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
-import { motion } from 'motion/react';
-import { Search, Plus, Filter, MoreHorizontal, FileText, CheckCircle, XCircle, Clock, ChevronLeft, ChevronRight, Download, User, Loader2, AlertCircle, UserPlus } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Search, Plus, Filter, MoreHorizontal, FileText, CheckCircle, XCircle, Clock,
+  ChevronLeft, ChevronRight, Download, User, Loader2, AlertCircle, UserPlus,
+  GraduationCap, BarChart2, CheckCircle2, X, BookOpen,
+} from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
 import { useDebounce } from '../hooks/useDebounce';
@@ -9,16 +13,15 @@ import { playPopSound } from '../utils/sound';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 
-const STUDENTS = [
-  { id: 'STU-001', name: 'Elena Rodriguez', email: 'elena.r@example.com', program: 'UI/UX Creative Designer', status: 'Active', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/elena/100/100' },
-  { id: 'STU-002', name: 'Marcus Chen', email: 'marcus.c@example.com', program: 'Web Development', status: 'Pending', date: 'Feb 23, 2026', avatar: 'https://picsum.photos/seed/marcus/100/100' },
-  { id: 'STU-003', name: 'Sarah Jenkins', email: 'sarah.j@example.com', program: 'Cybersecurity', status: 'Active', date: 'Feb 22, 2026', avatar: 'https://picsum.photos/seed/sarah/100/100' },
-  { id: 'STU-004', name: 'David Kim', email: 'david.k@example.com', program: 'UAV Engineering Degree', status: 'Suspended', date: 'Feb 20, 2026', avatar: 'https://picsum.photos/seed/david/100/100' },
-  { id: 'STU-005', name: 'Aisha Patel', email: 'aisha.p@example.com', program: 'Digital Marketing with AI', status: 'Graduated', date: 'Feb 15, 2026', avatar: 'https://picsum.photos/seed/aisha/100/100' },
-  { id: 'STU-006', name: 'James Wilson', email: 'james.w@example.com', program: 'Internet of Things (UAV/IoT)', status: 'Active', date: 'Feb 18, 2026', avatar: 'https://picsum.photos/seed/james/100/100' },
-  { id: 'STU-007', name: 'Nina Costa', email: 'nina.c@example.com', program: '3D Creative Artist', status: 'Active', date: 'Feb 19, 2026', avatar: 'https://picsum.photos/seed/nina/100/100' },
-  { id: 'STU-008', name: 'Alex Turner', email: 'alex.t@example.com', program: 'Entrepreneurship', status: 'Active', date: 'Feb 21, 2026', avatar: 'https://picsum.photos/seed/alex/100/100' },
-];
+type AdminStudent = {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  classes: { classId: string; className: string; programId: string; programName: string; enrolledAt: string }[];
+  programs: { programId: string; programName: string }[];
+  attStats: { total: number; present: number; late: number; absent: number } | null;
+};
 
 interface EnrollForm {
   firstName: string;
@@ -41,9 +44,16 @@ export default function Students() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
-  const [selectedStudentForPanel, setSelectedStudentForPanel] = useState<any | null>(null);
-  const itemsPerPage = 5;
+  const [selectedStudentForPanel, setSelectedStudentForPanel] = useState<AdminStudent | null>(null);
+  const [students, setStudents] = useState<AdminStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const itemsPerPage = 10;
   const navigate = useNavigate();
+
+  // Modals
+  const [classesModal, setClassesModal] = useState<{ studentName: string; classes: AdminStudent['classes'] } | null>(null);
+  const [programsModal, setProgramsModal] = useState<{ studentName: string; programs: AdminStudent['programs'] } | null>(null);
+  const [attModal, setAttModal] = useState<{ studentName: string; stats: NonNullable<AdminStudent['attStats']> } | null>(null);
 
   // ── Admin-enroll form state ────────────────────────────────────────────────
   const [form, setForm] = useState<EnrollForm>(BLANK_FORM);
@@ -54,6 +64,15 @@ export default function Students() {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { t } = useLanguage();
   const location = useLocation();
+
+  useEffect(() => { void loadStudents(); }, []);
+
+  async function loadStudents() {
+    setLoading(true);
+    try { setStudents(await api.teacher.getStudentsWithDetails()); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }
 
   // Open the enroll form when navigated here with ?enroll=1
   useEffect(() => {
@@ -68,12 +87,15 @@ export default function Students() {
   }, [location.search]);
 
   const filteredStudents = useMemo(() => {
-    return STUDENTS.filter(student => 
-      student.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-      student.email.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-      student.id.toLowerCase().includes(debouncedSearch.toLowerCase())
+    if (!debouncedSearch.trim()) return students;
+    const q = debouncedSearch.toLowerCase();
+    return students.filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      s.email.toLowerCase().includes(q) ||
+      s.programs.some(p => p.programName.toLowerCase().includes(q)) ||
+      s.classes.some(c => c.className.toLowerCase().includes(q))
     );
-  }, [debouncedSearch]);
+  }, [students, debouncedSearch]);
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -379,80 +401,130 @@ export default function Students() {
         </div>
 
         <div className="overflow-x-auto pb-4 custom-scrollbar flex-1 -mx-6 px-6">
-          <table className="w-full text-left border-collapse min-w-[800px]">
-            <thead>
-              <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
-                <th className="pb-3 pl-4 w-10">
-                  <input 
-                    type="checkbox" 
-                    className="rounded border-white/20 bg-transparent text-[#fc0ce4] focus:ring-[#fc0ce4]/50"
-                    checked={paginatedStudents.length > 0 && selectedStudents.length === paginatedStudents.length}
-                    onChange={handleSelectAll}
-                  />
-                </th>
-                <th className="pb-3 font-medium">{t('attendance.student_info')}</th>
-                <th className="pb-3 font-medium">{t('table.program')}</th>
-                <th className="pb-3 font-medium">{t('table.status')}</th>
-                <th className="pb-3 font-medium">{t('students.enrollment_date')}</th>
-                <th className="pb-3 font-medium text-right">{t('table.action')}</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm">
-              {paginatedStudents.length > 0 ? (
-                paginatedStudents.map((student) => (
-                  <tr 
-                    key={student.id} 
-                    className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer ${selectedStudents.includes(student.id) ? 'bg-white/5' : ''}`}
-                    onClick={() => { playPopSound(); setSelectedStudentForPanel(student); }}
-                  >
-                    <td className="py-4 pl-4" onClick={(e) => e.stopPropagation()}>
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-white/20 bg-transparent text-[#fc0ce4] focus:ring-[#fc0ce4]/50"
-                        checked={selectedStudents.includes(student.id)}
-                        onChange={() => handleSelectOne(student.id)}
-                      />
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-3">
-                        <img src={student.avatar} alt={student.name} className="w-10 h-10 rounded-full border border-white/10" referrerPolicy="no-referrer" />
-                        <div>
-                          <div className="font-medium text-white/90 group-hover:text-white transition-colors">{student.name}</div>
-                          <div className="text-[11px] text-white/40 font-mono mt-0.5">{student.id} • {student.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 text-white/60">{student.program}</td>
-                    <td className="py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
-                        student.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
-                        student.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                        student.status === 'Graduated' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        'bg-red-500/10 text-red-400 border-red-500/20'
-                      }`}>
-                        {student.status === 'Active' && <CheckCircle className="w-3 h-3" />}
-                        {student.status === 'Pending' && <Clock className="w-3 h-3" />}
-                        {student.status === 'Suspended' && <XCircle className="w-3 h-3" />}
-                        {t(`status.${student.status.toLowerCase()}`)}
-                      </span>
-                    </td>
-                    <td className="py-4 text-white/40 text-xs">{student.date}</td>
-                    <td className="py-4 text-right">
-                      <button className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-white/30" />
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse min-w-[960px]">
+              <thead>
+                <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
+                  <th className="pb-3 pl-4 w-10">
+                    <input
+                      type="checkbox"
+                      className="rounded border-white/20 bg-transparent text-[#fc0ce4] focus:ring-[#fc0ce4]/50"
+                      checked={paginatedStudents.length > 0 && selectedStudents.length === paginatedStudents.length}
+                      onChange={handleSelectAll}
+                    />
+                  </th>
+                  <th className="pb-3 font-medium">{t('attendance.student_info')}</th>
+                  <th className="pb-3 font-medium">Program</th>
+                  <th className="pb-3 font-medium">Class</th>
+                  <th className="pb-3 font-medium">Enrollment Date</th>
+                  <th className="pb-3 font-medium">Payment</th>
+                  <th className="pb-3 font-medium">Attendance</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm">
+                {paginatedStudents.length > 0 ? (
+                  paginatedStudents.map((student) => {
+                    const attRate = student.attStats && student.attStats.total > 0
+                      ? Math.round(((student.attStats.present + student.attStats.late) / student.attStats.total) * 100)
+                      : null;
+                    const firstProgram = student.programs[0];
+                    const extraPrograms = student.programs.length - 1;
+                    const firstClass = student.classes[0];
+                    const extraClasses = student.classes.length - 1;
+                    const enrollDate = firstClass?.enrolledAt
+                      ? new Date(firstClass.enrolledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : '–';
+                    return (
+                      <tr
+                        key={student.id}
+                        className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer ${selectedStudents.includes(student.id) ? 'bg-white/5' : ''}`}
+                        onClick={() => { playPopSound(); setSelectedStudentForPanel(student); }}
+                      >
+                        <td className="py-4 pl-4" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="rounded border-white/20 bg-transparent text-[#fc0ce4] focus:ring-[#fc0ce4]/50"
+                            checked={selectedStudents.includes(student.id)}
+                            onChange={() => handleSelectOne(student.id)}
+                          />
+                        </td>
+                        <td className="py-4">
+                          <div className="flex items-center gap-3">
+                            <img src={student.avatar} alt={student.name} className="w-9 h-9 rounded-full border border-white/10 shrink-0" referrerPolicy="no-referrer" />
+                            <div>
+                              <div className="font-medium text-white/90 group-hover:text-white transition-colors">{student.name}</div>
+                              <div className="text-[11px] text-white/40 font-mono mt-0.5">{student.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4">
+                          {firstProgram ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-500/15 text-purple-300 border border-purple-500/20 truncate max-w-[110px]">
+                                {firstProgram.programName}
+                              </span>
+                              {extraPrograms > 0 && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setProgramsModal({ studentName: student.name, programs: student.programs }); }}
+                                  className="text-[10px] text-white/40 hover:text-white bg-white/5 hover:bg-white/10 px-1.5 py-0.5 rounded-full border border-white/10 transition-colors"
+                                >
+                                  +{extraPrograms}
+                                </button>
+                              )}
+                            </div>
+                          ) : <span className="text-white/30">–</span>}
+                        </td>
+                        <td className="py-4">
+                          {firstClass ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/15 text-blue-300 border border-blue-500/20 truncate max-w-[110px]">
+                                {firstClass.className}
+                              </span>
+                              {extraClasses > 0 && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setClassesModal({ studentName: student.name, classes: student.classes }); }}
+                                  className="text-[10px] text-white/40 hover:text-white bg-white/5 hover:bg-white/10 px-1.5 py-0.5 rounded-full border border-white/10 transition-colors"
+                                >
+                                  +{extraClasses}
+                                </button>
+                              )}
+                            </div>
+                          ) : <span className="text-white/30">–</span>}
+                        </td>
+                        <td className="py-4 text-white/40 text-xs">{enrollDate}</td>
+                        <td className="py-4 text-white/30 text-sm">–</td>
+                        <td className="py-4">
+                          {attRate !== null ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setAttModal({ studentName: student.name, stats: student.attStats! }); }}
+                              className={`text-xs font-semibold px-2 py-1 rounded-lg border transition-colors ${
+                                attRate >= 75 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' :
+                                attRate >= 50 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20' :
+                                'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
+                              }`}
+                            >
+                              {attRate}%
+                            </button>
+                          ) : <span className="text-white/30">–</span>}
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={7} className="py-16 text-center">
+                      <GraduationCap className="w-10 h-10 text-white/10 mx-auto mb-3" />
+                      <p className="text-white/40 text-sm">No students found.</p>
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-white/40 text-sm">
-                    No students found matching your search.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* Pagination UI */}
@@ -496,49 +568,55 @@ export default function Students() {
         )}
       </div>
 
-      <SlideOver 
-        isOpen={!!selectedStudentForPanel} 
-        onClose={() => setSelectedStudentForPanel(null)} 
+      <SlideOver
+        isOpen={!!selectedStudentForPanel}
+        onClose={() => setSelectedStudentForPanel(null)}
         title="Student Details"
       >
         {selectedStudentForPanel && (
           <div className="space-y-8">
             <div className="flex flex-col items-center text-center">
-              <img 
-                src={selectedStudentForPanel.avatar} 
-                alt={selectedStudentForPanel.name} 
-                className="w-24 h-24 rounded-full border-4 border-white/10 mb-4" 
-                referrerPolicy="no-referrer" 
+              <img
+                src={selectedStudentForPanel.avatar}
+                alt={selectedStudentForPanel.name}
+                className="w-24 h-24 rounded-full border-4 border-white/10 mb-4"
+                referrerPolicy="no-referrer"
               />
               <h3 className="text-xl font-display font-medium text-white">{selectedStudentForPanel.name}</h3>
-              <p className="text-sm text-white/50 font-mono mt-1">{selectedStudentForPanel.id}</p>
-              
-              <span className={`mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium uppercase tracking-wider border ${
-                selectedStudentForPanel.status === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
-                selectedStudentForPanel.status === 'Pending' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                selectedStudentForPanel.status === 'Graduated' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                'bg-red-500/10 text-red-400 border-red-500/20'
-              }`}>
-                {selectedStudentForPanel.status}
-              </span>
+              <p className="text-sm text-white/50 font-mono mt-1">{selectedStudentForPanel.email}</p>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('profile.program')}</div>
-                <div className="text-sm text-white/90">{selectedStudentForPanel.program}</div>
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Programs</div>
+                {selectedStudentForPanel.programs.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedStudentForPanel.programs.map(p => (
+                      <span key={p.programId} className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-500/15 text-purple-300 border border-purple-500/20">{p.programName}</span>
+                    ))}
+                  </div>
+                ) : <span className="text-sm text-white/40">Not enrolled in any program</span>}
+              </div>
+              <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-2">Classes</div>
+                {selectedStudentForPanel.classes.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {selectedStudentForPanel.classes.map(c => (
+                      <div key={c.classId} className="flex items-center justify-between text-sm">
+                        <span className="text-white/80">{c.className}</span>
+                        <span className="text-[11px] text-white/30">{new Date(c.enrolledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <span className="text-sm text-white/40">No classes</span>}
               </div>
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('profile.email')}</div>
                 <div className="text-sm text-white/90">{selectedStudentForPanel.email}</div>
               </div>
-              <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('profile.enrollment_date')}</div>
-                <div className="text-sm text-white/90">{selectedStudentForPanel.date}</div>
-              </div>
             </div>
 
-            <button 
+            <button
               onClick={() => {
                 playPopSound();
                 navigate(`/students/${selectedStudentForPanel.id}`);
@@ -551,6 +629,145 @@ export default function Students() {
           </div>
         )}
       </SlideOver>
+
+      {/* Programs modal */}
+      <AnimatePresence>
+        {programsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setProgramsModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="glass-card rounded-2xl p-6 w-full max-w-sm border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-display text-base font-medium text-white">{programsModal.studentName}'s Programs</h3>
+                <button onClick={() => setProgramsModal(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {programsModal.programs.map(p => (
+                  <span key={p.programId} className="px-3 py-1 rounded-full text-xs font-medium bg-purple-500/15 text-purple-300 border border-purple-500/20">
+                    {p.programName}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Classes modal */}
+      <AnimatePresence>
+        {classesModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setClassesModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="glass-card rounded-2xl p-6 w-full max-w-sm border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-display text-base font-medium text-white">{classesModal.studentName}'s Classes</h3>
+                <button onClick={() => setClassesModal(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex flex-col gap-2">
+                {classesModal.classes.map(c => (
+                  <div key={c.classId} className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 border border-white/5">
+                    <span className="text-sm text-white/80">{c.className}</span>
+                    <span className="text-[10px] text-blue-300 ml-2 shrink-0">{c.programName}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Attendance modal */}
+      <AnimatePresence>
+        {attModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setAttModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="glass-card rounded-2xl p-6 w-full max-w-sm border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="font-display text-base font-medium text-white">Attendance</h3>
+                  <p className="text-xs text-white/40 mt-0.5">{attModal.studentName}</p>
+                </div>
+                <button onClick={() => setAttModal(null)} className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              {(() => {
+                const { total, present, late, absent } = attModal.stats;
+                const rate = total > 0 ? Math.round(((present + late) / total) * 100) : 0;
+                return (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-xs mb-1.5">
+                        <span className="text-white/50">Attendance Rate</span>
+                        <span className={`font-semibold ${rate >= 75 ? 'text-emerald-400' : rate >= 50 ? 'text-amber-400' : 'text-red-400'}`}>{rate}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${rate >= 75 ? 'bg-emerald-400' : rate >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                          style={{ width: `${rate}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {[
+                        { label: 'Total Classes', value: total, icon: <BarChart2 className="w-4 h-4 text-white/30" /> },
+                        { label: 'Present', value: present, icon: <CheckCircle2 className="w-4 h-4 text-emerald-400" /> },
+                        { label: 'Late', value: late, icon: <Clock className="w-4 h-4 text-amber-400" /> },
+                        { label: 'Absent', value: absent, icon: <XCircle className="w-4 h-4 text-red-400" /> },
+                      ].map(row => (
+                        <div key={row.label} className="flex items-center justify-between px-3 py-2 rounded-xl bg-white/5">
+                          <div className="flex items-center gap-2 text-sm text-white/60">{row.icon}{row.label}</div>
+                          <span className="text-sm font-semibold text-white">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-white/25 text-center">Late arrivals count as present when calculating the rate</p>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

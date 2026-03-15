@@ -64,10 +64,13 @@ export interface Announcement {
   title: string;
   content: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
-  audience: 'all' | 'students' | 'teachers' | 'admins' | 'program_specific';
+  audience: 'all' | 'students' | 'teachers' | 'admins' | 'program_specific' | 'class_specific';
   program?: string;
   programId?: string;
+  classId?: string;
+  className?: string;
   author: string;
+  authorRole?: string;
   date: string;
   startDate?: string;
   endDate?: string;
@@ -159,6 +162,8 @@ export interface CalendarEvent {
   color: string;
   event_type: 'meeting' | 'class' | 'personal' | 'holiday';
   created_by: string;
+  /** Populated for class events — the UUID of the class in the classes table */
+  class_id?: string;
   creator_profile?: {
     firstName: string;
     lastName: string;
@@ -166,4 +171,43 @@ export interface CalendarEvent {
     avatar?: string;
   };
   participants?: CalendarParticipant[];
+}
+
+export interface ClassSession {
+  id: string;
+  class_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+}
+
+export interface Class {
+  id: string;
+  program_id: string;
+  title: string;
+  teacher_id: string;
+  teacher?: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatar?: string;
+  };
+  sessions?: ClassSession[];
+  enrollmentCount?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ClassEnrollment {
+  id: string;
+  class_id: string;
+  student_id: string;
+  enrolled_at: string;
+  status: 'active' | 'dropped' | 'completed';
+  student?: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    avatar?: string;
+  };
 }
