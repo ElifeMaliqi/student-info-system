@@ -7,7 +7,7 @@ const QUIZZES = [
   { id: 'QZ-101', title: 'UI/UX Fundamentals Midterm', program: 'UI/UX Creative Designer', submissions: '24/28', date: 'Feb 20, 2026', status: 'Grading', type: 'Quiz' },
   { id: 'QZ-102', title: 'Component Architecture', program: 'Web Development', submissions: '18/18', date: 'Feb 15, 2026', status: 'Completed', type: 'Assignment' },
   { id: 'QZ-103', title: 'Cybersecurity Basics', program: 'Cybersecurity', submissions: '0/32', date: 'Feb 25, 2026', status: 'Scheduled', type: 'Quiz' },
-  { id: 'EV-001', title: 'Guest Lecture: AI in Design', program: 'All Programs', submissions: '-', date: 'Mar 01, 2026', status: 'Scheduled', type: 'Event' },
+  { id: 'EV-001', title: 'Guest Lecture: AI in Design', program: 'All Degrees', submissions: '-', date: 'Mar 01, 2026', status: 'Scheduled', type: 'Event' },
   { id: 'AS-002', title: 'Final Project Phase 1', program: 'UI/UX Creative Designer', submissions: '28/28', date: 'Jan 28, 2026', status: 'Completed', type: 'Assignment' },
 ];
 

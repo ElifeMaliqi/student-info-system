@@ -4,7 +4,11 @@ import { Search, Home, Users, CreditCard, Settings, User, BookOpen, X } from 'lu
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
 
-export function CommandPalette() {
+type Props = {
+  role: 'admin' | 'teacher' | 'student';
+};
+
+export function CommandPalette({ role }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,13 +38,29 @@ export function CommandPalette() {
     }
   }, [isOpen]);
 
-  const actions = [
+  const baseActions = [
     { id: 'dash', name: 'Go to Dashboard', icon: Home, path: '/dashboard' },
-    { id: 'students', name: 'Manage Students', icon: Users, path: '/students' },
-    { id: 'finance', name: 'View Finance & Invoices', icon: CreditCard, path: '/finance' },
-    { id: 'settings', name: 'System Settings', icon: Settings, path: '/settings' },
-    { id: 'attendance', name: 'Record Attendance', icon: BookOpen, path: '/attendance' },
+    { id: 'settings', name: 'Settings', icon: Settings, path: '/settings' },
   ];
+
+  const roleActions = role === 'admin'
+    ? [
+        { id: 'students', name: 'Manage Students', icon: Users, path: '/students' },
+        { id: 'finance', name: 'View Finance', icon: CreditCard, path: '/finance' },
+        { id: 'attendance', name: 'Attendance', icon: BookOpen, path: '/attendance' },
+      ]
+    : role === 'teacher'
+      ? [
+          { id: 'students', name: 'My Students', icon: Users, path: '/students' },
+          { id: 'classes', name: 'My Classes', icon: BookOpen, path: '/classes' },
+        ]
+      : [
+          { id: 'grades', name: 'My Grades', icon: BookOpen, path: '/grades' },
+          { id: 'invoices', name: 'My Invoices', icon: CreditCard, path: '/invoices' },
+          { id: 'profile', name: 'My Profile', icon: User, path: '/settings' },
+        ];
+
+  const actions = [...baseActions, ...roleActions];
 
   const filteredActions = actions.filter(action => 
     action.name.toLowerCase().includes(search.toLowerCase())

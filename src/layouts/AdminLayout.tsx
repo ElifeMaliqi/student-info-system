@@ -16,10 +16,9 @@ interface AdminLayoutProps {
   children: ReactNode;
   onLogout: () => void;
   role: 'admin' | 'teacher' | 'student';
-  setRole: (role: 'admin' | 'teacher' | 'student') => void;
 }
 
-export default function AdminLayout({ children, onLogout, role, setRole }: AdminLayoutProps) {
+export default function AdminLayout({ children, onLogout, role }: AdminLayoutProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
@@ -30,7 +29,7 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
   const location = useLocation();
   const navigate = useNavigate();
   
-  const activeTab = location.pathname.substring(1) || 'dashboard';
+  const activeTab = location.pathname.split('/').filter(Boolean)[0] || 'dashboard';
 
   // Close mobile menu and scroll to top when tab changes
   useEffect(() => {
@@ -61,6 +60,7 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
 
   const teacherNavItems = [
     { id: 'dashboard',     label: t('nav.dashboard'),     icon: LayoutDashboard },
+    { id: 'classes',       label: 'My Classes',           icon: BookOpen        },
     { id: 'quizzes',       label: t('nav.quizzes'),       icon: CalendarCheck   },
     { id: 'students',      label: t('nav.my_students'),   icon: Users           },
     { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays    },
@@ -302,7 +302,7 @@ export default function AdminLayout({ children, onLogout, role, setRole }: Admin
         </div>
       </main>
 
-      <CommandPalette />
+      <CommandPalette role={role} />
 
       <SlideOver isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} title="Help & FAQ">
         <div className="space-y-6">

@@ -18,6 +18,7 @@ import StudentGrades from './pages/StudentGrades';
 import StudentInvoices from './pages/StudentInvoices';
 import TeacherQuizzes from './pages/TeacherQuizzes';
 import TeacherStudents from './pages/TeacherStudents';
+import TeacherClasses from './pages/TeacherClasses';
 import TeacherCalendar from './pages/TeacherCalendar';
 import StudentCalendar from './pages/StudentCalendar';
 import Announcements from './pages/Announcements';
@@ -25,34 +26,34 @@ import AdminPrograms from './pages/AdminPrograms';
 import StudentProfile from './pages/StudentProfile';
 import RegistrationApplications from './pages/RegistrationApplications';
 import AdminCalendar from './pages/AdminCalendar';
+import ForcePasswordChange from './pages/ForcePasswordChange';
 import { LanguageProvider } from './context/LanguageContext';
 import { UserProvider, useUser } from './context/UserContext';
 
 function AppContent() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [role, setRole] = useState<'admin' | 'teacher' | 'student'>('admin');
-  const { setUser } = useUser();
+  const { user, setUser } = useUser();
   const navigate = useNavigate();
+  const role = user?.role;
 
-  if (!isAuthenticated) {
+  if (!user || !role) {
     return (
-      <Login onLogin={(selectedRole) => {
-        setRole(selectedRole as 'admin' | 'teacher' | 'student');
-        setIsAuthenticated(true);
+      <Login onLogin={() => {
         navigate('/dashboard', { replace: true });
       }} />
     );
   }
 
+  if (user.mustChangePassword) {
+    return <ForcePasswordChange />;
+  }
+
   return (
     <AdminLayout 
       onLogout={() => {
-        setIsAuthenticated(false);
         setUser(null);
         navigate('/', { replace: true });
       }}
       role={role}
-      setRole={setRole}
     >
       <Routes>
         {role === 'admin' && (
@@ -76,6 +77,7 @@ function AppContent() {
           <>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<TeacherDashboard />} />
+            <Route path="/classes" element={<TeacherClasses />} />
             <Route path="/quizzes" element={<TeacherQuizzes />} />
             <Route path="/students" element={<TeacherStudents />} />
             <Route path="/students/:id" element={<StudentProfile />} />

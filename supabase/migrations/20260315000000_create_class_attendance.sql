@@ -20,9 +20,14 @@ CREATE INDEX IF NOT EXISTS idx_ca_date       ON class_attendance(date);
 
 ALTER TABLE class_attendance ENABLE ROW LEVEL SECURITY;
 
+-- Grant permissions
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON class_attendance TO authenticated;
+
 DROP POLICY IF EXISTS "ca_select" ON class_attendance;
 DROP POLICY IF EXISTS "ca_insert" ON class_attendance;
 DROP POLICY IF EXISTS "ca_update" ON class_attendance;
+DROP POLICY IF EXISTS "ca_delete" ON class_attendance;
 
 -- Students see their own; teachers see their classes; admins see all
 CREATE POLICY "ca_select" ON class_attendance FOR SELECT
@@ -59,6 +64,12 @@ CREATE POLICY "ca_update" ON class_attendance FOR UPDATE
       WHERE classes.id = class_attendance.class_id
         AND classes.teacher_id = auth.uid()
     )
+  );
+
+-- Only admins can DELETE
+CREATE POLICY "ca_delete" ON class_attendance FOR DELETE
+  USING (
+    (SELECT role FROM profiles WHERE id = auth.uid()) = 'admin'
   );
 
 NOTIFY pgrst, 'reload schema';

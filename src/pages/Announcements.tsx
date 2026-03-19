@@ -25,7 +25,7 @@ const ADMIN_AUDIENCES: { value: AudienceType; label: string; Icon: React.Element
   { value: 'students',         label: 'All Students', Icon: GraduationCap },
   { value: 'teachers',         label: 'All Teachers', Icon: BookOpen },
   { value: 'admins',           label: 'All Admins',   Icon: Shield },
-  { value: 'program_specific', label: 'By Program',   Icon: Layers },
+  { value: 'program_specific', label: 'By Degree',    Icon: Layers },
   { value: 'class_specific',   label: 'By Class',     Icon: Users },
 ];
 
@@ -34,7 +34,7 @@ function audienceLabel(ann: Announcement) {
   if (ann.audience === 'students')         return 'All Students';
   if (ann.audience === 'teachers')         return 'All Teachers';
   if (ann.audience === 'admins')           return 'All Admins';
-  if (ann.audience === 'program_specific') return ann.program ? `Program: ${ann.program}` : 'By Program';
+  if (ann.audience === 'program_specific') return ann.program ? `Degree: ${ann.program}` : 'By Degree';
   if (ann.audience === 'class_specific')   return ann.className ? `Class: ${ann.className}` : 'By Class';
   return ann.audience;
 }
@@ -81,7 +81,7 @@ export default function Announcements({ role }: { role: Role }) {
     e.preventDefault();
     if (!form.audience) { setSubmitError('Please select a target audience.'); return; }
     if (form.audience === 'class_specific' && !form.classId) { setSubmitError('Please select a class.'); return; }
-    if (form.audience === 'program_specific' && !form.programId) { setSubmitError('Please select a program.'); return; }
+    if (form.audience === 'program_specific' && !form.programId) { setSubmitError('Please select a degree.'); return; }
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -334,16 +334,16 @@ export default function Announcements({ role }: { role: Role }) {
             )}
           </div>
 
-          {/* Program picker */}
+          {/* Degree picker */}
           {form.audience === 'program_specific' && (
             <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Program</label>
+              <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Degree</label>
               <select
                 value={form.programId}
                 onChange={e => setForm(f => ({ ...f, programId: e.target.value }))}
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40 transition-all appearance-none"
               >
-                <option value="">Select a program…</option>
+                <option value="">Select a degree…</option>
                 {availablePrograms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>

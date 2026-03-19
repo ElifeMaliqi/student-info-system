@@ -6,9 +6,10 @@ interface SlideOverProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  side?: 'left' | 'right';
 }
 
-export function SlideOver({ isOpen, onClose, title, children }: SlideOverProps) {
+export function SlideOver({ isOpen, onClose, title, children, side = 'right' }: SlideOverProps) {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -21,11 +22,13 @@ export function SlideOver({ isOpen, onClose, title, children }: SlideOverProps) 
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
           />
           <motion.div
-            initial={{ x: '100%' }}
+            initial={{ x: side === 'right' ? '100%' : '-100%' }}
             animate={{ x: 0 }}
-            exit={{ x: '100%' }}
+            exit={{ x: side === 'right' ? '100%' : '-100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed top-0 right-0 h-full w-full sm:w-[400px] md:w-[500px] bg-[#141414] border-l border-white/10 shadow-2xl z-50 flex flex-col"
+            className={`fixed top-0 h-full w-full sm:w-[400px] md:w-[500px] bg-[#141414] shadow-2xl z-50 flex flex-col ${
+              side === 'right' ? 'right-0 border-l border-white/10' : 'left-0 border-r border-white/10'
+            }`}
           >
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10 bg-[#0a0a0a]">
               <h2 className="font-display text-xl font-medium text-white">{title}</h2>

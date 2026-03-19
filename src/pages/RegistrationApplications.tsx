@@ -176,10 +176,22 @@ export default function RegistrationApplications() {
                           {app.phone}
                         </div>
                       )}
+                      {app.secondaryPhone && (
+                        <div className="flex items-center gap-2 text-white/60">
+                          <Phone className="w-4 h-4" />
+                          {app.secondaryPhone}
+                        </div>
+                      )}
                       {app.program && (
                         <div className="flex items-center gap-2 text-white/60">
                           <FileText className="w-4 h-4" />
                           {app.program}
+                        </div>
+                      )}
+                      {app.location && (
+                        <div className="flex items-center gap-2 text-white/60">
+                          <MapPin className="w-4 h-4" />
+                          {app.location}
                         </div>
                       )}
                     </div>
@@ -269,6 +281,24 @@ export default function RegistrationApplications() {
                     {t('students.phone')}
                   </label>
                   <p className="text-white">{selectedApp.phone}</p>
+                </div>
+              )}
+
+              {selectedApp.secondaryPhone && (
+                <div>
+                  <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
+                    Secondary Phone
+                  </label>
+                  <p className="text-white">{selectedApp.secondaryPhone}</p>
+                </div>
+              )}
+
+              {selectedApp.location && (
+                <div>
+                  <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
+                    Location
+                  </label>
+                  <p className="text-white">{selectedApp.location}</p>
                 </div>
               )}
 

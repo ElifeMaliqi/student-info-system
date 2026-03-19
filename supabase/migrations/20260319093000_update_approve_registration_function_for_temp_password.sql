@@ -1,27 +1,8 @@
 /*
-  # Create approve_registration_application RPC function
-
-  Replaces the Edge Function (which required deployment) with a server-side
-  PostgreSQL function using SECURITY DEFINER. This function runs with elevated
-  privileges (as the postgres superuser), allowing it to directly create auth
-  users and profile records in a single atomic transaction.
-
-  1. Enables pgcrypto for bcrypt password hashing
-  2. Creates approve_registration_application(application_id UUID) → JSON
-     - Verifies caller is an admin via auth.uid()
-     - Hashes the stored password with bcrypt (compatible with Supabase auth)
-     - Inserts directly into auth.users
-     - Creates the profile record
-     - Creates student or teacher records as appropriate
-     - Marks the application as approved
-  3. Grants EXECUTE to authenticated role (internal admin check handles authz)
+  Update approve_registration_application to:
+  - copy location + secondary_phone into profiles
+  - set must_change_password when temporary password is used
 */
-
--- Enable pgcrypto for bcrypt password hashing
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
--- Drop existing function if present (idempotent)
-DROP FUNCTION IF EXISTS public.approve_registration_application(UUID);
 
 CREATE OR REPLACE FUNCTION public.approve_registration_application(application_id UUID)
 RETURNS JSON
@@ -34,14 +15,12 @@ DECLARE
   new_user_id UUID;
   prog_id     UUID;
 BEGIN
-  -- ── 1. Authorization: caller must be an admin ──────────────────────────────
   IF NOT EXISTS (
     SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
   ) THEN
     RAISE EXCEPTION 'Only admins can approve registrations';
   END IF;
 
-  -- ── 2. Fetch the application ───────────────────────────────────────────────
   SELECT * INTO app
   FROM registration_applications
   WHERE id = application_id;
@@ -54,16 +33,12 @@ BEGIN
     RAISE EXCEPTION 'Application is already %', app.status;
   END IF;
 
-  -- ── 3. Guard: email must not already exist in profiles ────────────────────
   IF EXISTS (SELECT 1 FROM profiles WHERE email = app.email) THEN
     RAISE EXCEPTION 'A user with this email already exists';
   END IF;
 
-  -- ── 4. Generate new UUID for the auth user ────────────────────────────────
   new_user_id := gen_random_uuid();
 
-  -- ── 5. Create the Supabase auth user directly ─────────────────────────────
-  --      encrypted_password uses bcrypt (compatible with gotrue/Supabase auth)
   INSERT INTO auth.users (
     id,
     instance_id,
@@ -98,9 +73,6 @@ BEGIN
     ''
   );
 
-  -- ── 6. Create the public profile record ───────────────────────────────────
-  -- Use ON CONFLICT DO UPDATE because Supabase may have a trigger on auth.users
-  -- that auto-inserts a bare profiles row before we get here.
   INSERT INTO profiles (
     id,
     email,
@@ -168,9 +140,7 @@ BEGIN
     id_document_url         = EXCLUDED.id_document_url,
     program                 = EXCLUDED.program;
 
-  -- ── 7. Role-specific records ───────────────────────────────────────────────
   IF app.role = 'student' THEN
-    -- Resolve program id (optional)
     IF app.program IS NOT NULL THEN
       SELECT id INTO prog_id
       FROM programs
@@ -202,7 +172,6 @@ BEGIN
   END IF;
 
   IF app.role = 'teacher' THEN
-    -- Resolve program id (optional)
     IF app.program IS NOT NULL THEN
       SELECT id INTO prog_id
       FROM programs
@@ -217,7 +186,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- ── 8. Mark application as approved ───────────────────────────────────────
   UPDATE registration_applications
   SET
     status      = 'approved',
@@ -229,6 +197,6 @@ BEGIN
 END;
 $$;
 
--- Allow any authenticated user to call this function;
--- the SECURITY DEFINER body enforces admin-only access internally.
 GRANT EXECUTE ON FUNCTION public.approve_registration_application(UUID) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';

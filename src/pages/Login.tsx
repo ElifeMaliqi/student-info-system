@@ -7,8 +7,7 @@ import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
 
-export default function Login({ onLogin }: { onLogin: (role: string) => void }) {
-  const [role, setRole] = useState<'student' | 'teacher' | 'admin'>('admin');
+export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isHoveringBtn, setIsHoveringBtn] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
@@ -20,7 +19,7 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
@@ -38,9 +37,13 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
     }
 
     try {
-      const result = await api.auth.login(email, password, role);
-      setUser(result.user);
-      onLogin(role);
+      const result = await api.auth.login(email, password);
+      setUser({
+        ...result.user,
+        // Fallback enforcement while DB migration / RPC rollout catches up.
+        mustChangePassword: !!result.user.mustChangePassword || password === 'FMA#2026',
+      });
+      onLogin();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
@@ -137,22 +140,7 @@ export default function Login({ onLogin }: { onLogin: (role: string) => void }) 
                 </div>
 
                 <div className="glass-panel p-6 lg:p-8 rounded-[2rem] shadow-2xl shadow-black/50">
-                  {/* Role Selector */}
-                  <div className="flex p-1 bg-white/5 rounded-2xl mb-6 lg:mb-8 border border-white/5">
-                    {(['student', 'teacher', 'admin'] as const).map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => setRole(r)}
-                        className={`flex-1 py-2 lg:py-2.5 text-[10px] lg:text-[11px] font-semibold uppercase tracking-widest rounded-xl transition-all duration-300 ${
-                          role === r 
-                            ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white shadow-lg' 
-                            : 'text-white/40 hover:text-white/80'
-                        }`}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                  </div>
+
 
                   <form className="space-y-4 lg:space-y-5" onSubmit={handleLogin}>
                     {error && (

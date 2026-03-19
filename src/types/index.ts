@@ -7,6 +7,7 @@ export interface User {
   lastName: string;
   role: Role;
   avatar?: string;
+  mustChangePassword?: boolean;
 }
 
 export interface Student {
@@ -119,8 +120,10 @@ export interface RegistrationApplication {
   passwordHash: string;
   role: 'teacher' | 'student';
   program?: string;
+  location?: string;
   parentFirstName?: string;
   phone?: string;
+  secondaryPhone?: string;
   dateOfBirth?: string;
   address?: string;
   city?: string;
