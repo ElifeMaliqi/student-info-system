@@ -341,7 +341,7 @@ export default function Announcements({ role }: { role: Role }) {
               <select
                 value={form.programId}
                 onChange={e => setForm(f => ({ ...f, programId: e.target.value }))}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40 transition-all appearance-none"
+                className="glass-select w-full px-4 py-2.5 rounded-xl text-sm"
               >
                 <option value="">Select a degree…</option>
                 {availablePrograms.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -359,7 +359,7 @@ export default function Announcements({ role }: { role: Role }) {
                 <select
                   value={form.classId}
                   onChange={e => setForm(f => ({ ...f, classId: e.target.value }))}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40 transition-all appearance-none"
+                  className="glass-select w-full px-4 py-2.5 rounded-xl text-sm"
                 >
                   <option value="">Select a class…</option>
                   {availableClasses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}

@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment } from '../types';
+import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -380,6 +380,289 @@ export const api = {
     }
   },
 
+  gradeTables: {
+    /** Get all grade tables for a teacher, with their entries */
+    getAll: async (teacherId: string): Promise<GradeTable[]> => {
+      const { data, error } = await supabase
+        .from('grade_tables')
+        .select(`
+          *,
+          class:classes!grade_tables_class_id_fkey(title),
+          teacher:profiles!grade_tables_teacher_id_fkey(first_name, last_name),
+          entries:grade_table_entries(
+            id,
+            student_id,
+            total_points,
+            passed,
+            graded_at,
+            note,
+            student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, avatar_url)
+          )
+        `)
+        .eq('teacher_id', teacherId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        classId: t.class_id,
+        className: t.class?.title || 'Unknown',
+        teacherId: t.teacher_id,
+        teacherName: t.teacher ? `${t.teacher.first_name} ${t.teacher.last_name}` : 'Unknown',
+        degree: t.degree || '',
+        createdAt: formatDate(t.created_at),
+        entries: (t.entries || []).map((e: any) => ({
+          id: e.id,
+          gradeTableId: t.id,
+          studentId: e.student_id,
+          studentName: e.student ? `${e.student.first_name} ${e.student.last_name}` : 'Unknown',
+          avatar: e.student?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student_id}`,
+          className: t.class?.title || 'Unknown',
+          totalPoints: e.total_points != null ? parseFloat(e.total_points) : null,
+          passed: e.passed,
+          gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
+          note: e.note || null,
+          attendanceRate: null,
+          previousFailedExams: 0,
+        })),
+      }));
+    },
+
+    /** Get ALL grade tables across all teachers (admin view) */
+    getAllAdmin: async (): Promise<GradeTable[]> => {
+      const { data, error } = await supabase
+        .from('grade_tables')
+        .select(`
+          *,
+          class:classes!grade_tables_class_id_fkey(title),
+          teacher:profiles!grade_tables_teacher_id_fkey(first_name, last_name),
+          entries:grade_table_entries(
+            id,
+            student_id,
+            total_points,
+            passed,
+            graded_at,
+            note,
+            student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, avatar_url)
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        classId: t.class_id,
+        className: t.class?.title || 'Unknown',
+        teacherId: t.teacher_id,
+        teacherName: t.teacher ? `${t.teacher.first_name} ${t.teacher.last_name}` : 'Unknown',
+        degree: t.degree || '',
+        createdAt: formatDate(t.created_at),
+        entries: (t.entries || []).map((e: any) => ({
+          id: e.id,
+          gradeTableId: t.id,
+          studentId: e.student_id,
+          studentName: e.student ? `${e.student.first_name} ${e.student.last_name}` : 'Unknown',
+          avatar: e.student?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student_id}`,
+          className: t.class?.title || 'Unknown',
+          totalPoints: e.total_points != null ? parseFloat(e.total_points) : null,
+          passed: e.passed,
+          gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
+          note: e.note || null,
+          attendanceRate: null,
+          previousFailedExams: 0,
+        })),
+      }));
+    },
+
+    /** Get grade tables for a specific class */
+    getForClass: async (classId: string): Promise<GradeTable[]> => {
+      const { data, error } = await supabase
+        .from('grade_tables')
+        .select(`
+          *,
+          class:classes!grade_tables_class_id_fkey(title),
+          teacher:profiles!grade_tables_teacher_id_fkey(first_name, last_name),
+          entries:grade_table_entries(
+            id,
+            student_id,
+            total_points,
+            passed,
+            graded_at,
+            note,
+            student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, avatar_url)
+          )
+        `)
+        .eq('class_id', classId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        classId: t.class_id,
+        className: t.class?.title || 'Unknown',
+        teacherId: t.teacher_id,
+        teacherName: t.teacher ? `${t.teacher.first_name} ${t.teacher.last_name}` : 'Unknown',
+        degree: t.degree || '',
+        createdAt: formatDate(t.created_at),
+        entries: (t.entries || []).map((e: any) => ({
+          id: e.id,
+          gradeTableId: t.id,
+          studentId: e.student_id,
+          studentName: e.student ? `${e.student.first_name} ${e.student.last_name}` : 'Unknown',
+          avatar: e.student?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${e.student_id}`,
+          className: t.class?.title || 'Unknown',
+          totalPoints: e.total_points != null ? parseFloat(e.total_points) : null,
+          passed: e.passed,
+          gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
+          note: e.note || null,
+          attendanceRate: null,
+          previousFailedExams: 0,
+        })),
+      }));
+    },
+
+    /** Create a grade table with student entries */
+    create: async (name: string, classId: string, studentIds: string[], degree?: string): Promise<void> => {
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData.user) throw new Error('Not authenticated');
+
+      const { data: table, error: tableErr } = await supabase
+        .from('grade_tables')
+        .insert({ name, class_id: classId, teacher_id: authData.user.id, degree: degree || null })
+        .select('id')
+        .single();
+
+      if (tableErr) throw new Error(tableErr.message);
+
+      const entries = studentIds.map(sid => ({
+        grade_table_id: table.id,
+        student_id: sid,
+      }));
+
+      const { error: entryErr } = await supabase
+        .from('grade_table_entries')
+        .insert(entries);
+
+      if (entryErr) throw new Error(entryErr.message);
+    },
+
+    /** Grade a single student entry */
+    gradeStudent: async (entryId: string, totalPoints: number, passed: boolean, note?: string): Promise<void> => {
+      const { data: authData } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('grade_table_entries')
+        .update({
+          total_points: totalPoints,
+          passed,
+          graded_at: new Date().toISOString(),
+          graded_by: authData.user?.id,
+          note: note || null,
+        })
+        .eq('id', entryId);
+
+      if (error) throw new Error(error.message);
+    },
+
+    /** Delete a grade table and all its entries */
+    delete: async (tableId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('grade_tables')
+        .delete()
+        .eq('id', tableId);
+
+      if (error) throw new Error(error.message);
+    },
+
+    /** Enrich entries with attendance & previous failed exams data */
+    enrichEntries: async (entries: GradeTableEntry[], classId: string): Promise<GradeTableEntry[]> => {
+      if (entries.length === 0) return entries;
+
+      const studentIds = entries.map(e => e.studentId);
+
+      // Attendance for this class
+      const { data: attData } = await supabase
+        .from('class_attendance')
+        .select('student_id, status')
+        .eq('class_id', classId)
+        .in('student_id', studentIds);
+
+      const attMap: Record<string, { total: number; present: number }> = {};
+      (attData || []).forEach((r: any) => {
+        if (!attMap[r.student_id]) attMap[r.student_id] = { total: 0, present: 0 };
+        attMap[r.student_id].total++;
+        if (r.status === 'present' || r.status === 'late') attMap[r.student_id].present++;
+      });
+
+      // Previous failed exams (from other grade tables)
+      const { data: failData } = await supabase
+        .from('grade_table_entries')
+        .select('student_id')
+        .in('student_id', studentIds)
+        .eq('passed', false);
+
+      const failMap: Record<string, number> = {};
+      (failData || []).forEach((r: any) => {
+        failMap[r.student_id] = (failMap[r.student_id] || 0) + 1;
+      });
+
+      return entries.map(e => ({
+        ...e,
+        attendanceRate: attMap[e.studentId]
+          ? Math.round((attMap[e.studentId].present / attMap[e.studentId].total) * 100)
+          : null,
+        previousFailedExams: failMap[e.studentId] || 0,
+      }));
+    },
+
+    /** Get all grade table entries for a specific student (for profile/student view) */
+    getForStudent: async (studentId: string): Promise<{
+      tableName: string;
+      className: string;
+      teacherName: string;
+      degree: string;
+      totalPoints: number | null;
+      passed: boolean | null;
+      gradedAt: string | null;
+      note: string | null;
+    }[]> => {
+      const { data, error } = await supabase
+        .from('grade_table_entries')
+        .select(`
+          total_points,
+          passed,
+          graded_at,
+          note,
+          grade_table:grade_tables!grade_table_entries_grade_table_id_fkey(
+            name,
+            degree,
+            class:classes!grade_tables_class_id_fkey(title),
+            teacher:profiles!grade_tables_teacher_id_fkey(first_name, last_name)
+          )
+        `)
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((e: any) => ({
+        tableName: e.grade_table?.name || 'Unknown',
+        className: e.grade_table?.class?.title || 'Unknown',
+        teacherName: e.grade_table?.teacher ? `${e.grade_table.teacher.first_name} ${e.grade_table.teacher.last_name}` : 'Unknown',
+        degree: e.grade_table?.degree || '',
+        totalPoints: e.total_points != null ? parseFloat(e.total_points) : null,
+        passed: e.passed,
+        gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
+        note: e.note || null,
+      }));
+    },
+  },
+
   announcements: {
     getAll: async (role: Role, userId: string): Promise<Announcement[]> => {
       // Pre-fetch role-specific IDs for client-side audience filtering.
@@ -532,9 +815,10 @@ export const api = {
       const studentIds = new Set<string>();
 
       // Add students from programs
-      (programData || []).forEach(tp => {
-        if (tp.program?.students) {
-          tp.program.students.forEach((s: any) => {
+      (programData || []).forEach((tp: any) => {
+        const programObj = Array.isArray(tp.program) ? tp.program[0] : tp.program;
+        if (programObj?.students) {
+          programObj.students.forEach((s: any) => {
             const sid = s.id;
             if (!studentIds.has(sid)) {
               studentIds.add(sid);
@@ -542,7 +826,7 @@ export const api = {
                 id: s.student_id || `STU-${s.id.slice(0, 8)}`,
                 name: s.user ? `${s.user.first_name} ${s.user.last_name}` : 'Unknown',
                 email: s.user?.email || '',
-                program: tp.program?.name || 'No Program',
+                program: programObj?.name || 'No Program',
                 status: statusMap[s.status] || 'Active',
                 date: formatDate(s.enrollment_date || s.created_at),
                 avatar: s.user?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.id}`
@@ -1492,74 +1776,7 @@ export const api = {
         .select('class_id, student_id, status, date')
         .order('date', { ascending: false });
       if (attError) throw new Error(attError.message);
-      if (!attData || attData.length === 0) {
-        // Legacy fallback: build sessions from attendance table so admin page still shows data.
-        const { data: legacyRows, error: legacyErr } = await supabase
-          .from('attendance')
-          .select('student_id, status, date')
-          .order('date', { ascending: false });
-        if (legacyErr) throw new Error(legacyErr.message);
-        if (!legacyRows || legacyRows.length === 0) return [];
-
-        const legacyStudentIds = [...new Set((legacyRows || []).map((r: any) => r.student_id))];
-        const { data: studentRows, error: studentRowsErr } = await supabase
-          .from('students')
-          .select('id, user_id, user:profiles!students_user_id_fkey(id, first_name, last_name, avatar_url)')
-          .in('id', legacyStudentIds);
-        if (studentRowsErr) throw new Error(studentRowsErr.message);
-
-        const legacyStudentMap = new Map((studentRows || []).map((s: any) => [
-          s.id,
-          {
-            id: s.user?.id || s.user_id,
-            name: s.user ? `${s.user.first_name} ${s.user.last_name}` : 'Unknown',
-            avatar: s.user?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.user_id}`,
-          },
-        ]));
-
-        const groupedLegacy: Record<string, {
-          classId: string;
-          className: string;
-          teacherName: string;
-          date: string;
-          records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[];
-        }> = {};
-
-        (legacyRows || []).forEach((r: any) => {
-          const key = `legacy::${r.date}`;
-          if (!groupedLegacy[key]) {
-            groupedLegacy[key] = {
-              classId: 'legacy',
-              className: 'General Attendance',
-              teacherName: 'Legacy',
-              date: r.date,
-              records: [],
-            };
-          }
-
-          const student = legacyStudentMap.get(r.student_id) || {
-            id: r.student_id,
-            name: 'Unknown',
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.student_id}`,
-          };
-
-          groupedLegacy[key].records.push({
-            studentId: student.id,
-            studentName: student.name,
-            avatar: student.avatar,
-            status: r.status,
-          });
-        });
-
-        return Object.values(groupedLegacy)
-          .map(g => ({
-            ...g,
-            present: g.records.filter(r => r.status === 'present').length,
-            absent: g.records.filter(r => r.status === 'absent').length,
-            late: g.records.filter(r => r.status === 'late').length,
-          }))
-          .sort((a, b) => b.date.localeCompare(a.date));
-      }
+      if (!attData || attData.length === 0) return [];
 
       // Get unique class IDs and student IDs
       const classIds = [...new Set((attData || []).map((r: any) => r.class_id))];
@@ -1629,6 +1846,52 @@ export const api = {
         .sort((a, b) => b.date.localeCompare(a.date));
     },
 
+    /** Attendance sessions for a specific class, newest first. */
+    getSessionsForClass: async (classId: string): Promise<{
+      classId: string;
+      className: string;
+      date: string;
+      present: number;
+      absent: number;
+      late: number;
+    }[]> => {
+      const { data: classRow, error: classErr } = await supabase
+        .from('classes')
+        .select('id, title')
+        .eq('id', classId)
+        .maybeSingle();
+      if (classErr) throw new Error(classErr.message);
+
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('date, status')
+        .eq('class_id', classId)
+        .order('date', { ascending: false });
+
+      if (error) throw new Error(error.message);
+
+      const className = classRow?.title || 'Unknown';
+      const grouped: Record<string, { present: number; absent: number; late: number }> = {};
+      (data || []).forEach((r: any) => {
+        if (!grouped[r.date]) grouped[r.date] = { present: 0, absent: 0, late: 0 };
+        if (r.status === 'present') grouped[r.date].present++;
+        else if (r.status === 'absent') grouped[r.date].absent++;
+        else if (r.status === 'late') grouped[r.date].late++;
+      });
+
+      const rows = Object.entries(grouped)
+        .map(([date, c]) => ({
+          classId,
+          className,
+          date,
+          present: c.present,
+          absent: c.absent,
+          late: c.late,
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+      return rows;
+    },
+
     /** Today's total present/absent/late counts across all classes. */
     getTodayCounts: async (): Promise<{ present: number; absent: number; late: number }> => {
       const today = new Date().toISOString().split('T')[0];
@@ -1666,6 +1929,7 @@ export const api = {
         else if (r.status === 'late')    summary[r.student_id].late++;
         else if (r.status === 'absent')  summary[r.student_id].absent++;
       });
+
       return summary;
     },
   },

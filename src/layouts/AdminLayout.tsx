@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
-  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays
+  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -54,6 +54,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'registrations', label: 'Registrations', icon: UserPlus },
     { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
+    { id: 'grades', label: t('nav.grades'), icon: ClipboardList },
     { id: 'finance', label: t('nav.finance'), icon: CreditCard },
     { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
   ];
@@ -61,7 +62,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const teacherNavItems = [
     { id: 'dashboard',     label: t('nav.dashboard'),     icon: LayoutDashboard },
     { id: 'classes',       label: 'My Classes',           icon: BookOpen        },
-    { id: 'quizzes',       label: t('nav.quizzes'),       icon: CalendarCheck   },
+    { id: 'grading',       label: 'Grading',              icon: ClipboardList   },
     { id: 'students',      label: t('nav.my_students'),   icon: Users           },
     { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays    },
     { id: 'announcements', label: t('nav.announcements'), icon: Megaphone       },
@@ -69,7 +70,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
 
   const studentNavItems = [
     { id: 'dashboard',     label: t('nav.my_portal'),      icon: LayoutDashboard },
-    { id: 'grades',        label: t('nav.grades'),         icon: CalendarCheck   },
+    { id: 'grades',        label: t('nav.grades'),         icon: ClipboardList   },
+    { id: 'attendance',    label: t('nav.attendance'),     icon: CalendarCheck   },
     { id: 'invoices',      label: t('nav.invoices'),       icon: CreditCard      },
     { id: 'calendar',      label: t('nav.calendar'),       icon: CalendarDays    },
     { id: 'announcements', label: t('nav.announcements'),  icon: Megaphone       },

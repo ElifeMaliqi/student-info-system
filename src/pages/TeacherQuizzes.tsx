@@ -1,20 +1,37 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FileText, Plus, CheckCircle, Clock, CalendarCheck, Search, Filter, X } from 'lucide-react';
+import { FileText, Plus, CheckCircle, Clock, CalendarCheck, Search, Filter, X, Loader2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-
-const QUIZZES = [
-  { id: 'QZ-101', title: 'UI/UX Fundamentals Midterm', program: 'UI/UX Creative Designer', submissions: '24/28', date: 'Feb 20, 2026', status: 'Grading', type: 'Quiz' },
-  { id: 'QZ-102', title: 'Component Architecture', program: 'Web Development', submissions: '18/18', date: 'Feb 15, 2026', status: 'Completed', type: 'Assignment' },
-  { id: 'QZ-103', title: 'Cybersecurity Basics', program: 'Cybersecurity', submissions: '0/32', date: 'Feb 25, 2026', status: 'Scheduled', type: 'Quiz' },
-  { id: 'EV-001', title: 'Guest Lecture: AI in Design', program: 'All Degrees', submissions: '-', date: 'Mar 01, 2026', status: 'Scheduled', type: 'Event' },
-  { id: 'AS-002', title: 'Final Project Phase 1', program: 'UI/UX Creative Designer', submissions: '28/28', date: 'Jan 28, 2026', status: 'Completed', type: 'Assignment' },
-];
+import { useUser } from '../context/UserContext';
+import { api } from '../services/api';
+import type { Quiz } from '../types';
 
 export default function TeacherQuizzes() {
   const [view, setView] = useState<'list' | 'create'>('list');
   const [gradingQuiz, setGradingQuiz] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const { t } = useLanguage();
+  const { user } = useUser();
+
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    api.teacher.getQuizzes(user.id)
+      .then(setQuizzes)
+      .catch(() => setQuizzes([]))
+      .finally(() => setLoading(false));
+  }, [user]);
+
+  const filteredQuizzes = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return quizzes;
+    return quizzes.filter(quiz =>
+      quiz.title.toLowerCase().includes(q) ||
+      quiz.program.toLowerCase().includes(q)
+    );
+  }, [quizzes, search]);
 
   if (view === 'create') {
     return (
@@ -115,6 +132,8 @@ export default function TeacherQuizzes() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
             <input 
               type="text" 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="Search quizzes and events..." 
               className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
             />
@@ -139,7 +158,18 @@ export default function TeacherQuizzes() {
               </tr>
             </thead>
             <tbody className="text-sm">
-              {QUIZZES.map((quiz) => (
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-white/40">
+                    <Loader2 className="w-5 h-5 animate-spin inline mr-2" />
+                    Loading quizzes...
+                  </td>
+                </tr>
+              ) : filteredQuizzes.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-white/40">No quizzes found.</td>
+                </tr>
+              ) : filteredQuizzes.map((quiz) => (
                 <tr key={quiz.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
                   <td className="py-4">
                     <div className="font-medium text-white/90 group-hover:text-white transition-colors">{quiz.title}</div>
@@ -147,7 +177,7 @@ export default function TeacherQuizzes() {
                   </td>
                   <td className="py-4 text-white/60">
                     <span className="inline-flex items-center px-2 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border bg-white/5 text-white/60 border-white/10">
-                      {quiz.type}
+                      Quiz
                     </span>
                   </td>
                   <td className="py-4 font-medium text-white/90">{quiz.submissions}</td>

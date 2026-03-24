@@ -1,18 +1,16 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, Mail, Lock, Fingerprint, Sparkles } from 'lucide-react';
-import StudentWaitingPage from './StudentWaitingPage';
-import PublicRegistration from './PublicRegistration';
+import { motion } from 'motion/react';
+import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
+import { useNavigate } from 'react-router-dom';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isHoveringBtn, setIsHoveringBtn] = useState(false);
-  const [isApplying, setIsApplying] = useState(false);
-  const [isWaiting, setIsWaiting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { setUser } = useUser();
+  const navigate = useNavigate();
 
   // Form State
   const [email, setEmail] = useState('');
@@ -50,14 +48,6 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       setIsLoading(false);
     }
   };
-
-  if (isWaiting) {
-    return <StudentWaitingPage onBack={() => { setIsWaiting(false); setIsApplying(false); }} />;
-  }
-
-  if (isApplying) {
-    return <PublicRegistration onBack={() => setIsApplying(false)} />;
-  }
 
   return (
     <div className="min-h-screen w-full flex flex-col lg:flex-row bg-[#050505] selection:bg-white/20 font-sans">
@@ -218,7 +208,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">
               <p className="text-sm text-white/40">
                 Don't have an account?{' '}
-                <button onClick={() => setIsApplying(true)} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
+                <button onClick={() => navigate('/register')} className="text-white font-medium hover:text-[#fc0ce4] hover:underline underline-offset-4 transition-all">
                   Apply for Admission
                 </button>
               </p>

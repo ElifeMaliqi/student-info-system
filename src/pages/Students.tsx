@@ -12,7 +12,7 @@ import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
-import { AttendanceRecord, Grade } from '../types';
+import { AttendanceRecord } from '../types';
 
 type AdminStudent = {
   id: string;
@@ -114,10 +114,26 @@ export default function Students() {
   } | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState('');
-  const [insightGrades, setInsightGrades] = useState<Grade[]>([]);
+  const [insightGrades, setInsightGrades] = useState<{
+    tableName: string;
+    className: string;
+    teacherName: string;
+    degree: string;
+    totalPoints: number | null;
+    passed: boolean | null;
+    gradedAt: string | null;
+    note: string | null;
+  }[]>([]);
   const [insightAttendance, setInsightAttendance] = useState<AttendanceRecord[]>([]);
   const [insightPayments, setInsightPayments] = useState<any[]>([]);
   const [insightInvoices, setInsightInvoices] = useState<any[]>([]);
+
+  // Grade filters
+  const [gradeFilterClass, setGradeFilterClass] = useState('');
+  const [gradeFilterDegree, setGradeFilterDegree] = useState('');
+  const [gradeFilterStatus, setGradeFilterStatus] = useState('');
+  const [gradeFilterMonth, setGradeFilterMonth] = useState('');
+  const [gradeFilterYear, setGradeFilterYear] = useState('');
 
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { t } = useLanguage();
@@ -361,8 +377,13 @@ export default function Students() {
 
     try {
       if (type === 'grades') {
-        const data = await api.grades.getAll(selectedStudentForPanel.id);
+        const data = await api.gradeTables.getForStudent(selectedStudentForPanel.id);
         setInsightGrades(data);
+        setGradeFilterClass('');
+        setGradeFilterDegree('');
+        setGradeFilterStatus('');
+        setGradeFilterMonth('');
+        setGradeFilterYear('');
       } else if (type === 'attendance') {
         const data = await api.attendance.getAll(selectedStudentForPanel.id);
         setInsightAttendance(data);
@@ -1087,19 +1108,112 @@ export default function Students() {
                   )}
 
                   {!insightLoading && !insightError && insightPanel.type === 'grades' && (
-                    <div className="space-y-2">
-                      {insightGrades.length === 0 ? (
-                        <p className="text-sm text-white/50">No grades found.</p>
-                      ) : insightGrades.map((g) => (
-                        <div key={g.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-white">{g.assignment}</p>
-                            <span className="text-xs text-white/60">{g.date}</span>
+                    <div className="space-y-4">
+                      {/* Filters */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <select
+                          value={gradeFilterClass}
+                          onChange={e => setGradeFilterClass(e.target.value)}
+                          className="glass-select text-xs"
+                        >
+                          <option value="">All Classes</option>
+                          {[...new Set(insightGrades.map(g => g.className))].map(c => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={gradeFilterDegree}
+                          onChange={e => setGradeFilterDegree(e.target.value)}
+                          className="glass-select text-xs"
+                        >
+                          <option value="">All Degrees</option>
+                          {[...new Set(insightGrades.map(g => g.degree).filter(Boolean))].map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={gradeFilterStatus}
+                          onChange={e => setGradeFilterStatus(e.target.value)}
+                          className="glass-select text-xs"
+                        >
+                          <option value="">All Status</option>
+                          <option value="passed">Passed</option>
+                          <option value="failed">Failed</option>
+                          <option value="ungraded">Not Graded</option>
+                        </select>
+                        <select
+                          value={gradeFilterMonth}
+                          onChange={e => setGradeFilterMonth(e.target.value)}
+                          className="glass-select text-xs"
+                        >
+                          <option value="">All Months</option>
+                          {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
+                            <option key={m} value={String(i)}>{m}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={gradeFilterYear}
+                          onChange={e => setGradeFilterYear(e.target.value)}
+                          className="glass-select text-xs"
+                        >
+                          <option value="">All Years</option>
+                          {[...new Set(insightGrades.map(g => g.gradedAt ? new Date(g.gradedAt).getFullYear() : null).filter(Boolean))].sort((a, b) => (b as number) - (a as number)).map(y => (
+                            <option key={y} value={String(y)}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Results */}
+                      {(() => {
+                        const filtered = insightGrades.filter(g => {
+                          if (gradeFilterClass && g.className !== gradeFilterClass) return false;
+                          if (gradeFilterDegree && g.degree !== gradeFilterDegree) return false;
+                          if (gradeFilterStatus === 'passed' && g.passed !== true) return false;
+                          if (gradeFilterStatus === 'failed' && g.passed !== false) return false;
+                          if (gradeFilterStatus === 'ungraded' && g.passed !== null) return false;
+                          if (gradeFilterMonth && g.gradedAt) {
+                            if (new Date(g.gradedAt).getMonth() !== parseInt(gradeFilterMonth)) return false;
+                          } else if (gradeFilterMonth && !g.gradedAt) return false;
+                          if (gradeFilterYear && g.gradedAt) {
+                            if (new Date(g.gradedAt).getFullYear() !== parseInt(gradeFilterYear)) return false;
+                          } else if (gradeFilterYear && !g.gradedAt) return false;
+                          return true;
+                        });
+
+                        if (filtered.length === 0) {
+                          return <p className="text-sm text-white/50 py-4 text-center">No grades found.</p>;
+                        }
+
+                        return (
+                          <div className="space-y-2">
+                            <p className="text-xs text-white/40">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</p>
+                            {filtered.map((g, i) => (
+                              <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <p className="text-sm font-medium text-white">{g.tableName}</p>
+                                  {g.passed === true && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">Passed</span>
+                                  )}
+                                  {g.passed === false && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 font-medium">Failed</span>
+                                  )}
+                                  {g.passed == null && (
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white/5 text-white/30 border border-white/10">Not Graded</span>
+                                  )}
+                                </div>
+                                <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-white/50 mt-1">
+                                  <span>{g.className}</span>
+                                  {g.degree && <span>{g.degree}</span>}
+                                  <span>{g.teacherName}</span>
+                                  {g.totalPoints != null && <span>{g.totalPoints} pts</span>}
+                                  {g.gradedAt && <span>{g.gradedAt}</span>}
+                                </div>
+                                {g.note && <p className="text-xs text-white/40 mt-1.5 italic">{g.note}</p>}
+                              </div>
+                            ))}
                           </div>
-                          <p className="text-xs text-white/50 mt-0.5">{g.subject}</p>
-                          <p className="text-sm text-white/80 mt-1">{g.grade}/{g.maxGrade}{g.letterGrade ? ` (${g.letterGrade})` : ''}</p>
-                        </div>
-                      ))}
+                        );
+                      })()}
                     </div>
                   )}
 

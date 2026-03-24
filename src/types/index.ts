@@ -214,3 +214,30 @@ export interface ClassEnrollment {
     avatar?: string;
   };
 }
+
+export interface GradeTable {
+  id: string;
+  name: string;
+  classId: string;
+  className: string;
+  teacherId: string;
+  teacherName: string;
+  degree: string;
+  createdAt: string;
+  entries: GradeTableEntry[];
+}
+
+export interface GradeTableEntry {
+  id: string;
+  gradeTableId: string;
+  studentId: string;
+  studentName: string;
+  avatar: string;
+  className: string;
+  totalPoints: number | null;
+  passed: boolean | null;
+  gradedAt: string | null;
+  note: string | null;
+  attendanceRate: number | null;
+  previousFailedExams: number;
+}

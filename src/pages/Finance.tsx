@@ -42,7 +42,7 @@ export default function Finance() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2 md:col-span-2">
                 <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Select Student</label>
-                <select className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white bg-[#0a0a0a] appearance-none">
+                <select className="glass-select w-full px-4 py-3 rounded-xl text-sm">
                   <option>Elena Rodriguez (STU-001)</option>
                   <option>Marcus Chen (STU-002)</option>
                   <option>Sarah Jenkins (STU-003)</option>

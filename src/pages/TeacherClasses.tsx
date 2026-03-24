@@ -4,11 +4,12 @@ import {
   BookOpen, Users, ChevronRight, ArrowLeft, Search,
   CalendarCheck, FileText, CheckCircle2, XCircle, Clock,
   GraduationCap, Loader2, CheckCircle, BarChart2,
-  StickyNote, Pencil, Check, AlertCircle,
+  StickyNote, Pencil, Check, AlertCircle, ClipboardList,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
+import type { GradeTable } from '../types';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -46,7 +47,7 @@ type Quiz = {
   type?: string;
 };
 
-type Tab = 'students' | 'quizzes' | 'attendance';
+type Tab = 'students' | 'projects' | 'attendance';
 
 export default function TeacherClasses() {
   const { t } = useLanguage();
@@ -64,7 +65,7 @@ export default function TeacherClasses() {
 
   // Detail data
   const [students,    setStudents   ] = useState<StudentRow[]>([]);
-  const [quizzes,     setQuizzes    ] = useState<Quiz[]>([]);
+  const [gradeTables,  setGradeTables] = useState<GradeTable[]>([]);
   const [attSessions, setAttSessions] = useState<AttSession[]>([]);
   const [attStats,    setAttStats   ] = useState<Record<string, { total: number; present: number; late: number; absent: number }>>({});
   const [notes,       setNotes      ] = useState<Record<string, string>>({});
@@ -78,9 +79,16 @@ export default function TeacherClasses() {
   // Attendance detail modal (per session)
   const [attModal, setAttModal] = useState<AttSession | null>(null);
 
+  // Grading modal
+  const [gradingEntry, setGradingEntry] = useState<{ id: string; studentName: string } | null>(null);
+  const [gradePoints, setGradePoints] = useState('');
+  const [gradePassed, setGradePassed] = useState<boolean | null>(null);
+  const [gradeNote, setGradeNote] = useState('');
+  const [grading, setGrading] = useState(false);
+  const [gradeError, setGradeError] = useState('');
+
   // Detail searches
   const [studSearch, setStudSearch] = useState('');
-  const [quizSearch, setQuizSearch] = useState('');
 
   // Load list
   useEffect(() => {
@@ -97,17 +105,17 @@ export default function TeacherClasses() {
     if (!selected || !user) return;
     setLoadingDetail(true);
     setStudents([]);
-    setQuizzes([]);
+    setGradeTables([]);
     setAttSessions([]);
 
     Promise.all([
       api.teacher.getClassStudents(user.id),
-      api.teacher.getQuizzes(user.id),
-      api.classAttendance.getAllAttendanceSessions(),
+      api.gradeTables.getForClass(selected.id),
+      api.classAttendance.getSessionsForClass(selected.id),
       api.classAttendance.getSummaryForTeacher(user.id),
       api.teacher.getStudentNotes(user.id),
     ])
-      .then(([allStudents, allQuizzes, allAtt, attSummary, teacherNotes]) => {
+      .then(([allStudents, classTables, classAtt, attSummary, teacherNotes]) => {
         // Filter students to this class
         const classStudents = allStudents
           .filter(r => r.classId === selected.id)
@@ -119,11 +127,9 @@ export default function TeacherClasses() {
           }));
         setStudents(classStudents);
 
-        // Filter attendance sessions to this class
-        const classAtt = allAtt.filter(s => s.classId === selected.id);
         setAttSessions(classAtt);
 
-        setQuizzes(allQuizzes);
+        setGradeTables(classTables);
         setAttStats(attSummary);
         setNotes(teacherNotes);
       })
@@ -149,15 +155,6 @@ export default function TeacherClasses() {
     );
   }, [students, studSearch]);
 
-  const filteredQuizzes = useMemo(() => {
-    if (!quizSearch.trim()) return quizzes;
-    const q = quizSearch.toLowerCase();
-    return quizzes.filter(qz =>
-      qz.title.toLowerCase().includes(q) ||
-      qz.program.toLowerCase().includes(q)
-    );
-  }, [quizzes, quizSearch]);
-
   function openNote(studentId: string, studentName: string) {
     setNoteText(notes[studentId] ?? '');
     setSaveError('');
@@ -176,6 +173,38 @@ export default function TeacherClasses() {
       setSaveError('Failed to save note.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openGrading(entryId: string, studentName: string) {
+    setGradingEntry({ id: entryId, studentName });
+    setGradePoints('');
+    setGradePassed(null);
+    setGradeNote('');
+    setGradeError('');
+  }
+
+  async function submitGrade() {
+    if (!gradingEntry || gradePassed === null) return;
+    const pts = parseFloat(gradePoints);
+    if (isNaN(pts) || pts < 0) {
+      setGradeError('Enter a valid point value.');
+      return;
+    }
+    setGrading(true);
+    setGradeError('');
+    try {
+      await api.gradeTables.gradeStudent(gradingEntry.id, pts, gradePassed, gradeNote || undefined);
+      // Refresh grade tables
+      if (selected) {
+        const updated = await api.gradeTables.getForClass(selected.id);
+        setGradeTables(updated);
+      }
+      setGradingEntry(null);
+    } catch {
+      setGradeError('Failed to save grade.');
+    } finally {
+      setGrading(false);
     }
   }
 
@@ -224,7 +253,7 @@ export default function TeacherClasses() {
 
         {/* Tabs */}
         <div className="flex gap-1 p-1 bg-white/5 rounded-2xl w-fit">
-          {(['students', 'quizzes', 'attendance'] as Tab[]).map(tab => (
+          {(['students', 'projects', 'attendance'] as Tab[]).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -235,9 +264,9 @@ export default function TeacherClasses() {
               }`}
             >
               {tab === 'students' && <Users className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
-              {tab === 'quizzes' && <FileText className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
+              {tab === 'projects' && <ClipboardList className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
               {tab === 'attendance' && <CalendarCheck className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />}
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'projects' ? 'Final Projects' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -335,67 +364,68 @@ export default function TeacherClasses() {
               </div>
             )}
 
-            {/* ── Quizzes Tab ── */}
-            {activeTab === 'quizzes' && (
+            {/* ── Final Projects Tab ── */}
+            {activeTab === 'projects' && (
               <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between mb-5 shrink-0">
-                  <h2 className="font-display text-lg font-medium">Quizzes & Assignments</h2>
-                  <div className="relative group">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-                    <input
-                      type="text"
-                      placeholder="Search quizzes…"
-                      value={quizSearch}
-                      onChange={e => setQuizSearch(e.target.value)}
-                      className="bg-white/5 border border-white/5 rounded-xl py-2 pl-9 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 transition-all w-56"
-                    />
+                  <h2 className="font-display text-lg font-medium">Final Project Grade Tables</h2>
+                </div>
+                {gradeTables.length === 0 ? (
+                  <div className="flex flex-col items-center py-12 text-white/20">
+                    <ClipboardList className="w-8 h-8 mb-2" />
+                    <p className="text-sm">No grade tables for this class yet.</p>
+                    <p className="text-xs text-white/30 mt-1">Create one from the Grading page.</p>
                   </div>
-                </div>
-                <div className="overflow-x-auto -mx-6 px-6">
-                  <table className="w-full text-left border-collapse min-w-[600px]">
-                    <thead>
-                      <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
-                        <th className="pb-3 font-medium">Title</th>
-                        <th className="pb-3 px-4 font-medium">Submissions</th>
-                        <th className="pb-3 px-4 font-medium">Status</th>
-                        <th className="pb-3 px-4 font-medium text-right">Date</th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-sm">
-                      {filteredQuizzes.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="py-12 text-center">
-                            <FileText className="w-8 h-8 text-white/10 mx-auto mb-2" />
-                            <p className="text-white/30 text-sm">No quizzes found.</p>
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredQuizzes.map(qz => (
-                          <tr key={qz.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
-                            <td className="py-3.5">
-                              <div className="font-medium text-white/90 group-hover:text-white transition-colors">{qz.title}</div>
-                              <div className="text-[11px] text-white/40 mt-0.5">{qz.program}</div>
-                            </td>
-                            <td className="py-3.5 px-4 font-medium text-white/80">{qz.submissions}</td>
-                            <td className="py-3.5 px-4">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
-                                qz.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                qz.status === 'Grading'   ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                                'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                              }`}>
-                                {qz.status === 'Completed' && <CheckCircle className="w-3 h-3" />}
-                                {qz.status === 'Grading'   && <Clock className="w-3 h-3" />}
-                                {qz.status === 'Scheduled' && <CalendarCheck className="w-3 h-3" />}
-                                {qz.status}
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 text-right text-white/40 text-xs">{qz.date}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    {gradeTables.map(table => {
+                      const graded = table.entries.filter(e => e.passed != null).length;
+                      const total = table.entries.length;
+                      const passed = table.entries.filter(e => e.passed === true).length;
+                      const failed = table.entries.filter(e => e.passed === false).length;
+                      return (
+                        <div key={table.id} className="p-4 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-colors">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div>
+                              <h3 className="font-medium text-white/90 text-sm">{table.name}</h3>
+                              <p className="text-xs text-white/40 mt-0.5">{table.degree ? `${table.degree} · ` : ''}{table.createdAt}</p>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs shrink-0">
+                              <span className="text-white/50"><span className="text-white font-medium">{graded}</span>/{total} graded</span>
+                              {passed > 0 && <span className="text-emerald-400 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{passed}</span>}
+                              {failed > 0 && <span className="text-red-400 flex items-center gap-1"><XCircle className="w-3 h-3" />{failed}</span>}
+                            </div>
+                          </div>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] transition-all" style={{ width: total > 0 ? `${(graded / total) * 100}%` : '0%' }} />
+                          </div>
+                          {/* Student entries */}
+                          {table.entries.length > 0 && (
+                            <div className="mt-3 space-y-1">
+                              {table.entries.map(entry => (
+                                <div key={entry.id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded-lg hover:bg-white/[0.03] transition-colors">
+                                  <span className="text-white/70">{entry.studentName}</span>
+                                  <span>
+                                    {entry.passed === true && <span className="text-emerald-400 font-medium">Passed · {entry.totalPoints} pts</span>}
+                                    {entry.passed === false && <span className="text-red-400 font-medium">Failed · {entry.totalPoints} pts</span>}
+                                    {entry.passed == null && (
+                                      <button
+                                        onClick={() => openGrading(entry.id, entry.studentName)}
+                                        className="px-2.5 py-1 rounded-lg bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20 hover:bg-[#fc0ce4]/20 transition-colors font-medium"
+                                      >
+                                        Grade
+                                      </button>
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -573,6 +603,96 @@ export default function TeacherClasses() {
             </div>
           )}
         </AnimatePresence>
+
+        {/* Grading modal */}
+        <AnimatePresence>
+          {gradingEntry && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setGradingEntry(null)}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="relative w-full max-w-sm bg-[#0a0a0a] border border-white/10 rounded-3xl shadow-2xl p-6"
+              >
+                <h3 className="font-display text-lg font-medium mb-1">Grade Student</h3>
+                <p className="text-sm text-white/40 mb-4">{gradingEntry.studentName}</p>
+
+                <label className="block text-xs text-white/50 mb-1.5">Total Points</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={gradePoints}
+                  onChange={e => setGradePoints(e.target.value)}
+                  placeholder="0"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-[#fc0ce4]/40 mb-4"
+                />
+
+                <label className="block text-xs text-white/50 mb-1.5">Result</label>
+                <div className="flex gap-2 mb-4">
+                  <button
+                    onClick={() => setGradePassed(true)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                      gradePassed === true
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'border border-white/10 text-white/40 hover:bg-white/5'
+                    }`}
+                  >
+                    <CheckCircle className="w-4 h-4" /> Passed
+                  </button>
+                  <button
+                    onClick={() => setGradePassed(false)}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 ${
+                      gradePassed === false
+                        ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        : 'border border-white/10 text-white/40 hover:bg-white/5'
+                    }`}
+                  >
+                    <XCircle className="w-4 h-4" /> Failed
+                  </button>
+                </div>
+
+                <label className="block text-xs text-white/50 mb-1.5">Note (optional)</label>
+                <textarea
+                  rows={3}
+                  value={gradeNote}
+                  onChange={e => setGradeNote(e.target.value)}
+                  placeholder="Add a note…"
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-[#fc0ce4]/40 resize-none"
+                />
+
+                {gradeError && (
+                  <p className="text-xs text-red-400 mt-2 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5" />{gradeError}
+                  </p>
+                )}
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={() => setGradingEntry(null)}
+                    className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitGrade}
+                    disabled={grading || gradePassed === null || !gradePoints}
+                    className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {grading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    Save Grade
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
       </motion.div>
     );
   }

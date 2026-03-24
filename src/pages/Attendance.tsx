@@ -2,7 +2,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Calendar as CalendarIcon, CheckCircle2, XCircle, Clock, AlertTriangle,
-  Search, ChevronDown, Download, X, Loader2,
+  Search, Download, X, Loader2,
   GraduationCap, ArrowUpDown,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -257,31 +257,29 @@ export default function Attendance() {
           </div>
 
           {/* Month */}
-          <div className="relative">
+          <div>
             <select
               value={filterMonth}
               onChange={e => { setFilterMonth(e.target.value); setFilterDate(''); }}
-              className="appearance-none bg-white/5 border border-white/10 rounded-xl pl-3 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40 transition-all cursor-pointer"
+              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
             >
               <option value="">All Months</option>
               {MONTH_NAMES.map((m, i) => (
                 <option key={m} value={String(i + 1)}>{m}</option>
               ))}
             </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 pointer-events-none" />
           </div>
 
           {/* Year */}
-          <div className="relative">
+          <div>
             <select
               value={filterYear}
               onChange={e => { setFilterYear(e.target.value); setFilterDate(''); }}
-              className="appearance-none bg-white/5 border border-white/10 rounded-xl pl-3 pr-8 py-2.5 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40 transition-all cursor-pointer"
+              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
             >
               <option value="">All Years</option>
               {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 pointer-events-none" />
           </div>
         </div>
 

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, Plus, X, Loader2, StickyNote, Pencil, Check, AlertCircle, GraduationCap,
-  BarChart2, CheckCircle2, XCircle, Clock,
+  BarChart2, CheckCircle2, XCircle, Clock, CreditCard,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -28,10 +29,12 @@ interface GroupedStudent {
 export default function TeacherStudents() {
   const { t } = useLanguage();
   const { user } = useUser();
+  const navigate = useNavigate();
 
   const [rows,     setRows    ] = useState<StudentRow[]>([]);
   const [notes,    setNotes   ] = useState<Record<string, string>>({});
   const [attStats, setAttStats] = useState<Record<string, { total: number; present: number; late: number; absent: number }>>({});
+  const [payStatuses, setPayStatuses] = useState<Record<string, 'paid' | 'pending'>>({});
   const [loading,  setLoading ] = useState(true);
   const [search,   setSearch  ] = useState('');
 
@@ -61,6 +64,26 @@ export default function TeacherStudents() {
       setRows(fetchedRows);
       setNotes(fetchedNotes);
       setAttStats(fetchedAtt);
+
+      // Load current-month payment status per student
+      const uniqueIds = [...new Set(fetchedRows.map((r: StudentRow) => r.studentId))];
+      const now = new Date();
+      const thisMonth = now.getMonth();
+      const thisYear = now.getFullYear();
+      const statusMap: Record<string, 'paid' | 'pending'> = {};
+      await Promise.all(uniqueIds.map(async (sid) => {
+        try {
+          const payments = await api.finance.getPayments(sid);
+          const hasPaid = (payments || []).some((p: any) => {
+            const d = new Date(p.payment_date || p.date);
+            return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+          });
+          statusMap[sid] = hasPaid ? 'paid' : 'pending';
+        } catch {
+          statusMap[sid] = 'pending';
+        }
+      }));
+      setPayStatuses(statusMap);
     } catch (e) {
       console.error(e);
     } finally {
@@ -160,6 +183,7 @@ export default function TeacherStudents() {
                   <th className="pb-3 font-medium">Student</th>
                   <th className="pb-3 font-medium">Class</th>
                   <th className="pb-3 font-medium">Attendance</th>
+                  <th className="pb-3 font-medium">Payments</th>
                   <th className="pb-3 font-medium">Avg. Grade</th>
                   <th className="pb-3 font-medium">Notes</th>
                 </tr>
@@ -171,7 +195,8 @@ export default function TeacherStudents() {
                   return (
                     <tr
                       key={student.studentId}
-                      className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group"
+                      onClick={() => navigate(`/students/${student.studentId}`)}
+                      className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer"
                     >
                       {/* Student */}
                       <td className="py-4">
@@ -198,7 +223,7 @@ export default function TeacherStudents() {
                           </span>
                           {extraClasses.length > 0 && (
                             <button
-                              onClick={() => setClassesModal({ studentName: student.studentName, classes: student.classes })}
+                              onClick={e => { e.stopPropagation(); setClassesModal({ studentName: student.studentName, classes: student.classes }); }}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/5 border border-white/10 hover:bg-blue-500/10 hover:border-blue-500/20 hover:text-blue-400 text-white/40 text-xs font-medium transition-all"
                             >
                               <Plus className="w-3 h-3" />
@@ -218,11 +243,28 @@ export default function TeacherStudents() {
                           const color = pct >= 75 ? 'text-emerald-400 hover:text-emerald-300' : pct >= 50 ? 'text-amber-400 hover:text-amber-300' : 'text-red-400 hover:text-red-300';
                           return (
                             <button
-                              onClick={() => setAttModal({ studentName: student.studentName, stats: s })}
+                              onClick={e => { e.stopPropagation(); setAttModal({ studentName: student.studentName, stats: s }); }}
                               className={`font-semibold text-sm transition-colors ${color}`}
                             >
                               {pct}%
                             </button>
+                          );
+                        })()}
+                      </td>
+
+                      {/* Payments */}
+                      <td className="py-4">
+                        {(() => {
+                          const status = payStatuses[student.studentId];
+                          if (!status) return <span className="text-white/25 font-medium">–</span>;
+                          return status === 'paid' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                              <CheckCircle2 className="w-3 h-3" /> Paid
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium">
+                              <Clock className="w-3 h-3" /> Pending
+                            </span>
                           );
                         })()}
                       </td>
@@ -234,7 +276,7 @@ export default function TeacherStudents() {
                       <td className="py-4">
                         {note ? (
                           <button
-                            onClick={() => openNote(student.studentId, student.studentName)}
+                            onClick={e => { e.stopPropagation(); openNote(student.studentId, student.studentName); }}
                             className="flex items-center gap-1.5 max-w-[200px] px-2.5 py-1.5 rounded-lg bg-[#fc0ce4]/10 border border-[#fc0ce4]/20 hover:bg-[#fc0ce4]/15 transition-all text-left group/note"
                           >
                             <StickyNote className="w-3 h-3 text-[#fc0ce4]/70 shrink-0" />
@@ -243,7 +285,7 @@ export default function TeacherStudents() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => openNote(student.studentId, student.studentName)}
+                            onClick={e => { e.stopPropagation(); openNote(student.studentId, student.studentName); }}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-white/15 hover:border-[#fc0ce4]/40 hover:bg-[#fc0ce4]/5 transition-all text-white/30 hover:text-[#fc0ce4]"
                           >
                             <Plus className="w-3.5 h-3.5" />
