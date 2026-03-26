@@ -388,12 +388,20 @@ export const api = {
         if (error) throw new Error(error.message);
       }
 
-      // 5. Mark overdue: not_paid invoices from past months
+      // 5. Mark overdue: not_paid invoices whose due_date is in the past
+      const todayStr = `${curYear}-${String(curMonth).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       await supabase
         .from('invoices')
         .update({ status: 'overdue' })
         .eq('status', 'not_paid')
-        .or(`year.lt.${curYear},and(year.eq.${curYear},month.lt.${curMonth})`);
+        .lt('due_date', todayStr);
+
+      // 5b. Un-mark overdue: if due_date was moved to the future (e.g. via edit)
+      await supabase
+        .from('invoices')
+        .update({ status: 'not_paid' })
+        .eq('status', 'overdue')
+        .gte('due_date', todayStr);
     },
 
     /* ─── Invoices CRUD ─── */
@@ -436,10 +444,26 @@ export const api = {
       }));
     },
 
-    updateInvoice: async (id: string, updates: { amount?: number; status?: string }) => {
+    updateInvoice: async (id: string, updates: { amount?: number; status?: string; title?: string; due_date?: string }) => {
       const payload: any = {};
       if (updates.amount != null) payload.amount = updates.amount;
       if (updates.status) payload.status = updates.status;
+      if (updates.title) payload.title = updates.title;
+      if (updates.due_date) {
+        payload.due_date = updates.due_date;
+        // Auto-compute status based on new due date
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const due = new Date(updates.due_date + 'T12:00:00'); due.setHours(0, 0, 0, 0);
+        // Fetch current status to decide whether to flip
+        const { data: cur } = await supabase.from('invoices').select('status').eq('id', id).single();
+        if (cur) {
+          if (cur.status === 'overdue' && due >= today) {
+            payload.status = 'not_paid'; // due date moved to future → no longer overdue
+          } else if ((cur.status === 'not_paid') && due < today) {
+            payload.status = 'overdue'; // due date moved to past → overdue
+          }
+        }
+      }
       const { error } = await supabase.from('invoices').update(payload).eq('id', id);
       if (error) throw new Error(error.message);
     },

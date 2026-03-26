@@ -63,6 +63,8 @@ export default function Finance() {
 
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
   const [editAmount, setEditAmount]   = useState('');
+  const [editTitle, setEditTitle]     = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
   const [savingEdit, setSavingEdit]   = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
@@ -262,7 +264,21 @@ export default function Finance() {
     if (!editInvoice || !editAmount) return;
     setSavingEdit(true);
     try {
-      await api.finance.updateInvoice(editInvoice.id, { amount: parseFloat(editAmount) });
+      // Convert dd/mm/yy → yyyy-mm-dd for DB
+      let dueDateIso: string | undefined;
+      if (editDueDate) {
+        const parts = editDueDate.split('/');
+        if (parts.length === 3) {
+          const [dd, mm, yy] = parts;
+          const fullYear = parseInt(yy) < 100 ? 2000 + parseInt(yy) : parseInt(yy);
+          dueDateIso = `${fullYear}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+        }
+      }
+      await api.finance.updateInvoice(editInvoice.id, {
+        amount: parseFloat(editAmount),
+        title: editTitle || undefined,
+        due_date: dueDateIso,
+      });
       setEditInvoice(null);
       playPopSound();
       await loadAll();
@@ -584,7 +600,7 @@ export default function Finance() {
                       </td>
                       <td className="py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => { setEditInvoice(inv); setEditAmount(String(inv.amount)); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
+                          <button onClick={() => { setEditInvoice(inv); setEditAmount(String(inv.amount)); setEditTitle(inv.title); setEditDueDate(inv.dueDate ? (() => { const d = inv.dueDate.split('-'); return `${d[2]}/${d[1]}/${d[0].slice(2)}`; })() : ''); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button onClick={() => setDeleteTarget(inv)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
@@ -656,8 +672,18 @@ export default function Finance() {
                 </div>
                 <div className="px-5 py-4 space-y-4">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Amount (EUR)</label>
-                    <input type="number" step="0.01" min="0" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Title</label>
+                    <input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Due Date (dd/mm/yy)</label>
+                      <input type="text" placeholder="01/04/26" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Amount (EUR)</label>
+                      <input type="number" step="0.01" min="0" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                    </div>
                   </div>
                 </div>
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
