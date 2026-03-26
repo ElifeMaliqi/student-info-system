@@ -77,17 +77,19 @@ export default function StudentProfile() {
         setAttendanceRecords(attRecords);
         setClassEnrollments(enrollments);
 
-        // Check current month payment status
+        // Check current month invoice status
         try {
-          const payments = await api.finance.getPayments(id);
+          const invoices = await api.finance.getInvoices(id);
           const now = new Date();
-          const thisMonth = now.getMonth();
+          const thisMonth = now.getMonth() + 1;
           const thisYear = now.getFullYear();
-          const hasPaidThisMonth = (payments || []).some((p: any) => {
-            const d = new Date(p.payment_date || p.date);
-            return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-          });
-          setPaymentStatus(hasPaidThisMonth ? 'paid' : 'pending');
+          const monthInvoices = (invoices || []).filter((i: any) => i.month === thisMonth && i.year === thisYear);
+          if (monthInvoices.length === 0) {
+            setPaymentStatus(null);
+          } else {
+            const allPaid = monthInvoices.every((i: any) => i.status === 'paid');
+            setPaymentStatus(allPaid ? 'paid' : 'pending');
+          }
         } catch {
           setPaymentStatus(null);
         }
@@ -576,17 +578,9 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
     .limit(1)
     .maybeSingle();
 
-  // Get program name if available
-  let programName = 'No Degree';
+  // program_id on classes stores the program name directly as text
   const enrollClass = enrollment?.class as any;
-  if (enrollClass?.program_id) {
-    const { data: prog } = await supabase
-      .from('programs')
-      .select('name')
-      .eq('id', enrollClass.program_id)
-      .maybeSingle();
-    if (prog) programName = prog.name;
-  }
+  const programName = enrollClass?.program_id || 'No Degree';
 
   // Get attendance rate
   const { data: attData } = await supabase
@@ -636,23 +630,13 @@ async function loadClassEnrollments(profileId: string): Promise<ClassEnrollmentI
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) return [];
 
-  // Collect unique program IDs
-  const programIds = [...new Set((data as any[]).map(d => d.class?.program_id).filter(Boolean))];
-  const programMap: Record<string, string> = {};
-  if (programIds.length > 0) {
-    const { data: progs } = await supabase
-      .from('programs')
-      .select('id, name')
-      .in('id', programIds);
-    (progs || []).forEach((p: any) => { programMap[p.id] = p.name; });
-  }
-
   const formatDate = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
+  // program_id on classes stores the program name directly as text
   return (data as any[]).map(d => ({
     classId: d.class?.id || '',
     className: d.class?.title || 'Unknown',
-    programName: d.class?.program_id ? (programMap[d.class.program_id] || 'Unknown Degree') : 'No Degree',
+    programName: d.class?.program_id || 'No Degree',
     enrolledAt: d.enrolled_at ? formatDate(d.enrolled_at) : 'N/A',
   }));
 }

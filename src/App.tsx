@@ -27,6 +27,7 @@ import AdminPrograms from './pages/AdminPrograms';
 import AdminGrades from './pages/AdminGrades';
 import StudentProfile from './pages/StudentProfile';
 import RegistrationApplications from './pages/RegistrationApplications';
+import ResetPassword from './pages/ResetPassword';
 import AdminCalendar from './pages/AdminCalendar';
 import ForcePasswordChange from './pages/ForcePasswordChange';
 import { LanguageProvider } from './context/LanguageContext';
@@ -60,6 +61,10 @@ function AppContent() {
 
   if (!user || !role) {
     const path = location.pathname;
+
+    if (path === '/resetpassword') {
+      return <ResetPassword />;
+    }
 
     if (path === '/register' || path === '/signup' || path === '/apply') {
       return <PublicRegistration onBack={() => navigate('/auth', { replace: true })} />;

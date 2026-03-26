@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -200,74 +200,268 @@ export const api = {
   },
 
   finance: {
-    getInvoices: async (studentId?: string): Promise<Invoice[]> => {
+    /* ─── Month names ─── */
+    _MONTHS: ['January','February','March','April','May','June','July','August','September','October','November','December'] as const,
+
+    /* ─── Settings ─── */
+    getSettings: async (): Promise<InvoiceSettings | null> => {
+      const { data, error } = await supabase.from('invoice_settings').select('*').limit(1).single();
+      if (error) return null;
+      return {
+        id: data.id,
+        defaultAmount: parseFloat(data.default_amount),
+        titleTemplate: data.title_template,
+        discountPercent: parseFloat(data.discount_percent),
+        dueDay: data.due_day,
+      };
+    },
+
+    updateSettings: async (updates: Partial<Omit<InvoiceSettings, 'id'>>): Promise<void> => {
+      const payload: any = {};
+      if (updates.defaultAmount != null) payload.default_amount = updates.defaultAmount;
+      if (updates.titleTemplate != null) payload.title_template = updates.titleTemplate;
+      if (updates.discountPercent != null) payload.discount_percent = updates.discountPercent;
+      if (updates.dueDay != null) payload.due_day = updates.dueDay;
+      payload.updated_at = new Date().toISOString();
+      const { error } = await supabase.from('invoice_settings').update(payload).not('id', 'is', null);
+      if (error) throw new Error(error.message);
+    },
+
+    /* ─── Per-student overrides ─── */
+    getStudentsForSettings: async (): Promise<SettingsStudent[]> => {
+      // Active enrollments with student + class info
+      const { data: enrollments, error } = await supabase
+        .from('class_enrollments')
+        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name)')
+        .eq('status', 'active');
+      if (error || !enrollments) return [];
+
+      // Global defaults
+      const settings = await api.finance.getSettings();
+      const defaultAmt = settings?.defaultAmount ?? 60;
+
+      // Overrides
+      const { data: overrides } = await supabase.from('student_invoice_overrides').select('*');
+      const overrideMap = new Map<string, any>();
+      for (const o of (overrides || [])) overrideMap.set(o.student_id, o);
+
+      // Group by student
+      const map = new Map<string, { name: string; programs: Set<string>; classes: string[]; override: any | null }>();
+      for (const enr of enrollments) {
+        const sid = enr.student_id;
+        const s = enr.student as any;
+        const cls = enr.class as any;
+        const className = cls?.title || '';
+        const programName = cls?.program_id || '';
+        const existing = map.get(sid);
+        if (existing) {
+          if (className && !existing.classes.includes(className)) existing.classes.push(className);
+          if (programName) existing.programs.add(programName);
+        } else {
+          map.set(sid, {
+            name: s ? `${s.first_name} ${s.last_name}` : '',
+            programs: new Set(programName ? [programName] : []),
+            classes: className ? [className] : [],
+            override: overrideMap.get(sid) || null,
+          });
+        }
+      }
+
+      const result: SettingsStudent[] = [];
+      for (const [studentId, info] of map) {
+        const ovr = info.override;
+        const amt = ovr?.custom_amount != null ? parseFloat(ovr.custom_amount) : defaultAmt;
+        const disc = ovr?.custom_discount_percent != null ? parseFloat(ovr.custom_discount_percent) : (settings?.discountPercent ?? 0);
+        const entry: SettingsStudent = {
+          studentId,
+          studentName: info.name,
+          program: Array.from(info.programs).join(', '),
+          classes: info.classes,
+          currentAmount: amt,
+          currentDiscount: disc,
+          hasOverride: !!ovr,
+        };
+        if (ovr) {
+          if (ovr.custom_amount != null) entry.overrideAmount = parseFloat(ovr.custom_amount);
+          if (ovr.custom_discount_percent != null) entry.overrideDiscountPercent = parseFloat(ovr.custom_discount_percent);
+          if (ovr.custom_due_day != null) entry.overrideDueDay = parseInt(ovr.custom_due_day);
+          if (ovr.custom_title_template != null) entry.overrideTitleTemplate = ovr.custom_title_template;
+        }
+        result.push(entry);
+      }
+      return result.sort((a, b) => a.studentName.localeCompare(b.studentName));
+    },
+
+    deleteOverrides: async (studentIds: string[]): Promise<void> => {
+      const { error } = await supabase
+        .from('student_invoice_overrides')
+        .delete()
+        .in('student_id', studentIds);
+      if (error) throw new Error(error.message);
+    },
+
+    upsertOverrides: async (studentIds: string[], overrides: { amount?: number; discountPercent?: number; dueDay?: number; titleTemplate?: string }): Promise<void> => {
+      for (const sid of studentIds) {
+        const payload: any = { student_id: sid, updated_at: new Date().toISOString() };
+        if (overrides.amount != null) payload.custom_amount = overrides.amount;
+        if (overrides.discountPercent != null) payload.custom_discount_percent = overrides.discountPercent;
+        if (overrides.dueDay != null) payload.custom_due_day = overrides.dueDay;
+        if (overrides.titleTemplate != null) payload.custom_title_template = overrides.titleTemplate;
+        const { error } = await supabase
+          .from('student_invoice_overrides')
+          .upsert(payload, { onConflict: 'student_id' });
+        if (error) throw new Error(error.message);
+      }
+    },
+
+    /* ─── Auto-generate missing invoices ─── */
+    syncInvoices: async (): Promise<void> => {
+      const MONTHS = api.finance._MONTHS;
+
+      // 1. Settings (global defaults)
+      const { data: settingsRow } = await supabase.from('invoice_settings').select('*').limit(1).single();
+      const s = settingsRow || { default_amount: 60, title_template: '{class} - {month}', discount_percent: 0, due_day: 1 };
+
+      // 2. Per-student overrides
+      const { data: overrides } = await supabase.from('student_invoice_overrides').select('*');
+      const ovrMap = new Map<string, any>();
+      for (const o of (overrides || [])) ovrMap.set(o.student_id, o);
+
+      // 3. Active enrollments with class info
+      const { data: enrollments, error: eErr } = await supabase
+        .from('class_enrollments')
+        .select('id, student_id, class_id, enrolled_at, class:classes(title)')
+        .eq('status', 'active');
+      if (eErr || !enrollments || enrollments.length === 0) return;
+
+      // 4. Existing invoices (enrollment+month+year combos)
+      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
+      const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
+
+      // 5. Compute missing invoices
+      const now = new Date();
+      const curMonth = now.getMonth() + 1;
+      const curYear = now.getFullYear();
+
+      const toInsert: any[] = [];
+      for (const enr of enrollments) {
+        const enrolled = new Date(enr.enrolled_at);
+        let y = enrolled.getFullYear();
+        let m = enrolled.getMonth() + 1;
+        const className = (enr.class as any)?.title || 'Class';
+
+        // Resolve per-student or global values
+        const ovr = ovrMap.get(enr.student_id);
+        const baseAmount = ovr?.custom_amount != null ? parseFloat(ovr.custom_amount) : parseFloat(s.default_amount);
+        const disc = ovr?.custom_discount_percent != null ? parseFloat(ovr.custom_discount_percent) : parseFloat(s.discount_percent);
+        const dueDay = Math.min(ovr?.custom_due_day != null ? parseInt(ovr.custom_due_day) : parseInt(s.due_day), 28);
+        const titleTpl = ovr?.custom_title_template || (s.title_template as string);
+        const amount = baseAmount * (1 - disc / 100);
+
+        while (y < curYear || (y === curYear && m <= curMonth)) {
+          if (!existingKeys.has(`${enr.id}-${m}-${y}`)) {
+            const title = titleTpl
+              .replace('{class}', className)
+              .replace('{month}', `${MONTHS[m - 1]} ${y}`);
+            const dueM = m === 12 ? 1 : m + 1;
+            const dueY = m === 12 ? y + 1 : y;
+            toInsert.push({
+              enrollment_id: enr.id,
+              student_id: enr.student_id,
+              class_id: enr.class_id,
+              title,
+              month: m,
+              year: y,
+              due_date: `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
+              amount: Math.round(amount * 100) / 100,
+              discount_percent: disc,
+              status: 'not_paid',
+            });
+          }
+          m++;
+          if (m > 12) { m = 1; y++; }
+        }
+      }
+
+      if (toInsert.length > 0) {
+        const { error } = await supabase.from('invoices').insert(toInsert);
+        if (error) throw new Error(error.message);
+      }
+
+      // 5. Mark overdue: not_paid invoices from past months
+      await supabase
+        .from('invoices')
+        .update({ status: 'overdue' })
+        .eq('status', 'not_paid')
+        .or(`year.lt.${curYear},and(year.eq.${curYear},month.lt.${curMonth})`);
+    },
+
+    /* ─── Invoices CRUD ─── */
+    getInvoices: async (studentUserId?: string): Promise<Invoice[]> => {
       let query = supabase
         .from('invoices')
         .select(`
           *,
-          student:students!invoices_student_id_fkey(
-            student_id,
-            user:profiles!students_user_id_fkey(first_name, last_name)
+          student:profiles!invoices_student_id_fkey(first_name, last_name),
+          class:classes!invoices_class_id_fkey(
+            title,
+            teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
           )
         `)
-        .order('created_at', { ascending: false });
+        .order('year', { ascending: false })
+        .order('month', { ascending: false });
 
-      if (studentId) {
-        const { data: student } = await supabase
-          .from('students')
-          .select('id')
-          .eq('user_id', studentId)
-          .maybeSingle();
-
-        if (student) {
-          query = query.eq('student_id', student.id);
-        }
+      if (studentUserId) {
+        query = query.eq('student_id', studentUserId);
       }
 
       const { data, error } = await query;
-
       if (error) throw new Error(error.message);
 
-      return (data || []).map(inv => ({
-        id: inv.invoice_number || `INV-${inv.id.slice(0, 8)}`,
-        studentId: inv.student?.student_id || '',
-        studentName: inv.student?.user ? `${inv.student.user.first_name} ${inv.student.user.last_name}` : '',
-        amount: `$${parseFloat(inv.amount).toFixed(2)}`,
-        status: inv.status === 'paid' ? 'Paid' : inv.status === 'overdue' ? 'Overdue' : 'Pending',
-        date: formatDate(inv.issue_date),
-        due: formatDate(inv.due_date)
+      return (data || []).map((inv: any) => ({
+        id: inv.id,
+        enrollmentId: inv.enrollment_id,
+        studentId: inv.student_id,
+        studentName: inv.student ? `${inv.student.first_name} ${inv.student.last_name}` : '',
+        classId: inv.class_id,
+        className: inv.class?.title || '',
+        teacherName: inv.class?.teacher ? `${inv.class.teacher.first_name} ${inv.class.teacher.last_name}` : '',
+        title: inv.title,
+        month: inv.month,
+        year: inv.year,
+        dueDate: inv.due_date,
+        amount: parseFloat(inv.amount),
+        discountPercent: parseFloat(inv.discount_percent || '0'),
+        status: inv.status as Invoice['status'],
       }));
     },
 
-    getPayments: async (studentId?: string) => {
-      let query = supabase
-        .from('payments')
-        .select(`
-          *,
-          student:students!payments_student_id_fkey(
-            student_id,
-            user:profiles!students_user_id_fkey(first_name, last_name)
-          ),
-          invoice:invoices!payments_invoice_id_fkey(invoice_number)
-        `)
-        .order('payment_date', { ascending: false });
-
-      if (studentId) {
-        const { data: student } = await supabase
-          .from('students')
-          .select('id')
-          .eq('user_id', studentId)
-          .maybeSingle();
-
-        if (student) {
-          query = query.eq('student_id', student.id);
-        }
-      }
-
-      const { data, error } = await query;
+    updateInvoice: async (id: string, updates: { amount?: number; status?: string }) => {
+      const payload: any = {};
+      if (updates.amount != null) payload.amount = updates.amount;
+      if (updates.status) payload.status = updates.status;
+      const { error } = await supabase.from('invoices').update(payload).eq('id', id);
       if (error) throw new Error(error.message);
-      return data || [];
-    }
+    },
+
+    deleteInvoice: async (id: string) => {
+      const { error } = await supabase.from('invoices').delete().eq('id', id);
+      if (error) throw new Error(error.message);
+    },
+
+    /* ─── Dashboard Stats ─── */
+    getStats: async (): Promise<{ totalPaid: number; pending: number; overdue: number; invoiceCount: number }> => {
+      const { data, error } = await supabase.from('invoices').select('amount, status');
+      if (error) throw new Error(error.message);
+      let totalPaid = 0, pending = 0, overdue = 0;
+      for (const r of (data || [])) {
+        const amt = parseFloat(r.amount);
+        if (r.status === 'paid') totalPaid += amt;
+        else if (r.status === 'overdue') overdue += amt;
+        else pending += amt;
+      }
+      return { totalPaid, pending, overdue, invoiceCount: (data || []).length };
+    },
   },
 
   attendance: {
@@ -1208,13 +1402,21 @@ export const api = {
       }));
     },
 
-    approve: async (applicationId: string) => {
+    approve: async (applicationId: string, classId?: string) => {
       const { data, error } = await supabase.rpc('approve_registration_application', {
         application_id: applicationId,
       });
 
       if (error) throw new Error(error.message);
       if (!data?.success) throw new Error('Failed to approve application');
+
+      // Enroll the new student into the selected class
+      if (classId && data.user_id) {
+        const { error: enrollError } = await supabase
+          .from('class_enrollments')
+          .insert([{ class_id: classId, student_id: data.user_id, status: 'active' }]);
+        if (enrollError) throw new Error(`Approved but failed to enroll in class: ${enrollError.message}`);
+      }
     },
 
     reject: async (applicationId: string, notes?: string) => {
@@ -1231,6 +1433,17 @@ export const api = {
         .eq('id', applicationId);
 
       if (error) throw new Error(error.message);
+    },
+
+    checkExistingEmails: async (emails: string[]): Promise<Set<string>> => {
+      if (emails.length === 0) return new Set();
+      const lower = emails.map(e => e.toLowerCase());
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('email')
+        .in('email', lower);
+      if (error) throw new Error(error.message);
+      return new Set((data || []).map((r: { email: string }) => r.email.toLowerCase()));
     },
 
     adminEnroll: async (enrollData: {

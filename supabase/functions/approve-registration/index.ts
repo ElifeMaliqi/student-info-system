@@ -196,6 +196,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         message: "Application approved successfully",
+        user_id: userId,
       }),
       {
         headers: {

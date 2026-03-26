@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search, Plus, X, Loader2, StickyNote, Pencil, Check, AlertCircle, GraduationCap,
-  BarChart2, CheckCircle2, XCircle, Clock, CreditCard,
+  BarChart2, CheckCircle2, XCircle, Clock, CreditCard, Download,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
+import { exportCsv } from '../utils/csv';
 
 interface StudentRow {
   studentId: string;
@@ -37,6 +38,8 @@ export default function TeacherStudents() {
   const [payStatuses, setPayStatuses] = useState<Record<string, 'paid' | 'pending'>>({});
   const [loading,  setLoading ] = useState(true);
   const [search,   setSearch  ] = useState('');
+  const [filterClass, setFilterClass] = useState('');
+  const [filterPayment, setFilterPayment] = useState<'' | 'paid' | 'pending'>('');
 
   // Classes popover
   const [classesModal, setClassesModal] = useState<{ studentName: string; classes: { classId: string; className: string }[] } | null>(null);
@@ -65,20 +68,18 @@ export default function TeacherStudents() {
       setNotes(fetchedNotes);
       setAttStats(fetchedAtt);
 
-      // Load current-month payment status per student
+      // Load current-month invoice status per student
       const uniqueIds = [...new Set(fetchedRows.map((r: StudentRow) => r.studentId))];
       const now = new Date();
-      const thisMonth = now.getMonth();
+      const thisMonth = now.getMonth() + 1;
       const thisYear = now.getFullYear();
       const statusMap: Record<string, 'paid' | 'pending'> = {};
       await Promise.all(uniqueIds.map(async (sid) => {
         try {
-          const payments = await api.finance.getPayments(sid);
-          const hasPaid = (payments || []).some((p: any) => {
-            const d = new Date(p.payment_date || p.date);
-            return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-          });
-          statusMap[sid] = hasPaid ? 'paid' : 'pending';
+          const invoices = await api.finance.getInvoices(sid);
+          const monthInvoices = (invoices || []).filter((i: any) => i.month === thisMonth && i.year === thisYear);
+          const allPaid = monthInvoices.length > 0 && monthInvoices.every((i: any) => i.status === 'paid');
+          statusMap[sid] = allPaid ? 'paid' : 'pending';
         } catch {
           statusMap[sid] = 'pending';
         }
@@ -103,15 +104,45 @@ export default function TeacherStudents() {
     return Array.from(map.values());
   }, [rows]);
 
+  const classOptions = useMemo(() => {
+    return [...new Set(rows.map(r => r.className))].sort();
+  }, [rows]);
+
   const filtered = useMemo<GroupedStudent[]>(() => {
-    if (!search.trim()) return grouped;
-    const q = search.toLowerCase();
-    return grouped.filter(s =>
-      s.studentName.toLowerCase().includes(q) ||
-      s.email.toLowerCase().includes(q) ||
-      s.classes.some(c => c.className.toLowerCase().includes(q))
-    );
-  }, [grouped, search]);
+    let result = grouped;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(s =>
+        s.studentName.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        s.classes.some(c => c.className.toLowerCase().includes(q))
+      );
+    }
+    if (filterClass) result = result.filter(s => s.classes.some(c => c.className === filterClass));
+    if (filterPayment) result = result.filter(s => payStatuses[s.studentId] === filterPayment);
+    return result;
+  }, [grouped, search, filterClass, filterPayment, payStatuses]);
+
+  const hasTeacherFilters = !!search.trim() || !!filterClass || !!filterPayment;
+
+  function clearTeacherFilters() {
+    setSearch('');
+    setFilterClass('');
+    setFilterPayment('');
+  }
+
+  function handleExportCsv() {
+    exportCsv({
+      filename: 'my-students',
+      headers: ['Student', 'Email', 'Classes', 'Payment Status'],
+      rows: filtered.map(s => [
+        s.studentName,
+        s.email,
+        s.classes.map(c => c.className).join('; '),
+        payStatuses[s.studentId] || 'unknown',
+      ]),
+    });
+  }
 
   function openNote(studentId: string, studentName: string) {
     setNoteText(notes[studentId] ?? '');
@@ -149,17 +180,49 @@ export default function TeacherStudents() {
       {/* Table card */}
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
 
-        {/* Search */}
-        <div className="mb-6 shrink-0">
-          <div className="relative w-full md:w-96 group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-            <input
-              type="text"
-              placeholder="Search by name, email or class…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
-            />
+        {/* Search & Filters */}
+        <div className="mb-6 shrink-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative flex-1 min-w-[220px] md:max-w-sm group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
+              <input
+                type="text"
+                placeholder="Search by name, email or class…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
+              />
+            </div>
+            <button onClick={handleExportCsv} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-[#fc0ce4]/30 text-white/70 hover:text-white rounded-xl px-4 py-2.5 text-sm transition-all">
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Payment status pills */}
+            {(['', 'paid', 'pending'] as const).map(v => (
+              <button
+                key={v || 'all'}
+                onClick={() => setFilterPayment(v)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${filterPayment === v ? 'bg-[#fc0ce4]/20 border-[#fc0ce4]/40 text-[#fc0ce4]' : 'bg-white/5 border-white/5 text-white/50 hover:border-white/20'}`}
+              >
+                {v === '' ? 'All Payments' : v === 'paid' ? 'Paid' : 'Pending'}
+              </button>
+            ))}
+
+            {/* Class dropdown */}
+            {classOptions.length > 0 && (
+              <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select bg-white/5 border border-white/5 text-white/70 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-[#fc0ce4]/40">
+                <option value="">All Classes</option>
+                {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            )}
+
+            {hasTeacherFilters && (
+              <button onClick={clearTeacherFilters} className="flex items-center gap-1 text-white/40 hover:text-white/70 text-xs transition-colors">
+                <X className="w-3 h-3" /> Clear all
+              </button>
+            )}
           </div>
         </div>
 
@@ -173,7 +236,7 @@ export default function TeacherStudents() {
             <div className="flex flex-col items-center justify-center py-16 text-white/30 gap-3">
               <GraduationCap className="w-8 h-8 opacity-40" />
               <p className="text-sm">
-                {search ? 'No students match your search.' : 'No students enrolled in your classes yet.'}
+                {hasTeacherFilters ? 'No students match your filters.' : 'No students enrolled in your classes yet.'}
               </p>
             </div>
           ) : (

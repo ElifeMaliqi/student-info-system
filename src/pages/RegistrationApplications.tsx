@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { api } from '../services/api';
-import { RegistrationApplication } from '../types';
+import { RegistrationApplication, Class } from '../types';
 import { Skeleton } from '../components/Skeleton';
 
 export default function RegistrationApplications() {
@@ -15,6 +15,9 @@ export default function RegistrationApplications() {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | null>(null);
   const [rejectNotes, setRejectNotes] = useState('');
+  const [approveClasses, setApproveClasses] = useState<Class[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [loadingClasses, setLoadingClasses] = useState(false);
 
   useEffect(() => {
     loadApplications();
@@ -36,12 +39,28 @@ export default function RegistrationApplications() {
     setSelectedApp(null);
     setConfirmAction(null);
     setRejectNotes('');
+    setApproveClasses([]);
+    setSelectedClassId('');
   };
 
-  const openApproveConfirm = (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
+  const openApproveConfirm = async (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
     e.stopPropagation();
     setSelectedApp(app);
     setConfirmAction('approve');
+    setSelectedClassId('');
+    if (app.role === 'student' && app.program) {
+      setLoadingClasses(true);
+      try {
+        const classes = await api.classes.getByProgram(app.program);
+        setApproveClasses(classes);
+      } catch {
+        setApproveClasses([]);
+      } finally {
+        setLoadingClasses(false);
+      }
+    } else {
+      setApproveClasses([]);
+    }
   };
 
   const openRejectConfirm = (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
@@ -53,9 +72,13 @@ export default function RegistrationApplications() {
 
   const doApprove = async () => {
     if (!selectedApp) return;
+    if (selectedApp.role === 'student' && approveClasses.length > 0 && !selectedClassId) {
+      alert('Please select a class for this student.');
+      return;
+    }
     try {
       setProcessingId(selectedApp.id);
-      await api.registrations.approve(selectedApp.id);
+      await api.registrations.approve(selectedApp.id, selectedClassId || undefined);
       await loadApplications();
       closeModal();
     } catch (error) {
@@ -415,7 +438,23 @@ export default function RegistrationApplications() {
               {selectedApp.status === 'pending' && !confirmAction && (
                 <div className="flex gap-3 pt-4 border-t border-white/10">
                   <button
-                    onClick={() => setConfirmAction('approve')}
+                    onClick={async () => {
+                      setConfirmAction('approve');
+                      setSelectedClassId('');
+                      if (selectedApp.role === 'student' && selectedApp.program) {
+                        setLoadingClasses(true);
+                        try {
+                          const classes = await api.classes.getByProgram(selectedApp.program);
+                          setApproveClasses(classes);
+                        } catch {
+                          setApproveClasses([]);
+                        } finally {
+                          setLoadingClasses(false);
+                        }
+                      } else {
+                        setApproveClasses([]);
+                      }
+                    }}
                     disabled={!!processingId}
                     className="flex-1 py-3 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -436,6 +475,35 @@ export default function RegistrationApplications() {
               {selectedApp.status === 'pending' && confirmAction === 'approve' && (
                 <div className="pt-4 border-t border-white/10 space-y-4">
                   <p className="text-sm text-white/70">{t('registrations.confirm_approve_msg')}</p>
+
+                  {selectedApp.role === 'student' && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider block">
+                        Assign to Class {selectedApp.program && <span className="normal-case text-white/60">({selectedApp.program})</span>}
+                      </label>
+                      {loadingClasses ? (
+                        <div className="flex items-center gap-2 text-white/40 text-sm py-2">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading classes…
+                        </div>
+                      ) : approveClasses.length === 0 ? (
+                        <p className="text-xs text-amber-400/80">No classes found for this degree. The student will be approved without a class assignment.</p>
+                      ) : (
+                        <select
+                          value={selectedClassId}
+                          onChange={e => setSelectedClassId(e.target.value)}
+                          className="glass-select w-full px-4 py-3 rounded-xl text-sm"
+                        >
+                          <option value="">Select a class…</option>
+                          {approveClasses.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.title}{c.teacher ? ` — ${c.teacher.firstName} ${c.teacher.lastName}` : ''}{c.enrollmentCount != null ? ` (${c.enrollmentCount} students)` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex gap-3">
                     <button
                       onClick={doApprove}

@@ -10,7 +10,7 @@ import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent } from '../types';
 import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
-import { playPopSound } from '../utils/sound';
+import { exportCsv } from '../utils/csv';
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -41,6 +41,7 @@ export default function Attendance() {
   const [filterDate, setFilterDate]   = useState('');
   const [filterMonth, setFilterMonth] = useState('');
   const [filterYear, setFilterYear]   = useState('');
+  const [filterClass, setFilterClass] = useState('');
 
   // Sorting
   const [sortBy, setSortBy]   = useState<SortCol>('date');
@@ -63,7 +64,11 @@ export default function Attendance() {
 
   const yearOptions = useMemo(() => {
     const years = new Set(sessions.map(s => s.date.slice(0, 4)));
-    return Array.from(years).sort((a, b) => b.localeCompare(a));
+    return Array.from(years).sort((a: string, b: string) => b.localeCompare(a));
+  }, [sessions]);
+
+  const classOptions = useMemo(() => {
+    return [...new Set(sessions.map(s => s.className))].sort();
   }, [sessions]);
 
   const filtered = useMemo(() => {
@@ -76,6 +81,8 @@ export default function Attendance() {
         s.teacherName.toLowerCase().includes(q)
       );
     }
+
+    if (filterClass) result = result.filter(s => s.className === filterClass);
 
     if (filterDate) {
       result = result.filter(s => s.date === filterDate);
@@ -218,8 +225,20 @@ export default function Attendance() {
         <div className="flex items-center justify-between mb-5 shrink-0">
           <h2 className="font-display text-lg font-medium">Attendance Overview</h2>
           <button
-            onClick={() => { playPopSound(); alert('Exporting attendance report to CSV...'); }}
-            className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+            onClick={() => {
+              if (filtered.length === 0) return;
+              exportCsv({
+                filename: 'attendance',
+                headers: ['Date', 'Class', 'Teacher', 'Rate %', 'Present', 'Late', 'Absent'],
+                rows: filtered.map(s => {
+                  const total = s.present + s.absent + s.late;
+                  const pct = total > 0 ? Math.round(((s.present + s.late) / total) * 100) : 0;
+                  return [s.date, s.className, s.teacherName, pct, s.present, s.late, s.absent];
+                }),
+              });
+            }}
+            disabled={filtered.length === 0}
+            className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30"
           >
             <Download className="w-4 h-4" />
             Export
@@ -281,10 +300,22 @@ export default function Attendance() {
               {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
+
+          {/* Class */}
+          <div>
+            <select
+              value={filterClass}
+              onChange={e => setFilterClass(e.target.value)}
+              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+            >
+              <option value="">All Classes</option>
+              {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
         </div>
 
         {/* Active filter chips */}
-        {(filterDate || filterMonth || filterYear) && (
+        {(filterDate || filterMonth || filterYear || filterClass) && (
           <div className="flex items-center gap-2 mb-4 shrink-0 flex-wrap">
             <span className="text-xs text-white/40">Filtering by:</span>
             {filterDate && (
@@ -302,8 +333,13 @@ export default function Attendance() {
                 {filterYear}
               </span>
             )}
+            {filterClass && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">
+                {filterClass}
+              </span>
+            )}
             <button
-              onClick={() => { setFilterDate(''); setFilterMonth(''); setFilterYear(''); }}
+              onClick={() => { setFilterDate(''); setFilterMonth(''); setFilterYear(''); setFilterClass(''); }}
               className="text-xs text-white/30 hover:text-white transition-colors"
             >
               Clear all

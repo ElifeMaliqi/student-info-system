@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
+import { supabase } from '../lib/supabase';
 import { useUser } from '../context/UserContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -16,6 +17,32 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [forgotMode, setForgotMode] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  const handleForgotPassword = async (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    if (!email || !email.includes('@')) {
+      setError('Please enter a valid email address.');
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: 'https://studentinfosystems.netlify.app/resetpassword',
+      });
+      if (error) throw error;
+      setResetSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send reset link.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleLogin = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
@@ -125,13 +152,73 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             className="w-full"
           >
                 <div className="mb-8 lg:mb-10 text-center lg:text-left">
-                  <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">Welcome back</h2>
-                  <p className="text-white/50 text-sm">Enter your credentials to access the portal.</p>
+                  <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">{forgotMode ? 'Reset Password' : 'Welcome back'}</h2>
+                  <p className="text-white/50 text-sm">{forgotMode ? 'Enter your email and we\'ll send you a reset link.' : 'Enter your credentials to access the portal.'}</p>
                 </div>
 
                 <div className="glass-panel p-6 lg:p-8 rounded-[2rem] shadow-2xl shadow-black/50">
 
+                  {forgotMode ? (
+                    resetSent ? (
+                      <div className="space-y-5">
+                        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm text-center">
+                          Check your email for a password reset link. It may take a minute to arrive.
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setForgotMode(false); setResetSent(false); setError(''); }}
+                          className="w-full py-3.5 rounded-2xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          Back to Sign In
+                        </button>
+                      </div>
+                    ) : (
+                      <form className="space-y-4 lg:space-y-5" onSubmit={handleForgotPassword}>
+                        {error && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium text-center"
+                          >
+                            {error}
+                          </motion.div>
+                        )}
 
+                        <div className="space-y-2">
+                          <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address</label>
+                          <div className="relative group">
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                              <Mail className="h-4 w-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
+                            </div>
+                            <input
+                              type="email"
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                              placeholder="name@futureminds.edu"
+                              className="glass-input w-full pl-11 pr-4 py-3 lg:py-3.5 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isLoading}
+                          className="w-full mt-2 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isLoading ? 'Sending…' : 'Send Reset Link'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setForgotMode(false); setError(''); }}
+                          className="w-full py-3 rounded-2xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          Back to Sign In
+                        </button>
+                      </form>
+                    )
+                  ) : (
+                  <>
                   <form className="space-y-4 lg:space-y-5" onSubmit={handleLogin}>
                     {error && (
                       <motion.div 
@@ -162,7 +249,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between ml-1">
                         <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest">Password</label>
-                        <a href="#" className="text-[10px] lg:text-[11px] font-medium text-white/40 hover:text-[#fc0ce4] transition-colors">Forgot?</a>
+                        <button type="button" onClick={() => { setForgotMode(true); setError(''); }} className="text-[10px] lg:text-[11px] font-medium text-white/40 hover:text-[#fc0ce4] transition-colors">Forgot?</button>
                       </div>
                       <div className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-white">
@@ -203,6 +290,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                       Sign in with Passkey
                     </button>
                   </div>
+                  </>
+                  )}
                 </div>
 
             <div className="mt-6 lg:mt-8 text-center pb-8 lg:pb-0">

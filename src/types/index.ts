@@ -33,12 +33,50 @@ export interface Teacher {
 
 export interface Invoice {
   id: string;
+  enrollmentId: string;
   studentId: string;
   studentName?: string;
-  amount: string;
-  status: 'Paid' | 'Pending' | 'Overdue';
-  date: string;
-  due: string;
+  classId: string;
+  className?: string;
+  teacherName?: string;
+  title: string;
+  month: number;
+  year: number;
+  dueDate: string;
+  amount: number;
+  discountPercent: number;
+  status: 'paid' | 'partial' | 'not_paid' | 'overdue';
+}
+
+export interface InvoiceSettings {
+  id: string;
+  defaultAmount: number;
+  titleTemplate: string;
+  discountPercent: number;
+  dueDay: number;
+}
+
+export interface StudentInvoiceOverride {
+  id: string;
+  studentId: string;
+  customAmount?: number;
+  customDiscountPercent?: number;
+  customDueDay?: number;
+  customTitleTemplate?: string;
+}
+
+export interface SettingsStudent {
+  studentId: string;
+  studentName: string;
+  program: string;
+  classes: string[];
+  currentAmount: number;
+  currentDiscount: number;
+  hasOverride: boolean;
+  overrideAmount?: number;
+  overrideDiscountPercent?: number;
+  overrideDueDay?: number;
+  overrideTitleTemplate?: string;
 }
 
 export interface Quiz {

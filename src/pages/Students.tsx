@@ -10,9 +10,9 @@ import { useLanguage } from '../context/LanguageContext';
 import { useDebounce } from '../hooks/useDebounce';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
+import { exportCsv } from '../utils/csv';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
-import { AttendanceRecord } from '../types';
 
 type AdminStudent = {
   id: string;
@@ -49,7 +49,6 @@ type CsvStudentRow = {
   secondaryPhone?: string;
   location: string;
   program: string;
-  classId: string;
 };
 
 interface EnrollForm {
@@ -80,6 +79,9 @@ export default function Students() {
   const [selectedStudentForPanel, setSelectedStudentForPanel] = useState<AdminStudent | null>(null);
   const [students, setStudents] = useState<AdminStudent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterProgram, setFilterProgram] = useState('');
+  const [filterClass, setFilterClass] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
   const itemsPerPage = 10;
   const navigate = useNavigate();
 
@@ -108,6 +110,16 @@ export default function Students() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ── CSV import review modal ────────────────────────────────────────────────
+  const [csvPendingRows, setCsvPendingRows] = useState<CsvStudentRow[]>([]);
+  const [csvForms, setCsvForms] = useState<EnrollForm[]>([]);
+  const [csvClassOptions, setCsvClassOptions] = useState<Record<string, { id: string; title: string; teacherName: string; count: number }[]>>({});
+  const [csvLoadingClasses, setCsvLoadingClasses] = useState(false);
+  const [csvProcessing, setCsvProcessing] = useState(false);
+  const [csvResults, setCsvResults] = useState<{ success: number; total: number; errors: string[] } | null>(null);
+  const [csvCurrentIdx, setCsvCurrentIdx] = useState(0);
+  const [csvTakenEmails, setCsvTakenEmails] = useState<Set<string>>(new Set());
   const [insightPanel, setInsightPanel] = useState<{
     type: 'grades' | 'attendance' | 'payments';
     student: AdminStudent;
@@ -124,7 +136,7 @@ export default function Students() {
     gradedAt: string | null;
     note: string | null;
   }[]>([]);
-  const [insightAttendance, setInsightAttendance] = useState<AttendanceRecord[]>([]);
+  const [insightAttendance, setInsightAttendance] = useState<{ classId: string; className: string; date: string; status: 'present' | 'absent' | 'late' }[]>([]);
   const [insightPayments, setInsightPayments] = useState<any[]>([]);
   const [insightInvoices, setInsightInvoices] = useState<any[]>([]);
 
@@ -160,16 +172,39 @@ export default function Students() {
     }
   }, [location.search]);
 
+  const studentFilterOptions = useMemo(() => {
+    const programs = [...new Set(students.flatMap(s => s.programs.map(p => p.programName)))].sort();
+    const classes = [...new Set(students.flatMap(s => s.classes.map(c => c.className)))].sort();
+    const locations = [...new Set(students.map(s => s.location).filter(Boolean))].sort();
+    return { programs, classes, locations };
+  }, [students]);
+
   const filteredStudents = useMemo(() => {
-    if (!debouncedSearch.trim()) return students;
-    const q = debouncedSearch.toLowerCase();
-    return students.filter(s =>
-      s.name.toLowerCase().includes(q) ||
-      s.email.toLowerCase().includes(q) ||
-      s.programs.some(p => p.programName.toLowerCase().includes(q)) ||
-      s.classes.some(c => c.className.toLowerCase().includes(q))
-    );
-  }, [students, debouncedSearch]);
+    let result = students;
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
+      result = result.filter(s =>
+        s.name.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q) ||
+        s.programs.some(p => p.programName.toLowerCase().includes(q)) ||
+        s.classes.some(c => c.className.toLowerCase().includes(q))
+      );
+    }
+    if (filterProgram) result = result.filter(s => s.programs.some(p => p.programName === filterProgram));
+    if (filterClass) result = result.filter(s => s.classes.some(c => c.className === filterClass));
+    if (filterLocation) result = result.filter(s => s.location === filterLocation);
+    return result;
+  }, [students, debouncedSearch, filterProgram, filterClass, filterLocation]);
+
+  const hasStudentFilters = !!debouncedSearch.trim() || !!filterProgram || !!filterClass || !!filterLocation;
+
+  function clearStudentFilters() {
+    setSearchQuery('');
+    setFilterProgram('');
+    setFilterClass('');
+    setFilterLocation('');
+    setCurrentPage(1);
+  }
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.checked) {
@@ -186,11 +221,27 @@ export default function Students() {
   };
 
   const handleExport = () => {
-    playPopSound();
-    alert(`Exporting ${selectedStudents.length > 0 ? selectedStudents.length : filteredStudents.length} students to CSV...`);
+    const dataToExport = selectedStudents.length > 0
+      ? filteredStudents.filter(s => selectedStudents.includes(s.id))
+      : filteredStudents;
+    if (dataToExport.length === 0) return;
+    exportCsv({
+      filename: 'students',
+      headers: ['first_name', 'last_name', 'parent_first_name', 'email', 'phone', 'secondary_phone', 'location', 'degree'],
+      rows: dataToExport.map(s => [
+        s.firstName,
+        s.lastName,
+        s.parentFirstName || '',
+        s.email,
+        s.phone || '',
+        s.secondaryPhone || '',
+        s.location || '',
+        s.programs.map(p => p.programName).join('; '),
+      ]),
+    });
   };
 
-  const parseCsvLine = (line: string): string[] => {
+  const parseCsvLine = (line: string, delim = ','): string[] => {
     const values: string[] = [];
     let current = '';
     let inQuotes = false;
@@ -204,7 +255,7 @@ export default function Students() {
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (ch === ',' && !inQuotes) {
+      } else if (ch === delim && !inQuotes) {
         values.push(current.trim());
         current = '';
       } else {
@@ -227,19 +278,28 @@ export default function Students() {
   const handleCsvImport = async (file: File) => {
     setImportingCsv(true);
     try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+      let text = await file.text();
+      // Strip BOM (byte-order mark)
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      let lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+
+      // Skip Excel sep= directive
+      if (lines[0]?.trim().toLowerCase().startsWith('sep=')) lines = lines.slice(1);
 
       if (lines.length < 2) {
         throw new Error('CSV file must include a header and at least one row.');
       }
 
-      const headers = parseCsvLine(lines[0]).map(h => h.trim());
+      // Auto-detect delimiter: if first line has more semicolons than commas, use semicolons
+      const commaCount = (lines[0].match(/,/g) || []).length;
+      const semiCount = (lines[0].match(/;/g) || []).length;
+      const delimiter = semiCount > commaCount ? ';' : ',';
+
+      const headers = parseCsvLine(lines[0], delimiter).map(h => h.trim().replace(/^["']+|["']+$/g, ''));
       const parsedRows: CsvStudentRow[] = [];
-      const classCache = new Map<string, { id: string; title: string }[]>();
 
       for (let i = 1; i < lines.length; i++) {
-        const cols = parseCsvLine(lines[i]);
+        const cols = parseCsvLine(lines[i], delimiter);
         const row: Record<string, string> = {};
         headers.forEach((header, idx) => { row[header] = (cols[idx] || '').trim(); });
 
@@ -251,65 +311,140 @@ export default function Students() {
         const secondaryPhone = getHeaderValue(row, ['secondary_phone', 'secondaryPhone']);
         const location = getHeaderValue(row, ['location']);
         const program = getHeaderValue(row, ['degree', 'program']);
-        let classId = getHeaderValue(row, ['class_id', 'classId']);
-        const classTitle = getHeaderValue(row, ['class_title', 'class', 'className']);
 
-        if (!firstName || !lastName || !parentFirstName || !email || !phone || !location || !program) {
-          throw new Error(`Row ${i + 1} is missing required fields.`);
-        }
+        // Accept rows with at least some data — missing fields left blank for admin to fill
+        if (!firstName && !lastName && !email) continue; // skip fully empty rows
 
-        if (!classId) {
-          if (!classCache.has(program)) {
-            const classes = await api.classes.getByProgram(program);
-            classCache.set(program, classes.map(c => ({ id: c.id, title: c.title })));
-          }
-          const cls = classCache.get(program)?.find(c => c.title.toLowerCase() === classTitle.toLowerCase());
-          classId = cls?.id || '';
-        }
-
-        if (!classId) {
-          throw new Error(`Row ${i + 1} needs class_id or a valid class_title under degree '${program}'.`);
-        }
-
-        parsedRows.push({ firstName, lastName, parentFirstName, email, phone, secondaryPhone, location, program, classId });
+        parsedRows.push({ firstName, lastName, parentFirstName, email, phone, secondaryPhone, location, program });
       }
 
-      let successCount = 0;
-      const errors: string[] = [];
-      for (let i = 0; i < parsedRows.length; i++) {
-        const row = parsedRows[i];
+      if (parsedRows.length === 0) {
+        throw new Error('No valid student rows found in the CSV file.');
+      }
+
+      // Check for already-taken emails
+      const emailsToCheck = parsedRows.map(r => r.email).filter(e => e && e.includes('@'));
+      let takenEmails = new Set<string>();
+      try {
+        takenEmails = await api.registrations.checkExistingEmails(emailsToCheck);
+      } catch { /* proceed without check */ }
+      setCsvTakenEmails(takenEmails);
+
+      // Fetch classes for each unique program
+      const uniquePrograms = [...new Set(parsedRows.map(r => r.program).filter(Boolean))];
+      setCsvLoadingClasses(true);
+      const classMap: Record<string, { id: string; title: string; teacherName: string; count: number }[]> = {};
+      for (const prog of uniquePrograms) {
         try {
-          await api.registrations.adminEnroll({
-            email: row.email.toLowerCase(),
-            firstName: row.firstName,
-            lastName: row.lastName,
-            parentFirstName: row.parentFirstName,
-            phone: row.phone,
-            secondaryPhone: row.secondaryPhone,
-            location: row.location,
-            program: row.program,
-            classId: row.classId,
-          });
-          successCount++;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          errors.push(`Row ${i + 2}: ${msg}`);
+          const classes = await api.classes.getByProgram(prog);
+          classMap[prog] = classes.map(c => ({
+            id: c.id,
+            title: c.title,
+            teacherName: c.teacher ? `${c.teacher.firstName} ${c.teacher.lastName}` : '',
+            count: c.enrollmentCount || 0,
+          }));
+        } catch {
+          classMap[prog] = [];
         }
       }
+      setCsvLoadingClasses(false);
+      setCsvClassOptions(classMap);
 
-      await loadStudents();
-      const summary = [`Imported ${successCount}/${parsedRows.length} students.`];
-      if (errors.length > 0) {
-        summary.push('Errors:');
-        summary.push(...errors.slice(0, 10));
-      }
-      alert(summary.join('\n'));
+      // Pre-fill EnrollForm for each row
+      setCsvForms(parsedRows.map(r => ({
+        firstName: r.firstName,
+        lastName: r.lastName,
+        parentFirstName: r.parentFirstName,
+        email: r.email,
+        password: 'FMA#2026',
+        phone: r.phone,
+        secondaryPhone: r.secondaryPhone || '',
+        location: r.location,
+        program: r.program,
+        classId: '',
+      })));
+      setCsvCurrentIdx(0);
+      setCsvPendingRows(parsedRows);
+      setCsvResults(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'CSV import failed.');
     } finally {
       if (csvInputRef.current) csvInputRef.current.value = '';
       setImportingCsv(false);
     }
+  };
+
+  const setCsvField = (idx: number, key: keyof EnrollForm, value: string) => {
+    setCsvForms(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [key]: value };
+      // When program changes, reset classId and fetch classes
+      if (key === 'program') {
+        next[idx].classId = '';
+        if (value && !csvClassOptions[value]) {
+          api.classes.getByProgram(value).then(classes => {
+            setCsvClassOptions(prev => ({
+              ...prev,
+              [value]: classes.map(c => ({
+                id: c.id,
+                title: c.title,
+                teacherName: c.teacher ? `${c.teacher.firstName} ${c.teacher.lastName}` : '',
+                count: c.enrollmentCount || 0,
+              })),
+            }));
+          }).catch(() => {
+            setCsvClassOptions(prev => ({ ...prev, [value]: [] }));
+          });
+        }
+      }
+      return next;
+    });
+  };
+
+  const confirmCsvImport = async () => {
+    // Validate all forms
+    for (let i = 0; i < csvForms.length; i++) {
+      const f = csvForms[i];
+      if (!f.firstName.trim() || !f.lastName.trim() || !f.parentFirstName.trim() || !f.email.includes('@') || !f.phone.trim() || !f.location || !f.program || !f.classId) {
+        setCsvCurrentIdx(i);
+        alert(`Please fill all required fields for ${f.firstName || 'student'} ${f.lastName || ''} (student ${i + 1}).`);
+        return;
+      }
+      if (csvTakenEmails.has(f.email.trim().toLowerCase())) {
+        setCsvCurrentIdx(i);
+        alert(`Email "${f.email}" is already taken (student ${i + 1}). Please change it or remove this student.`);
+        return;
+      }
+    }
+
+    setCsvProcessing(true);
+    let successCount = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < csvForms.length; i++) {
+      const f = csvForms[i];
+      try {
+        await api.registrations.adminEnroll({
+          email: f.email.trim().toLowerCase(),
+          firstName: f.firstName.trim(),
+          lastName: f.lastName.trim(),
+          parentFirstName: f.parentFirstName.trim(),
+          phone: f.phone.trim(),
+          secondaryPhone: f.secondaryPhone.trim() || undefined,
+          location: f.location,
+          program: f.program,
+          classId: f.classId,
+        });
+        successCount++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        errors.push(`${f.firstName} ${f.lastName}: ${msg}`);
+      }
+    }
+
+    setCsvProcessing(false);
+    setCsvResults({ success: successCount, total: csvForms.length, errors });
+    await loadStudents();
   };
 
   const handleEditOpen = (student: AdminStudent) => {
@@ -385,14 +520,10 @@ export default function Students() {
         setGradeFilterMonth('');
         setGradeFilterYear('');
       } else if (type === 'attendance') {
-        const data = await api.attendance.getAll(selectedStudentForPanel.id);
+        const data = await api.classAttendance.getForStudent(selectedStudentForPanel.id);
         setInsightAttendance(data);
       } else {
-        const [payments, invoices] = await Promise.all([
-          api.finance.getPayments(selectedStudentForPanel.id),
-          api.finance.getInvoices(selectedStudentForPanel.id),
-        ]);
-        setInsightPayments(payments || []);
+        const invoices = await api.finance.getInvoices(selectedStudentForPanel.id);
         setInsightInvoices(invoices || []);
       }
     } catch (err) {
@@ -413,19 +544,16 @@ export default function Students() {
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
     
-    const targetDate = new Date(year, month);
-    
     // Before enrollment or after current month
     if (year < enrollYear || (year === enrollYear && month < enrollMonth)) return 'gray';
     if (year > currentYear || (year === currentYear && month > currentMonth)) return 'gray';
     
-    // Check if paid
-    const isPaid = insightPayments.some((p: any) => {
-      const payDate = new Date(p.payment_date || p.date);
-      return payDate.getFullYear() === year && payDate.getMonth() === month;
-    });
+    // Check if all invoices for this month are paid (month is 0-based here, invoices use 1-based)
+    const monthInvoices = insightInvoices.filter((inv: any) => inv.year === year && inv.month === month + 1);
+    if (monthInvoices.length === 0) return 'gray';
+    const allPaid = monthInvoices.every((inv: any) => inv.status === 'paid');
     
-    return isPaid ? 'green' : 'red';
+    return allPaid ? 'green' : 'red';
   };
 
   const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
@@ -762,32 +890,49 @@ export default function Students() {
       </div>
 
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
-        <div className="flex flex-col md:flex-row gap-4 justify-between mb-6 shrink-0">
-          <div className="relative w-full md:w-96 group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-            <input 
-              type="text" 
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setCurrentPage(1); // Reset to first page on search
-              }}
-              placeholder={t('students.search')} 
-              className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
-            />
-          </div>
-          <div className="flex gap-2">
+        <div className="flex flex-col gap-4 justify-between mb-6 shrink-0">
+          <div className="flex flex-col md:flex-row gap-4 justify-between">
+            <div className="relative w-full md:w-96 group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder={t('students.search')} 
+                className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
+              />
+            </div>
             <button 
               onClick={handleExport}
-              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+              disabled={filteredStudents.length === 0}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start"
             >
               <Download className="w-4 h-4" />
-              Export
+              Export CSV
             </button>
-            <button className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              {t('students.filter')}
-            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={filterProgram} onChange={e => { setFilterProgram(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+              <option value="">All Programs</option>
+              {studentFilterOptions.programs.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+              <option value="">All Classes</option>
+              {studentFilterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filterLocation} onChange={e => { setFilterLocation(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+              <option value="">All Locations</option>
+              {studentFilterOptions.locations.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {hasStudentFilters && (
+              <button onClick={clearStudentFilters} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
+                Clear all
+              </button>
+            )}
           </div>
         </div>
 
@@ -1056,6 +1201,13 @@ export default function Students() {
                 Payments
               </button>
             </div>
+
+            <button
+              onClick={() => navigate(`/students/${selectedStudentForPanel.id}`)}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all"
+            >
+              View Full Profile
+            </button>
           </div>
         )}
       </SlideOver>
@@ -1221,17 +1373,19 @@ export default function Students() {
                     <div className="space-y-2">
                       {insightAttendance.length === 0 ? (
                         <p className="text-sm text-white/50">No attendance records found.</p>
-                      ) : insightAttendance.map((a) => (
-                        <div key={a.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                      ) : insightAttendance.map((a, i) => (
+                        <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-sm text-white">{a.date}</p>
+                            <div>
+                              <p className="text-sm text-white">{a.date}</p>
+                              <p className="text-[11px] text-white/30 mt-0.5">{a.className}</p>
+                            </div>
                             <span className={`text-xs px-2 py-0.5 rounded-full border ${
                               a.status === 'present' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' :
                               a.status === 'late' ? 'bg-amber-500/10 text-amber-300 border-amber-500/20' :
                               'bg-red-500/10 text-red-300 border-red-500/20'
-                            }`}>{a.status}</span>
+                            }`}>{a.status.charAt(0).toUpperCase() + a.status.slice(1)}</span>
                           </div>
-                          {a.notes && <p className="text-xs text-white/55 mt-1">{a.notes}</p>}
                         </div>
                       ))}
                     </div>
@@ -1281,17 +1435,17 @@ export default function Students() {
                       </div>
 
                       <div className="border-t border-white/10 pt-4">
-                        <h4 className="text-sm font-semibold text-white mb-3">Payment Records</h4>
+                        <h4 className="text-sm font-semibold text-white mb-3">Invoice Records</h4>
                         <div className="space-y-2">
-                          {insightPayments.length === 0 ? (
-                            <p className="text-sm text-white/50">No payments found.</p>
-                          ) : insightPayments.map((p: any) => (
-                            <div key={p.id} className="rounded-lg border border-white/10 bg-white/5 p-2.5">
+                          {insightInvoices.length === 0 ? (
+                            <p className="text-sm text-white/50">No invoices found.</p>
+                          ) : insightInvoices.map((inv: any) => (
+                            <div key={inv.id} className="rounded-lg border border-white/10 bg-white/5 p-2.5">
                               <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm text-white font-medium">${Number(p.amount || 0).toFixed(2)}</p>
-                                <span className="text-xs text-white/60">{p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '—'}</span>
+                                <p className="text-sm text-white font-medium">{inv.title}</p>
+                                <span className={`text-xs px-2 py-0.5 rounded-full border ${inv.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : inv.status === 'overdue' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>{inv.status === 'not_paid' ? 'Not Paid' : inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}</span>
                               </div>
-                              <p className="text-xs text-white/50 mt-1">Method: {p.payment_method || 'N/A'}</p>
+                              <p className="text-xs text-white/50 mt-1">€{Number(inv.amount || 0).toFixed(2)} — Due: {inv.dueDate ? new Date(inv.dueDate + 'T12:00:00').toLocaleDateString() : '—'}</p>
                             </div>
                           ))}
                         </div>
@@ -1303,6 +1457,200 @@ export default function Students() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* CSV Import — Review & Confirm Modal */}
+      <AnimatePresence>
+        {csvPendingRows.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+              className="glass-card rounded-2xl p-6 w-full max-w-3xl border border-white/10 max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {csvResults ? (
+                /* ── Results screen ── */
+                <div className="space-y-4">
+                  <h3 className="font-display text-xl font-medium text-white">Import Complete</h3>
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                    <span className="text-white text-lg">{csvResults.success} / {csvResults.total} students imported successfully</span>
+                  </div>
+                  {csvResults.errors.length > 0 && (
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      <p className="text-sm font-medium text-red-400">Errors:</p>
+                      {csvResults.errors.map((err, i) => (
+                        <p key={i} className="text-xs text-red-300/70">{err}</p>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { setCsvPendingRows([]); setCsvForms([]); setCsvResults(null); setCsvTakenEmails(new Set()); }}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                /* ── Form review screen ── */
+                <>
+                  <div className="flex items-center justify-between mb-4 shrink-0">
+                    <div>
+                      <h3 className="font-display text-xl font-medium text-white">Review Imported Students</h3>
+                      <p className="text-sm text-white/50 mt-1">
+                        Student {csvCurrentIdx + 1} of {csvForms.length} — review and edit details, then assign a class.
+                      </p>
+                    </div>
+                    <button onClick={() => { setCsvPendingRows([]); setCsvForms([]); setCsvTakenEmails(new Set()); }} className="p-2 rounded-lg hover:bg-white/5"><X className="w-5 h-5 text-white/50" /></button>
+                  </div>
+
+                  {/* Tab dots / quick nav */}
+                  <div className="flex gap-1.5 mb-4 flex-wrap shrink-0">
+                    {csvForms.map((f, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setCsvCurrentIdx(idx)}
+                        className={`w-8 h-8 rounded-lg text-xs font-semibold transition-all ${idx === csvCurrentIdx
+                          ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white shadow-[0_0_12px_rgba(252,12,228,0.3)]'
+                          : csvTakenEmails.has(f.email.trim().toLowerCase())
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/20'
+                            : f.classId
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        {idx + 1}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Current student form */}
+                  {csvForms[csvCurrentIdx] && (() => {
+                    const f = csvForms[csvCurrentIdx];
+                    const idx = csvCurrentIdx;
+                    const inp = 'glass-input w-full px-4 py-2.5 rounded-xl text-sm text-white placeholder:text-white/20';
+                    const programClasses = csvClassOptions[f.program] || [];
+                    return (
+                      <div className="overflow-y-auto flex-1 pr-1 space-y-4">
+                        {/* Name row */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">First Name *</label>
+                            <input type="text" value={f.firstName} onChange={e => setCsvField(idx, 'firstName', e.target.value)} className={inp} placeholder="John" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Last Name *</label>
+                            <input type="text" value={f.lastName} onChange={e => setCsvField(idx, 'lastName', e.target.value)} className={inp} placeholder="Doe" />
+                          </div>
+                        </div>
+
+                        {/* Parent name */}
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name *</label>
+                          <input type="text" value={f.parentFirstName} onChange={e => setCsvField(idx, 'parentFirstName', e.target.value)} className={inp} placeholder="Parent's name" />
+                        </div>
+
+                        {/* Email + Phone */}
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email *</label>
+                            <input type="email" value={f.email} onChange={e => setCsvField(idx, 'email', e.target.value)} className={`${inp}${csvTakenEmails.has(f.email.trim().toLowerCase()) ? ' !border-red-500 !ring-red-500/30' : ''}`} placeholder="email@example.com" />
+                            {csvTakenEmails.has(f.email.trim().toLowerCase()) && (
+                              <p className="text-[11px] text-red-400 mt-0.5 ml-1">Email already taken, try signing in</p>
+                            )}
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Phone *</label>
+                            <input type="tel" value={f.phone} onChange={e => setCsvField(idx, 'phone', e.target.value)} className={inp} placeholder="+1 555 000 0000" />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Secondary Phone</label>
+                            <input type="tel" value={f.secondaryPhone} onChange={e => setCsvField(idx, 'secondaryPhone', e.target.value)} className={inp} placeholder="Optional" />
+                          </div>
+                        </div>
+
+                        {/* Location */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Location *</label>
+                            <select value={f.location} onChange={e => setCsvField(idx, 'location', e.target.value)} className="glass-select w-full px-4 py-2.5 rounded-xl text-sm">
+                              <option value="">Select Location</option>
+                              {LOCATION_OPTIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Password</label>
+                            <input type="text" value="FMA#2026" readOnly className={`${inp} opacity-60 cursor-not-allowed`} />
+                          </div>
+                        </div>
+
+                        {/* Degree + Class */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Degree *</label>
+                            <select value={f.program} onChange={e => setCsvField(idx, 'program', e.target.value)} className="glass-select w-full px-4 py-2.5 rounded-xl text-sm">
+                              <option value="">Select Degree</option>
+                              {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Class *</label>
+                            <select
+                              value={f.classId}
+                              onChange={e => setCsvField(idx, 'classId', e.target.value)}
+                              disabled={!f.program || csvLoadingClasses}
+                              className="glass-select w-full px-4 py-2.5 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <option value="">{!f.program ? 'Select degree first' : programClasses.length === 0 ? 'No classes found' : 'Select Class'}</option>
+                              {programClasses.map(c => (
+                                <option key={c.id} value={c.id}>{c.title}{c.teacherName ? ` — ${c.teacherName}` : ''} ({c.count})</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Navigation + Confirm */}
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10 shrink-0">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setCsvCurrentIdx(i => Math.max(0, i - 1))}
+                        disabled={csvCurrentIdx === 0}
+                        className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-30 flex items-center gap-1.5"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Previous
+                      </button>
+                      <button
+                        onClick={() => setCsvCurrentIdx(i => Math.min(csvForms.length - 1, i + 1))}
+                        disabled={csvCurrentIdx === csvForms.length - 1}
+                        className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-30 flex items-center gap-1.5"
+                      >
+                        Next <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <button
+                      onClick={confirmCsvImport}
+                      disabled={csvProcessing}
+                      className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {csvProcessing ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</> : `Import All ${csvForms.length} Students`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
