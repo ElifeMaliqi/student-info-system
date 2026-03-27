@@ -68,6 +68,7 @@ body {
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
+  color-scheme: dark;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 12px center;
@@ -89,9 +90,15 @@ body {
 }
 
 .glass-select option {
-  background: #0a0a0a;
+  background: #111111;
   color: #ffffff;
-  padding: 8px;
+  padding: 8px 12px;
+}
+
+.glass-select option:hover,
+.glass-select option:checked {
+  background: #1e1e2e;
+  color: #ffffff;
 }
 
 /* Typography */

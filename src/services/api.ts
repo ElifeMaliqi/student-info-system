@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Quiz, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -981,36 +981,6 @@ export const api = {
   },
 
   teacher: {
-    getQuizzes: async (teacherId?: string): Promise<Quiz[]> => {
-      let query = supabase
-        .from('quizzes')
-        .select(`
-          *,
-          program:programs!quizzes_program_id_fkey(name),
-          results:quiz_results(count)
-        `)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-
-      if (teacherId) {
-        query = query.eq('created_by', teacherId);
-      }
-
-      const { data, error } = await query;
-      if (error) throw new Error(error.message);
-
-      return (data || []).map(q => ({
-        id: q.id,
-        title: q.title,
-        program: q.program?.name || 'General',
-        submissions: `${q.results?.length || 0}`,
-        date: formatDate(q.created_at),
-        status: new Date(q.end_date) < new Date() ? 'Completed' : 'Grading',
-        totalPoints: q.total_points,
-        duration: q.duration_minutes
-      }));
-    },
-
     getStudents: async (teacherId: string) => {
       // Get students from teacher_programs relationship (legacy)
       const { data: programData, error: programError } = await supabase
@@ -1381,6 +1351,58 @@ export const api = {
         enrolled: p.enrolled_count,
         color: p.color
       }));
+    },
+
+    create: async (program: { name: string; description?: string; duration: number; price: number; capacity: number }): Promise<Program> => {
+      const { data, error } = await supabase
+        .from('programs')
+        .insert([{
+          name: program.name,
+          description: program.description || null,
+          duration_months: program.duration,
+          price: program.price,
+          capacity: program.capacity,
+        }])
+        .select()
+        .single();
+
+      if (error) throw new Error(error.message);
+
+      return {
+        id: data.id,
+        name: data.name,
+        description: data.description,
+        duration: data.duration_months,
+        price: parseFloat(data.price),
+        capacity: data.capacity,
+        enrolled: data.enrolled_count,
+        color: data.color
+      };
+    },
+
+    update: async (id: string, program: { name: string; description?: string; duration: number; price: number; capacity: number }): Promise<void> => {
+      const { error } = await supabase
+        .from('programs')
+        .update({
+          name: program.name,
+          description: program.description || null,
+          duration_months: program.duration,
+          price: program.price,
+          capacity: program.capacity,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      if (error) throw new Error(error.message);
+    },
+
+    delete: async (id: string): Promise<void> => {
+      const { error } = await supabase
+        .from('programs')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) throw new Error(error.message);
     }
   },
 

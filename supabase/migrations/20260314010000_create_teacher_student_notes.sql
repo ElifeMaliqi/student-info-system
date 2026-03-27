@@ -36,3 +36,4 @@ CREATE POLICY "teacher_notes_update"
   WITH CHECK (teacher_id = auth.uid());
 
 NOTIFY pgrst, 'reload schema';
+

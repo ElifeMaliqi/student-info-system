@@ -37,16 +37,6 @@ type AttSession = {
   late: number;
 };
 
-type Quiz = {
-  id: string;
-  title: string;
-  program: string;
-  submissions: string;
-  date: string;
-  status: string;
-  type?: string;
-};
-
 type Tab = 'students' | 'projects' | 'attendance';
 
 export default function TeacherClasses() {
@@ -709,7 +699,7 @@ export default function TeacherClasses() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">My Classes</h1>
-          <p className="text-white/50 text-sm">Click a class to view its students, quizzes, and attendance.</p>
+          <p className="text-white/50 text-sm">Click a class to view its students and attendance.</p>
         </div>
       </div>
 

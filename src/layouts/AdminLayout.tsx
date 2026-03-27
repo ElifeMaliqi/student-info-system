@@ -124,6 +124,19 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
             </button>
           </>
         )}
+        {role !== 'admin' && (
+          <button 
+            onClick={() => navigate('/settings')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 mt-4 ${
+              activeTab === 'settings' 
+                ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
+                : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
+            }`}
+          >
+            <Settings className={`w-4 h-4 ${activeTab === 'settings' ? 'text-[#fc0ce4]' : 'text-white/40'}`} />
+            {t('nav.settings')}
+          </button>
+        )}
       </nav>
 
       <div className="p-4 border-t border-white/5 shrink-0">

@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus } from 'lucide-react';
+import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus, GraduationCap, Edit2, Loader2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { PROGRAM_DETAILS } from '../constants/programs';
 import { api } from '../services/api';
-import { Class, ClassSession, ClassEnrollment } from '../types';
+import { Class, ClassSession, ClassEnrollment, Program } from '../types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 export default function AdminPrograms() {
   const { t } = useLanguage();
+  const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
@@ -18,6 +18,8 @@ export default function AdminPrograms() {
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [showClassEditModal, setShowClassEditModal] = useState(false);
+  const [showDegreeModal, setShowDegreeModal] = useState(false);
+  const [editingDegree, setEditingDegree] = useState<Program | null>(null);
   const [teachers, setTeachers] = useState<any[]>([]);
   const [availableStudents, setAvailableStudents] = useState<any[]>([]);
   const [modalEnrollments, setModalEnrollments] = useState<ClassEnrollment[]>([]);
@@ -32,6 +34,13 @@ export default function AdminPrograms() {
     teacherId: '',
     sessions: [] as { dayOfWeek: number; startTime: string; endTime: string }[],
   });
+  const [degreeForm, setDegreeForm] = useState({
+    name: '',
+    description: '',
+    duration: 12,
+    price: 0,
+    capacity: 30,
+  });
   
   const [newClass, setNewClass] = useState({
     title: '',
@@ -41,6 +50,10 @@ export default function AdminPrograms() {
       { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
     ]
   });
+
+  useEffect(() => {
+    loadPrograms();
+  }, []);
 
   useEffect(() => {
     if (selectedProgram) {
@@ -64,6 +77,15 @@ export default function AdminPrograms() {
       });
     }
   }, [selectedClass]);
+
+  const loadPrograms = async () => {
+    try {
+      const data = await api.programs.getAll();
+      setPrograms(data);
+    } catch (err) {
+      console.error('Failed to load programs:', err);
+    }
+  };
 
   const loadClasses = async () => {
     try {
@@ -132,10 +154,83 @@ export default function AdminPrograms() {
     }
   };
 
+  const handleCreateDegree = async (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    if (!degreeForm.name.trim()) {
+      setError('Please provide a degree name.');
+      return;
+    }
+    try {
+      setLoading(true);
+      if (editingDegree) {
+        await api.programs.update(editingDegree.id, {
+          name: degreeForm.name.trim(),
+          description: degreeForm.description.trim(),
+          duration: degreeForm.duration,
+          price: degreeForm.price,
+          capacity: degreeForm.capacity,
+        });
+      } else {
+        await api.programs.create({
+          name: degreeForm.name.trim(),
+          description: degreeForm.description.trim(),
+          duration: degreeForm.duration,
+          price: degreeForm.price,
+          capacity: degreeForm.capacity,
+        });
+      }
+      setShowDegreeModal(false);
+      setEditingDegree(null);
+      setDegreeForm({ name: '', description: '', duration: 12, price: 0, capacity: 30 });
+      setError('');
+      await loadPrograms();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save degree');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteDegree = async (programId: string, programName: string) => {
+    if (!confirm(`Are you sure you want to delete "${programName}"? This will deactivate the degree.`)) return;
+    try {
+      setLoading(true);
+      await api.programs.delete(programId);
+      await loadPrograms();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete degree');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openEditDegree = (program: Program) => {
+    setEditingDegree(program);
+    setDegreeForm({
+      name: program.name,
+      description: program.description || '',
+      duration: program.duration,
+      price: program.price,
+      capacity: program.capacity,
+    });
+    setShowDegreeModal(true);
+  };
+
   const handleCreateClass = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!selectedProgram || !newClass.title || !newClass.teacherId) {
-      setError('Please fill in all required fields');
+    if (!selectedProgram || !newClass.title.trim() || !newClass.teacherId) {
+      setError('Please fill in all required fields (title and teacher).');
+      return;
+    }
+
+    if (newClass.sessions.length === 0) {
+      setError('Please add at least one weekly session.');
+      return;
+    }
+
+    const invalidSession = newClass.sessions.find(s => !s.startTime || !s.endTime);
+    if (invalidSession) {
+      setError('Please fill in start and end times for all sessions.');
       return;
     }
 
@@ -352,38 +447,196 @@ export default function AdminPrograms() {
             <h1 className="font-display text-3xl font-medium tracking-tight mb-1">Degrees</h1>
             <p className="text-white/50 text-sm">Manage degrees, create classes, and assign teachers & students.</p>
           </div>
+          <button
+            onClick={() => {
+              setEditingDegree(null);
+              setDegreeForm({ name: '', description: '', duration: 12, price: 0, capacity: 30 });
+              setShowDegreeModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
+          >
+            <Plus size={18} />
+            New Degree
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {PROGRAM_DETAILS.map((program, idx) => (
-            <motion.button
-              key={program.id}
-              onClick={() => setSelectedProgram(program.name)}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              className="glass-card rounded-2xl p-6 text-left hover:bg-white/10 transition-colors group"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-                  <BookOpen size={20} className="text-white" />
+        {error && (
+          <div className="glass-card rounded-xl p-4 border border-red-500/20 bg-red-500/5 text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {programs.length === 0 ? (
+          <div className="glass-card rounded-2xl p-12 text-center text-white/50">
+            <GraduationCap size={32} className="mx-auto mb-4 opacity-50" />
+            <p>No degrees created yet. Click "New Degree" to get started.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {programs.map((program, idx) => (
+              <motion.div
+                key={program.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.05 }}
+                className="glass-card rounded-2xl p-6 text-left group relative"
+              >
+                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEditDegree(program); }}
+                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                    title="Edit degree"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteDegree(program.id, program.name); }}
+                    className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/50 hover:text-red-400 transition-colors"
+                    title="Delete degree"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-                <ChevronDown size={16} className="text-white/30 group-hover:text-white/70 transition-colors" />
-              </div>
-              <h3 className="font-semibold mb-2 text-white">{program.name}</h3>
-              <div className="space-y-1 text-xs text-white/60">
-                <p>Duration: {program.duration} months</p>
-                <p>Price: {program.price}</p>
-              </div>
-            </motion.button>
-          ))}
-        </div>
+
+                <button
+                  onClick={() => setSelectedProgram(program.name)}
+                  className="w-full text-left"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
+                      <BookOpen size={20} className="text-white" />
+                    </div>
+                    <ChevronDown size={16} className="text-white/30 group-hover:text-white/70 transition-colors" />
+                  </div>
+                  <h3 className="font-semibold mb-2 text-white">{program.name}</h3>
+                  <div className="space-y-1 text-xs text-white/60">
+                    <p>Duration: {program.duration} months</p>
+                    <p>Price: €{program.price.toLocaleString()}</p>
+                    <p>Capacity: {program.capacity} students</p>
+                  </div>
+                </button>
+              </motion.div>
+            ))}
+          </div>
+        )}
+
+        {/* Create / Edit Degree Modal */}
+        <AnimatePresence>
+          {showDegreeModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => { setShowDegreeModal(false); setEditingDegree(null); }}
+            >
+              <motion.div
+                initial={{ scale: 0.95 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0.95 }}
+                onClick={(e) => e.stopPropagation()}
+                className="glass-card rounded-3xl p-8 max-w-md w-full space-y-6"
+              >
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-2xl font-medium">{editingDegree ? 'Edit Degree' : 'New Degree'}</h2>
+                  <button
+                    onClick={() => { setShowDegreeModal(false); setEditingDegree(null); }}
+                    className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleCreateDegree} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                      Degree Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={degreeForm.name}
+                      onChange={(e) => setDegreeForm({ ...degreeForm, name: e.target.value })}
+                      placeholder="e.g., Web Development"
+                      className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                      Description
+                    </label>
+                    <textarea
+                      value={degreeForm.description}
+                      onChange={(e) => setDegreeForm({ ...degreeForm, description: e.target.value })}
+                      placeholder="Brief description of the degree..."
+                      rows={3}
+                      className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white resize-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                        Duration (mo)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={degreeForm.duration}
+                        onChange={(e) => setDegreeForm({ ...degreeForm, duration: parseInt(e.target.value) || 1 })}
+                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                        Price (€)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={degreeForm.price}
+                        onChange={(e) => setDegreeForm({ ...degreeForm, price: parseFloat(e.target.value) || 0 })}
+                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
+                        Capacity
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={degreeForm.capacity}
+                        onChange={(e) => setDegreeForm({ ...degreeForm, capacity: parseInt(e.target.value) || 1 })}
+                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !degreeForm.name.trim()}
+                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2"
+                  >
+                    {loading && <Loader2 size={16} className="animate-spin" />}
+                    {loading ? 'Saving...' : (editingDegree ? 'Save Changes' : 'Create Degree')}
+                  </button>
+                </form>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   }
 
   // Degree Detail View
-  const currentProgram = PROGRAM_DETAILS.find(p => p.name === selectedProgram);
+  const currentProgram = programs.find(p => p.name === selectedProgram);
 
   return (
     <motion.div

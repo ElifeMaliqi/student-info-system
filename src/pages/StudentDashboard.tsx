@@ -3,38 +3,139 @@ import { motion } from 'motion/react';
 import { BookOpen, CalendarCheck, CreditCard, Award, ArrowUpRight, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
-import { api } from '../services/api';
+import { supabase } from '../lib/supabase';
+import { Skeleton } from '../components/Skeleton';
 
-const STATS = [
-  { label: 'student.overall_grade', value: 'A-', trend: 'Top 10%', icon: Award, color: 'text-emerald-400' },
-  { label: 'student.attendance', value: '98%', trend: 'Excellent', icon: CalendarCheck, color: 'text-blue-400' },
-  { label: 'student.active_courses', value: '4', trend: 'This Semester', icon: BookOpen, color: 'text-purple-400' },
-  { label: 'student.next_payment', value: '$1,200', trend: 'Due in 12 days', icon: CreditCard, color: 'text-amber-400' },
-];
+interface StudentStats {
+  overallGrade: string;
+  attendanceRate: number;
+  activeCourses: number;
+  nextPaymentAmount: number;
+  nextPaymentDue: string;
+}
 
-const RECENT_GRADES = [
-  { id: 'QZ-001', course: 'UI/UX Fundamentals', title: 'Midterm Quiz', score: '94/100', date: 'Feb 20, 2026', status: 'Excellent' },
-  { id: 'QZ-002', course: 'Design Systems', title: 'Component Architecture', score: '88/100', date: 'Feb 15, 2026', status: 'Good' },
-  { id: 'AS-001', course: 'Prototyping', title: 'Interactive Prototype Assignment', score: '96/100', date: 'Feb 10, 2026', status: 'Excellent' },
-];
+interface RecentGradeRow {
+  id: string;
+  title: string;
+  className: string;
+  score: string;
+  date: string;
+  status: string;
+}
 
-const INVOICES = [
-  { id: 'INV-2026-001', amount: '$1,200', status: 'Pending', date: 'Feb 01, 2026', due: 'Mar 01, 2026' },
-  { id: 'INV-2025-012', amount: '$1,200', status: 'Paid', date: 'Jan 01, 2026', due: 'Jan 15, 2026' },
-];
+interface InvoiceRow {
+  id: string;
+  title: string;
+  amount: string;
+  status: string;
+  date: string;
+  due: string;
+}
 
 export default function StudentDashboard() {
   const { t } = useLanguage();
   const { user } = useUser();
+  const [isLoading, setIsLoading] = useState(true);
   const [program, setProgram] = useState<string | null>(null);
+  const [stats, setStats] = useState<StudentStats>({ overallGrade: 'N/A', attendanceRate: 0, activeCourses: 0, nextPaymentAmount: 0, nextPaymentDue: '' });
+  const [recentGrades, setRecentGrades] = useState<RecentGradeRow[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
 
   useEffect(() => {
     if (!user) return;
-    api.students.getById(user.id)
-      .then(data => {
-        if (data?.program?.name) setProgram(data.program.name);
-      })
-      .catch(() => {});
+    const load = async () => {
+      try {
+        // Enrollments (active courses + program)
+        const { data: enrollments } = await supabase
+          .from('class_enrollments')
+          .select('class:classes(title, program_id)')
+          .eq('student_id', user.id)
+          .eq('status', 'active');
+        const courses = enrollments || [];
+        if (courses.length > 0) {
+          const prog = (courses[0].class as any)?.program_id;
+          if (prog) setProgram(prog);
+        }
+
+        // Attendance
+        const { data: attData } = await supabase.from('class_attendance').select('status').eq('student_id', user.id);
+        let attTotal = 0, attPresent = 0;
+        (attData || []).forEach((r: any) => { attTotal++; if (r.status === 'present' || r.status === 'late') attPresent++; });
+        const attendanceRate = attTotal > 0 ? Math.round((attPresent / attTotal) * 100) : 0;
+
+        // Grade table entries for this student
+        const { data: gradeEntries } = await supabase
+          .from('grade_table_entries')
+          .select(`
+            id, total_points, passed, graded_at,
+            grade_table:grade_tables!grade_table_entries_grade_table_id_fkey(
+              name,
+              class:classes!grade_tables_class_id_fkey(title)
+            )
+          `)
+          .eq('student_id', user.id)
+          .not('total_points', 'is', null)
+          .order('graded_at', { ascending: false })
+          .limit(5);
+
+        const gradeRows: RecentGradeRow[] = (gradeEntries || []).map((e: any) => {
+          const pts = parseFloat(e.total_points);
+          return {
+            id: e.id,
+            title: e.grade_table?.name || 'Exam',
+            className: e.grade_table?.class?.title || '',
+            score: `${pts} pts`,
+            date: e.graded_at ? new Date(e.graded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+            status: pts >= 90 ? 'Excellent' : pts >= 70 ? 'Good' : 'Needs Improvement',
+          };
+        });
+        setRecentGrades(gradeRows);
+
+        // Compute overall grade from all entries (show as avg pts)
+        const allPts = (gradeEntries || []).filter((e: any) => e.total_points != null).map((e: any) => parseFloat(e.total_points));
+        let overallGrade = 'N/A';
+        if (allPts.length > 0) {
+          const avg = Math.round(allPts.reduce((a: number, b: number) => a + b, 0) / allPts.length);
+          overallGrade = `${avg} pts`;
+        }
+
+        // Invoices
+        const { data: invData } = await supabase
+          .from('invoices')
+          .select('id, title, amount, status, due_date, month, year')
+          .eq('student_id', user.id)
+          .order('year', { ascending: false })
+          .order('month', { ascending: false })
+          .limit(5);
+
+        const fmt = (d: string) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const invRows: InvoiceRow[] = (invData || []).map((inv: any) => ({
+          id: inv.id.slice(0, 8).toUpperCase(),
+          title: inv.title,
+          amount: `€${parseFloat(inv.amount).toLocaleString()}`,
+          status: inv.status === 'paid' ? 'Paid' : inv.status === 'overdue' ? 'Overdue' : 'Pending',
+          date: inv.title,
+          due: inv.due_date ? fmt(inv.due_date) : '',
+        }));
+        setInvoices(invRows);
+
+        // Next payment
+        const unpaid = (invData || []).filter((inv: any) => inv.status !== 'paid').sort((a: any, b: any) => (a.due_date || '').localeCompare(b.due_date || ''));
+        const next = unpaid[0];
+        const nextAmt = next ? parseFloat(next.amount) : 0;
+        const nextDue = next?.due_date ? (() => {
+          const diff = Math.ceil((new Date(next.due_date + 'T12:00:00').getTime() - Date.now()) / 86400000);
+          return diff > 0 ? `Due in ${diff} days` : diff === 0 ? 'Due today' : `${Math.abs(diff)} days overdue`;
+        })() : '';
+
+        setStats({ overallGrade, attendanceRate, activeCourses: courses.length, nextPaymentAmount: nextAmt, nextPaymentDue: nextDue });
+      } catch (err) {
+        console.error('StudentDashboard load error:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
   }, [user]);
 
   return (
@@ -59,7 +160,26 @@ export default function StudentDashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {STATS.map((stat, i) => (
+        {isLoading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="glass-card p-5 rounded-2xl flex flex-col gap-4">
+              <div className="flex justify-between items-start">
+                <Skeleton className="w-10 h-10 rounded-xl" />
+                <Skeleton className="w-16 h-5 rounded-full" />
+              </div>
+              <div>
+                <Skeleton className="w-24 h-8 mb-2" />
+                <Skeleton className="w-32 h-3" />
+              </div>
+            </div>
+          ))
+        ) : (
+          [
+            { label: 'student.overall_grade', value: stats.overallGrade, trend: '', icon: Award, color: 'text-emerald-400' },
+            { label: 'student.attendance', value: `${stats.attendanceRate}%`, trend: stats.attendanceRate >= 90 ? 'Excellent' : stats.attendanceRate >= 70 ? 'Good' : 'Needs Improvement', icon: CalendarCheck, color: 'text-blue-400' },
+            { label: 'student.active_courses', value: String(stats.activeCourses), trend: '', icon: BookOpen, color: 'text-purple-400' },
+            { label: 'student.next_payment', value: stats.nextPaymentAmount ? `€${stats.nextPaymentAmount.toLocaleString()}` : 'None', trend: stats.nextPaymentDue, icon: CreditCard, color: 'text-amber-400' },
+          ].map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
@@ -80,7 +200,8 @@ export default function StudentDashboard() {
               <div className="text-xs font-medium text-white/40 uppercase tracking-wider">{t(stat.label)}</div>
             </div>
           </motion.div>
-        ))}
+        ))
+        )}
       </div>
 
       {/* Two Column Layout */}
@@ -110,24 +231,38 @@ export default function StudentDashboard() {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {RECENT_GRADES.map((grade) => (
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="border-b border-white/5">
+                      <td className="py-4"><Skeleton className="w-32 h-4" /></td>
+                      <td className="py-4"><Skeleton className="w-16 h-5 rounded-full" /></td>
+                      <td className="py-4 text-right"><Skeleton className="w-20 h-4" /></td>
+                    </tr>
+                  ))
+                ) : recentGrades.length === 0 ? (
+                  <tr><td colSpan={3} className="py-8 text-center text-white/30 text-sm">No grades yet</td></tr>
+                ) : (
+                  recentGrades.map((grade) => (
                   <tr key={grade.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
                     <td className="py-4">
                       <div className="font-medium text-white/90 group-hover:text-white transition-colors">{grade.title}</div>
-                      <div className="text-[11px] text-white/40 mt-0.5">{grade.course}</div>
+                      <div className="text-[11px] text-white/40 mt-0.5">{grade.className}</div>
                     </td>
                     <td className="py-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
                         grade.status === 'Excellent' 
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                          : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                          : grade.status === 'Good'
+                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                          : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       }`}>
                         {grade.score}
                       </span>
                     </td>
                     <td className="py-4 text-right text-white/40 text-xs">{grade.date}</td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
@@ -158,25 +293,39 @@ export default function StudentDashboard() {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {INVOICES.map((invoice) => (
+                {isLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="border-b border-white/5">
+                      <td className="py-4"><Skeleton className="w-24 h-4" /></td>
+                      <td className="py-4"><Skeleton className="w-16 h-4" /></td>
+                      <td className="py-4"><Skeleton className="w-16 h-5 rounded-full" /></td>
+                      <td className="py-4 text-right"><Skeleton className="w-20 h-4" /></td>
+                    </tr>
+                  ))
+                ) : invoices.length === 0 ? (
+                  <tr><td colSpan={4} className="py-8 text-center text-white/30 text-sm">No invoices yet</td></tr>
+                ) : (
+                  invoices.map((invoice) => (
                   <tr key={invoice.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
                     <td className="py-4">
-                      <div className="font-mono text-white/90 group-hover:text-[#fc0ce4] transition-colors cursor-pointer">{invoice.id}</div>
+                      <div className="font-mono text-white/90 group-hover:text-[#fc0ce4] transition-colors cursor-pointer">{invoice.id.slice(0, 8)}</div>
                       <div className="text-[11px] text-white/40 mt-0.5">{invoice.date}</div>
                     </td>
                     <td className="py-4 font-medium text-white/90">{invoice.amount}</td>
                     <td className="py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
                         invoice.status === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                        invoice.status === 'Overdue' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                         'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       }`}>
-                        {invoice.status === 'Paid' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                        {invoice.status === 'Paid' ? <CheckCircle className="w-3 h-3" /> : invoice.status === 'Overdue' ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
                         {t(`status.${invoice.status.toLowerCase()}`)}
                       </span>
                     </td>
                     <td className="py-4 text-right text-white/60 text-xs">{invoice.due}</td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>

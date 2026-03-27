@@ -79,17 +79,6 @@ export interface SettingsStudent {
   overrideTitleTemplate?: string;
 }
 
-export interface Quiz {
-  id: string;
-  title: string;
-  program: string;
-  submissions: string;
-  date: string;
-  status: 'Completed' | 'Grading' | 'Scheduled';
-  totalPoints?: number;
-  duration?: number;
-}
-
 export interface DashboardStats {
   label: string;
   value: string;
