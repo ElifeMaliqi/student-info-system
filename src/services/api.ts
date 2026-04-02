@@ -2165,6 +2165,41 @@ export const api = {
   },
 
   classAttendance: {
+    _sendLowAttendanceAlertEmail: async (params: {
+      studentEmail: string;
+      studentName: string;
+      className: string;
+      attendanceRate: number;
+      presentCount: number;
+      totalCount: number;
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-attendance-alert-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(params),
+        }
+      );
+
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'Failed to send attendance alert email');
+      }
+    },
+
+    _computeAttendanceRate: (rows: Array<{ status: 'present' | 'absent' | 'late' }>): number => {
+      if (rows.length === 0) return 0;
+      const present = rows.filter((r) => r.status === 'present').length;
+      return Math.round((present / rows.length) * 100);
+    },
+
     /** Enrolled (active) students for a class. */
     getStudentsForClass: async (classId: string): Promise<{ id: string; name: string; avatar: string }[]> => {
       const { data, error } = await supabase
@@ -2196,6 +2231,15 @@ export const api = {
     /** Upsert one attendance mark. */
     mark: async (classId: string, studentId: string, date: string, status: 'present' | 'absent' | 'late'): Promise<void> => {
       const { data: { user } } = await supabase.auth.getUser();
+
+      const { data: beforeRows, error: beforeErr } = await supabase
+        .from('class_attendance')
+        .select('status')
+        .eq('class_id', classId)
+        .eq('student_id', studentId);
+      if (beforeErr) throw new Error(beforeErr.message);
+      const beforeRate = api.classAttendance._computeAttendanceRate((beforeRows || []) as Array<{ status: 'present' | 'absent' | 'late' }>);
+
       const { error } = await supabase
         .from('class_attendance')
         .upsert(
@@ -2203,6 +2247,49 @@ export const api = {
           { onConflict: 'class_id,student_id,date' }
         );
       if (error) throw new Error(error.message);
+
+      const { data: afterRows, error: afterErr } = await supabase
+        .from('class_attendance')
+        .select('status')
+        .eq('class_id', classId)
+        .eq('student_id', studentId);
+      if (afterErr) throw new Error(afterErr.message);
+
+      const typedAfterRows = (afterRows || []) as Array<{ status: 'present' | 'absent' | 'late' }>;
+      const afterRate = api.classAttendance._computeAttendanceRate(typedAfterRows);
+      const crossedThreshold = afterRate <= 40 && beforeRate > 40;
+
+      if (crossedThreshold && typedAfterRows.length > 0) {
+        const presentCount = typedAfterRows.filter((r) => r.status === 'present').length;
+        const totalCount = typedAfterRows.length;
+
+        const { data: studentProfile } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, email')
+          .eq('id', studentId)
+          .maybeSingle();
+
+        const { data: classRow } = await supabase
+          .from('classes')
+          .select('title')
+          .eq('id', classId)
+          .maybeSingle();
+
+        if (studentProfile?.email) {
+          try {
+            await api.classAttendance._sendLowAttendanceAlertEmail({
+              studentEmail: studentProfile.email,
+              studentName: `${studentProfile.first_name || ''} ${studentProfile.last_name || ''}`.trim() || 'Student',
+              className: classRow?.title || 'Class',
+              attendanceRate: afterRate,
+              presentCount,
+              totalCount,
+            });
+          } catch (emailErr) {
+            console.warn('Low-attendance alert email failed:', emailErr);
+          }
+        }
+      }
     },
 
     /** All attendance records for one student, newest first. */

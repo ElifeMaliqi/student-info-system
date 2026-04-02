@@ -19,6 +19,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   const [error, setError] = useState('');
   const [forgotMode, setForgotMode] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const resetRedirectUrl =
+    import.meta.env.VITE_PASSWORD_RESET_REDIRECT_URL || `${window.location.origin}/resetpassword`;
 
   const handleForgotPassword = async (e: { preventDefault: () => void }) => {
     e.preventDefault();
@@ -33,7 +35,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: 'https://studentinfosystems.netlify.app/resetpassword',
+        redirectTo: resetRedirectUrl,
       });
       if (error) throw error;
       setResetSent(true);
