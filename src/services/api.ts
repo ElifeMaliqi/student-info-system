@@ -211,6 +211,9 @@ export const api = {
       invoiceId: string;
       amount: number;
       dueDate: string;
+      status?: string;
+      mode?: 'created' | 'updated';
+      changeSummary?: string;
     }): Promise<void> => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
@@ -405,6 +408,8 @@ export const api = {
             invoiceId,
             amount: params.amount,
             dueDate: params.dueDate,
+            status: 'not_paid',
+            mode: 'created',
           });
         } catch (emailErr) {
           console.warn('Invoice created but email sending failed:', emailErr);
@@ -472,6 +477,9 @@ export const api = {
         invoiceId: string;
         amount: number;
         dueDate: string;
+        status?: string;
+        mode?: 'created' | 'updated';
+        changeSummary?: string;
       }> = [];
       for (const enr of enrollments) {
         const enrolled = new Date(enr.enrolled_at);
@@ -523,6 +531,8 @@ export const api = {
                 invoiceId,
                 amount: roundedAmount,
                 dueDate,
+                status: 'not_paid',
+                mode: 'created',
               });
             }
           }
@@ -605,27 +615,74 @@ export const api = {
     },
 
     updateInvoice: async (id: string, updates: { amount?: number; status?: string; title?: string; due_date?: string }) => {
+      const { data: current, error: currentError } = await supabase
+        .from('invoices')
+        .select(`
+          invoice_id,
+          title,
+          amount,
+          due_date,
+          status,
+          student:profiles!invoices_student_id_fkey(first_name, last_name, email),
+          class:classes!invoices_class_id_fkey(title)
+        `)
+        .eq('id', id)
+        .single();
+      if (currentError || !current) throw new Error(currentError?.message || 'Invoice not found');
+
       const payload: any = {};
       if (updates.amount != null) payload.amount = updates.amount;
       if (updates.status) payload.status = updates.status;
       if (updates.title) payload.title = updates.title;
       if (updates.due_date) {
         payload.due_date = updates.due_date;
-        // Auto-compute status based on new due date
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const due = new Date(updates.due_date + 'T12:00:00'); due.setHours(0, 0, 0, 0);
-        // Fetch current status to decide whether to flip
-        const { data: cur } = await supabase.from('invoices').select('status').eq('id', id).single();
-        if (cur) {
-          if (cur.status === 'overdue' && due >= today) {
-            payload.status = 'not_paid'; // due date moved to future → no longer overdue
-          } else if ((cur.status === 'not_paid') && due < today) {
-            payload.status = 'overdue'; // due date moved to past → overdue
-          }
+        if (current.status === 'overdue' && due >= today) {
+          payload.status = 'not_paid';
+        } else if (current.status === 'not_paid' && due < today) {
+          payload.status = 'overdue';
         }
       }
+
+      const oldAmount = parseFloat(current.amount);
+      const newAmount = payload.amount != null ? Number(payload.amount) : oldAmount;
+      const oldTitle = current.title as string;
+      const newTitle = payload.title ?? oldTitle;
+      const oldDueDate = current.due_date as string;
+      const newDueDate = payload.due_date ?? oldDueDate;
+      const oldStatus = current.status as string;
+      const newStatus = payload.status ?? oldStatus;
+
+      const changeParts: string[] = [];
+      if (newTitle !== oldTitle) changeParts.push(`the title was changed from "${oldTitle}" to "${newTitle}"`);
+      if (newAmount !== oldAmount) changeParts.push(`the amount was changed from EUR ${oldAmount.toFixed(2)} to EUR ${newAmount.toFixed(2)}`);
+      if (newDueDate !== oldDueDate) changeParts.push(`the due date was changed from ${oldDueDate} to ${newDueDate}`);
+      if (newStatus !== oldStatus) changeParts.push(`the status was changed from ${oldStatus.replace('_', ' ')} to ${newStatus.replace('_', ' ')}`);
+
       const { error } = await supabase.from('invoices').update(payload).eq('id', id);
       if (error) throw new Error(error.message);
+
+      const student = current.student as any;
+      const cls = current.class as any;
+      if (student?.email && changeParts.length > 0) {
+        try {
+          await api.finance._sendInvoiceEmail({
+            studentEmail: student.email,
+            studentName: `${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Student',
+            className: cls?.title || 'Class',
+            invoiceTitle: newTitle,
+            invoiceId: current.invoice_id,
+            amount: newAmount,
+            dueDate: newDueDate,
+            status: newStatus,
+            mode: 'updated',
+            changeSummary: changeParts.join('; '),
+          });
+        } catch (emailErr) {
+          console.warn('Invoice updated but email sending failed:', emailErr);
+        }
+      }
     },
 
     deleteInvoice: async (id: string) => {

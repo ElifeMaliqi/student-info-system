@@ -16,6 +16,9 @@ interface RequestBody {
   invoiceId: string;
   amount: number;
   dueDate: string;
+  status?: string;
+  mode?: "created" | "updated";
+  changeSummary?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -57,7 +60,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const body: RequestBody = await req.json();
-    const { studentEmail, studentName, className, invoiceTitle, invoiceId, amount, dueDate } = body;
+    const { studentEmail, studentName, className, invoiceTitle, invoiceId, amount, dueDate, status, mode, changeSummary } = body;
 
     if (!studentEmail || !studentName || !className || !invoiceTitle || !invoiceId || !dueDate || !Number.isFinite(amount)) {
       throw new Error("Missing required fields for invoice email");
@@ -69,10 +72,16 @@ Deno.serve(async (req: Request) => {
       day: "numeric",
       year: "numeric",
     });
+    const formattedStatus = (status ?? "not_paid").replace(/_/g, " ");
+    const isUpdated = mode === "updated";
 
-    const subject = `New Invoice from Future Minds Academy: ${invoiceTitle}`;
+    const subject = isUpdated
+      ? `Updated Invoice from Future Minds Academy: ${invoiceTitle}`
+      : `New Invoice from Future Minds Academy: ${invoiceTitle}`;
 
-    const textBody = `Hello ${studentName},\n\nI hope you are doing well.\n\nA new invoice titled "${invoiceTitle}" has been issued for you at Future Minds Academy. The invoice ID is ${invoiceId}. This invoice is for your class, ${className}, and the total amount due is $${formattedAmount}. Please make sure the payment is completed by ${formattedDueDate}.\n\nIf you have any questions about this invoice or need support with payment, please reply to this email and our finance team will assist you.\n\nWarm regards,\nFuture Minds Academy\nFinance Department`;
+    const textBody = isUpdated
+      ? `Hello ${studentName},\n\nI hope you are doing well.\n\nYour invoice titled "${invoiceTitle}" has been updated by Future Minds Academy. The change made was: ${changeSummary || "invoice details were updated"}.\n\nThe current invoice details are as follows: invoice ID ${invoiceId}, title "${invoiceTitle}", student name ${studentName}, class ${className}, amount due $${formattedAmount}, due date ${formattedDueDate}, and status ${formattedStatus}.\n\nIf you have any questions about this update or need support with payment, please reply to this email and our finance team will assist you.\n\nWarm regards,\nFuture Minds Academy\nFinance Department`
+      : `Hello ${studentName},\n\nI hope you are doing well.\n\nA new invoice titled "${invoiceTitle}" has been issued for you at Future Minds Academy. The invoice ID is ${invoiceId}. This invoice is for your class, ${className}, and the total amount due is $${formattedAmount}. Please make sure the payment is completed by ${formattedDueDate}.\n\nThe current invoice details are as follows: invoice ID ${invoiceId}, title "${invoiceTitle}", student name ${studentName}, class ${className}, amount due $${formattedAmount}, due date ${formattedDueDate}, and status ${formattedStatus}.\n\nIf you have any questions about this invoice or need support with payment, please reply to this email and our finance team will assist you.\n\nWarm regards,\nFuture Minds Academy\nFinance Department`;
 
     const htmlBody = `
 <!DOCTYPE html>
@@ -81,33 +90,49 @@ Deno.serve(async (req: Request) => {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin:0;padding:0;background-color:#f4f6fb;font-family:Arial,sans-serif;color:#1f2937;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;background-color:#f4f6fb;">
+<body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;">
     <tr>
       <td align="center">
-        <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#111118;border-radius:16px;border:1px solid rgba(255,255,255,0.06);overflow:hidden;">
           <tr>
-            <td style="padding:24px 28px;background:#0f172a;">
-              <h1 style="margin:0;color:#ffffff;font-size:22px;line-height:1.3;">Future Minds Academy</h1>
+            <td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
+              <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.3px;">
+                ${escapeHtml(invoiceTitle)}
+              </h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">
+                ${isUpdated ? "Future Minds Academy Invoice Update" : "Future Minds Academy Invoice Notification"}
+              </p>
             </td>
           </tr>
           <tr>
-            <td style="padding:28px;">
-              <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Hello ${escapeHtml(studentName)},</p>
-              <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">I hope you are doing well.</p>
-              <p style="margin:0 0 14px;font-size:16px;line-height:1.7;">
-                A new invoice titled "${escapeHtml(invoiceTitle)}" has been issued for you at Future Minds Academy.
-                The invoice ID is <strong>${escapeHtml(invoiceId)}</strong>.
-                This invoice is for your class, ${escapeHtml(className)}, and the total amount due is <strong>$${formattedAmount}</strong>.
-                Please make sure the payment is completed by <strong>${escapeHtml(formattedDueDate)}</strong>.
-              </p>
-              <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">
-                If you have any questions about this invoice or need support with payment, please reply to this email and our finance team will assist you.
-              </p>
-              <p style="margin:18px 0 0;font-size:16px;line-height:1.6;">
-                Warm regards,<br>
-                Future Minds Academy<br>
-                Finance Department
+            <td style="padding:32px 40px;">
+              <div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
+                <p style="margin:0 0 16px;">Hello ${escapeHtml(studentName)},</p>
+                <p style="margin:0 0 16px;">I hope you are doing well.</p>
+                <p style="margin:0 0 16px;">
+                  ${isUpdated
+                    ? `Your invoice titled "${escapeHtml(invoiceTitle)}" has been updated by Future Minds Academy. The change made was: <strong style="color:#ffffff;">${escapeHtml(changeSummary || "invoice details were updated")}</strong>.`
+                    : `A new invoice titled "${escapeHtml(invoiceTitle)}" has been issued for you at Future Minds Academy.`}
+                </p>
+                <p style="margin:0 0 16px;">
+                  The current invoice details are as follows: invoice ID <strong style="color:#ffffff;">${escapeHtml(invoiceId)}</strong>, student name ${escapeHtml(studentName)}, class ${escapeHtml(className)}, amount due <strong style="color:#ffffff;">$${formattedAmount}</strong>, due date <strong style="color:#ffffff;">${escapeHtml(formattedDueDate)}</strong>, and status <strong style="color:#ffffff; text-transform:capitalize;">${escapeHtml(formattedStatus)}</strong>.
+                </p>
+                <p style="margin:0 0 16px;">
+                  If you have any questions about this ${isUpdated ? "update" : "invoice"} or need support with payment, please reply to this email and our finance team will assist you.
+                </p>
+                <p style="margin:0;">
+                  Warm regards,<br>
+                  Future Minds Academy<br>
+                  Finance Department
+                </p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
+              <p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">
+                Future Minds Academy · Student Information System
               </p>
             </td>
           </tr>
