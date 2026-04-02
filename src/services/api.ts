@@ -990,23 +990,41 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify(params),
-        }
-      );
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-email`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify(params),
+          }
+        );
 
-      const result = await res.json();
-      if (!res.ok || result.error) {
-        throw new Error(result.error || 'Failed to send emails');
+        if (!res.ok) {
+          const result = await res.json().catch(() => ({}));
+          throw new Error(
+            result.error || 
+            `Server error: ${res.status} ${res.statusText}`
+          );
+        }
+
+        const result = await res.json();
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        return { sent: result.sent, total: result.total };
+      } catch (error) {
+        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+          throw new Error(
+            'Network error: Could not connect to email service. This may be a CORS issue. ' +
+            'Please check that the Supabase Edge Function is deployed and accessible.'
+          );
+        }
+        throw error;
       }
-      return { sent: result.sent, total: result.total };
     },
   },
 

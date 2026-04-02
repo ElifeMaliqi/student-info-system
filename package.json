@@ -33,6 +33,7 @@
     "autoprefixer": "^10.4.21",
     "jimp": "^1.6.0",
     "node-vibrant": "^4.0.4",
+    "supabase": "^2.84.7",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

@@ -3,9 +3,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS, GET, PUT, DELETE",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Client-Info, Apikey",
+    "Content-Type, Authorization, X-Client-Info, Apikey, x-client-info, x-supabase-auth",
+  "Access-Control-Max-Age": "86400",
 };
 
 interface RequestBody {
@@ -18,8 +19,12 @@ interface RequestBody {
 }
 
 Deno.serve(async (req: Request) => {
+  // Always handle CORS preflight requests immediately
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
@@ -237,11 +242,19 @@ Deno.serve(async (req: Request) => {
       }
     );
   } catch (err) {
+    console.error("Error in send-announcement-email function:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
-    return new Response(JSON.stringify({ success: false, error: message }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: message,
+        errorDetails: err instanceof Error ? err.stack : undefined,
+      }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });
 
