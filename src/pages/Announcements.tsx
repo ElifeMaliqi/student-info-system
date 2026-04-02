@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Megaphone, Plus, Calendar, Globe, GraduationCap, BookOpen,
-  Users, Shield, Layers, Loader2, AlertCircle, X,
+  Users, Shield, Layers, Loader2, AlertCircle, X, Mail,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -39,7 +39,7 @@ function audienceLabel(ann: Announcement) {
   return ann.audience;
 }
 
-const EMPTY_FORM = { title: '', content: '', priority: 'medium' as Priority, audience: '' as AudienceType | '', programId: '', classId: '' };
+const EMPTY_FORM = { title: '', content: '', priority: 'medium' as Priority, audience: '' as AudienceType | '', programId: '', classId: '', sendAsEmail: false };
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'urgent'];
 
 export default function Announcements({ role }: { role: Role }) {
@@ -94,6 +94,25 @@ export default function Announcements({ role }: { role: Role }) {
         classId:   form.audience === 'class_specific'   ? form.classId   : undefined,
         author: '',
       });
+
+      // Send email if checkbox is checked
+      if (form.sendAsEmail) {
+        try {
+          const senderName = user ? `${user.firstName} ${user.lastName}` : 'Future Minds';
+          await api.announcements.sendEmail({
+            title: form.title,
+            content: form.content,
+            audience: form.audience as AudienceType,
+            programId: form.audience === 'program_specific' ? form.programId : undefined,
+            classId: form.audience === 'class_specific' ? form.classId : undefined,
+            senderName,
+          });
+        } catch (emailErr) {
+          console.error('Email sending failed:', emailErr);
+          // Don't block announcement creation if email fails
+        }
+      }
+
       setShowCreate(false);
       void loadAnnouncements();
     } catch (err) {
@@ -379,6 +398,23 @@ export default function Announcements({ role }: { role: Role }) {
               className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 transition-all resize-none"
             />
           </div>
+
+          {/* Send as Email */}
+          {role !== 'student' && (
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/[0.07] transition-colors group">
+              <input
+                type="checkbox"
+                checked={form.sendAsEmail}
+                onChange={e => setForm(f => ({ ...f, sendAsEmail: e.target.checked }))}
+                className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#fc0ce4] focus:ring-[#fc0ce4]/30 focus:ring-offset-0 cursor-pointer accent-[#fc0ce4]"
+              />
+              <Mail className={`w-4 h-4 shrink-0 transition-colors ${form.sendAsEmail ? 'text-[#fc0ce4]' : 'text-white/40 group-hover:text-white/60'}`} />
+              <div>
+                <p className={`text-sm font-medium transition-colors ${form.sendAsEmail ? 'text-white' : 'text-white/60'}`}>Send as email</p>
+                <p className="text-[11px] text-white/35">Also send this announcement via email to the selected audience</p>
+              </div>
+            </label>
+          )}
 
           {submitError && (
             <p className="flex items-center gap-2 text-xs text-red-400">

@@ -978,6 +978,36 @@ export const api = {
       if (error) throw new Error(error.message);
       return data || [];
     },
+
+    sendEmail: async (params: {
+      title: string;
+      content: string;
+      audience: string;
+      programId?: string;
+      classId?: string;
+      senderName: string;
+    }): Promise<{ sent: number; total: number }> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(params),
+        }
+      );
+
+      const result = await res.json();
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'Failed to send emails');
+      }
+      return { sent: result.sent, total: result.total };
+    },
   },
 
   teacher: {
