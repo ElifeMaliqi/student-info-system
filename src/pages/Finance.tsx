@@ -69,6 +69,7 @@ export default function Finance() {
 
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
   const [deleting, setDeleting]         = useState(false);
+  const [generatingInvoices, setGeneratingInvoices] = useState(false);
 
   useEffect(() => { void loadAll(); }, []);
 
@@ -234,8 +235,9 @@ export default function Finance() {
   function handleExportCsv() {
     exportCsv({
       filename: 'invoices',
-      headers: ['Student', 'Title', 'Teacher', 'Month', 'Year', 'Due Date', 'Amount', 'Status'],
+      headers: ['Invoice ID', 'Student', 'Title', 'Teacher', 'Month', 'Year', 'Due Date', 'Amount', 'Status'],
       rows: filtered.map(inv => [
+        inv.invoiceId || inv.id,
         inv.studentName || '',
         inv.title,
         inv.teacherName || '',
@@ -246,6 +248,19 @@ export default function Finance() {
         STATUS_LABEL[inv.status] || inv.status,
       ]),
     });
+  }
+
+  async function generateInvoicesNow() {
+    setGeneratingInvoices(true);
+    try {
+      await api.finance.syncInvoices();
+      playPopSound();
+      await loadAll();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setGeneratingInvoices(false);
+    }
   }
 
   async function changeStatus(newStatus: string) {
@@ -480,10 +495,20 @@ export default function Finance() {
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('finance.title')}</h1>
           <p className="text-white/50 text-sm">{t('finance.desc')}</p>
         </div>
-        <button onClick={openSettings} className="self-start sm:self-auto px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-          <Settings2 className="w-4 h-4" />
-          Invoice Settings
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={generateInvoicesNow}
+            disabled={generatingInvoices}
+            className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-40"
+          >
+            {generatingInvoices ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+            Generate Invoices
+          </button>
+          <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
+            <Settings2 className="w-4 h-4" />
+            Invoice Settings
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -569,6 +594,7 @@ export default function Finance() {
             <table className="w-full text-left border-collapse min-w-[1050px]">
               <thead>
                 <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
+                  <th className="pb-3 font-medium">Invoice ID</th>
                   <th className="pb-3 font-medium">{t('table.student')}</th>
                   <th className="pb-3 font-medium">Title</th>
                   <th className="pb-3 font-medium">Teacher</th>
@@ -585,6 +611,7 @@ export default function Finance() {
                   const Icon = STATUS_ICON[inv.status] || Clock;
                   return (
                     <tr key={inv.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                      <td className="py-4 text-white/60 text-xs font-mono">{inv.invoiceId || inv.id.slice(0, 8).toUpperCase()}</td>
                       <td className="py-4 font-medium text-white/90">{inv.studentName}</td>
                       <td className="py-4 text-white/70 max-w-[200px] truncate">{inv.title}</td>
                       <td className="py-4 text-white/50 text-xs">{inv.teacherName || '-'}</td>

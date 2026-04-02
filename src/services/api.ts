@@ -203,6 +203,41 @@ export const api = {
     /* ─── Month names ─── */
     _MONTHS: ['January','February','March','April','May','June','July','August','September','October','November','December'] as const,
 
+    _sendInvoiceEmail: async (params: {
+      studentEmail: string;
+      studentName: string;
+      className: string;
+      invoiceTitle: string;
+      invoiceId: string;
+      amount: number;
+      dueDate: string;
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invoice-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(params),
+        }
+      );
+
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'Failed to send invoice email');
+      }
+    },
+
+    _generateInvoiceId: (year: number, month: number): string => {
+      const rand = crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+      return `INV-${year}${String(month).padStart(2, '0')}-${rand}`;
+    },
+
     /* ─── Settings ─── */
     getSettings: async (): Promise<InvoiceSettings | null> => {
       const { data, error } = await supabase.from('invoice_settings').select('*').limit(1).single();
@@ -330,7 +365,7 @@ export const api = {
       // 3. Active enrollments with class info
       const { data: enrollments, error: eErr } = await supabase
         .from('class_enrollments')
-        .select('id, student_id, class_id, enrolled_at, class:classes(title)')
+        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email)')
         .eq('status', 'active');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
@@ -344,11 +379,23 @@ export const api = {
       const curYear = now.getFullYear();
 
       const toInsert: any[] = [];
+      const pendingInvoiceEmails: Array<{
+        studentEmail: string;
+        studentName: string;
+        className: string;
+        invoiceTitle: string;
+        invoiceId: string;
+        amount: number;
+        dueDate: string;
+      }> = [];
       for (const enr of enrollments) {
         const enrolled = new Date(enr.enrolled_at);
         let y = enrolled.getFullYear();
         let m = enrolled.getMonth() + 1;
         const className = (enr.class as any)?.title || 'Class';
+        const student = enr.student as any;
+        const studentName = student ? `${student.first_name || ''} ${student.last_name || ''}`.trim() : 'Student';
+        const studentEmail = student?.email || '';
 
         // Resolve per-student or global values
         const ovr = ovrMap.get(enr.student_id);
@@ -365,18 +412,34 @@ export const api = {
               .replace('{month}', `${MONTHS[m - 1]} ${y}`);
             const dueM = m === 12 ? 1 : m + 1;
             const dueY = m === 12 ? y + 1 : y;
+            const dueDate = `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
+            const roundedAmount = Math.round(amount * 100) / 100;
+            const invoiceId = api.finance._generateInvoiceId(y, m);
             toInsert.push({
               enrollment_id: enr.id,
               student_id: enr.student_id,
               class_id: enr.class_id,
+              invoice_id: invoiceId,
               title,
               month: m,
               year: y,
-              due_date: `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
-              amount: Math.round(amount * 100) / 100,
+              due_date: dueDate,
+              amount: roundedAmount,
               discount_percent: disc,
               status: 'not_paid',
             });
+
+            if (studentEmail) {
+              pendingInvoiceEmails.push({
+                studentEmail,
+                studentName,
+                className,
+                invoiceTitle: title,
+                invoiceId,
+                amount: roundedAmount,
+                dueDate,
+              });
+            }
           }
           m++;
           if (m > 12) { m = 1; y++; }
@@ -386,6 +449,17 @@ export const api = {
       if (toInsert.length > 0) {
         const { error } = await supabase.from('invoices').insert(toInsert);
         if (error) throw new Error(error.message);
+
+        // Send one email per newly generated invoice without blocking invoice creation.
+        if (pendingInvoiceEmails.length > 0) {
+          const emailResults = await Promise.allSettled(
+            pendingInvoiceEmails.map((payload) => api.finance._sendInvoiceEmail(payload))
+          );
+          const failed = emailResults.filter((r) => r.status === 'rejected').length;
+          if (failed > 0) {
+            console.warn(`Failed to send ${failed} invoice email(s) out of ${pendingInvoiceEmails.length}.`);
+          }
+        }
       }
 
       // 5. Mark overdue: not_paid invoices whose due_date is in the past
@@ -428,6 +502,7 @@ export const api = {
 
       return (data || []).map((inv: any) => ({
         id: inv.id,
+        invoiceId: inv.invoice_id,
         enrollmentId: inv.enrollment_id,
         studentId: inv.student_id,
         studentName: inv.student ? `${inv.student.first_name} ${inv.student.last_name}` : '',

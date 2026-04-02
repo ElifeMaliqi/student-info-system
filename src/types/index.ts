@@ -33,6 +33,7 @@ export interface Teacher {
 
 export interface Invoice {
   id: string;
+  invoiceId?: string;
   enrollmentId: string;
   studentId: string;
   studentName?: string;

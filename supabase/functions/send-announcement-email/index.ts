@@ -31,7 +31,8 @@ Deno.serve(async (req: Request) => {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (!resendApiKey) throw new Error("RESEND_API_KEY not configured");
 
-    const fromEmail = Deno.env.get("RESEND_FROM_EMAIL") ?? "Future Minds <info@futureminds.io>";
+    const rawFrom = Deno.env.get("RESEND_FROM_EMAIL") ?? "info@futureminds.io";
+    const fromEmail = `Future Minds Academy <${extractEmail(rawFrom)}>`;
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -265,4 +266,9 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function extractEmail(input: string): string {
+  const match = input.match(/<([^>]+)>/);
+  return (match?.[1] || input).trim();
 }
