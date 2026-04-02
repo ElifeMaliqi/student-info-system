@@ -69,7 +69,32 @@ export default function Finance() {
 
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
   const [deleting, setDeleting]         = useState(false);
-  const [generatingInvoices, setGeneratingInvoices] = useState(false);
+  const [showCreateInvoice, setShowCreateInvoice] = useState(false);
+  const [loadingCreateOptions, setLoadingCreateOptions] = useState(false);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [enrollmentOptions, setEnrollmentOptions] = useState<Array<{
+    enrollmentId: string;
+    studentId: string;
+    studentName: string;
+    studentEmail: string;
+    classId: string;
+    className: string;
+    teacherName: string;
+  }>>([]);
+  const [createForm, setCreateForm] = useState(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const year = now.getFullYear();
+    return {
+      enrollmentId: '',
+      title: '',
+      month: String(month),
+      year: String(year),
+      dueDate: `${year}-${String(month).padStart(2, '0')}-15`,
+      amount: '60',
+      discountPercent: '0',
+    };
+  });
 
   useEffect(() => { void loadAll(); }, []);
 
@@ -250,16 +275,54 @@ export default function Finance() {
     });
   }
 
-  async function generateInvoicesNow() {
-    setGeneratingInvoices(true);
+  async function openGenerateNewInvoice() {
+    setShowCreateInvoice(true);
+    setLoadingCreateOptions(true);
     try {
-      await api.finance.syncInvoices();
+      const options = await api.finance.getActiveEnrollmentOptions();
+      setEnrollmentOptions(options);
+
+      const first = options[0];
+      setCreateForm(prev => {
+        if (!first) return { ...prev, enrollmentId: '' };
+        const title = prev.title || `${first.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}`;
+        return { ...prev, enrollmentId: first.enrollmentId, title };
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingCreateOptions(false);
+    }
+  }
+
+  async function createManualInvoice() {
+    if (!createForm.enrollmentId || !createForm.title || !createForm.dueDate || !createForm.amount) return;
+    const selected = enrollmentOptions.find(opt => opt.enrollmentId === createForm.enrollmentId);
+    if (!selected) return;
+
+    setCreatingInvoice(true);
+    try {
+      await api.finance.createManualInvoice({
+        enrollmentId: selected.enrollmentId,
+        studentId: selected.studentId,
+        classId: selected.classId,
+        title: createForm.title,
+        month: Number(createForm.month),
+        year: Number(createForm.year),
+        dueDate: createForm.dueDate,
+        amount: parseFloat(createForm.amount),
+        discountPercent: parseFloat(createForm.discountPercent || '0'),
+        studentName: selected.studentName,
+        studentEmail: selected.studentEmail,
+        className: selected.className,
+      });
       playPopSound();
+      setShowCreateInvoice(false);
       await loadAll();
     } catch (err) {
       console.error(err);
     } finally {
-      setGeneratingInvoices(false);
+      setCreatingInvoice(false);
     }
   }
 
@@ -497,12 +560,11 @@ export default function Finance() {
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
-            onClick={generateInvoicesNow}
-            disabled={generatingInvoices}
+            onClick={openGenerateNewInvoice}
             className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-40"
           >
-            {generatingInvoices ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-            Generate Invoices
+            <CreditCard className="w-4 h-4" />
+            Generate New Invoice
           </button>
           <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
             <Settings2 className="w-4 h-4" />
@@ -643,6 +705,99 @@ export default function Finance() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showCreateInvoice && (
+          <>
+            <motion.div key="create-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !creatingInvoice && setShowCreateInvoice(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
+            <motion.div key="create-modal" initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }} transition={{ type: 'spring', damping: 28, stiffness: 340 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+              <div className="w-full max-w-lg bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+                  <div>
+                    <h2 className="text-sm font-bold text-white">Generate New Invoice</h2>
+                    <p className="text-[11px] text-white/40 mt-0.5">Create one invoice manually for an active enrollment.</p>
+                  </div>
+                  <button onClick={() => !creatingInvoice && setShowCreateInvoice(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"><X className="w-4 h-4" /></button>
+                </div>
+
+                <div className="px-5 py-4 space-y-4">
+                  {loadingCreateOptions ? (
+                    <div className="flex items-center justify-center py-10 text-white/30 gap-2"><Loader2 className="w-5 h-5 animate-spin" /></div>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Student / Class</label>
+                        <select
+                          value={createForm.enrollmentId}
+                          onChange={e => {
+                            const enrollmentId = e.target.value;
+                            const selected = enrollmentOptions.find(opt => opt.enrollmentId === enrollmentId);
+                            setCreateForm(prev => ({
+                              ...prev,
+                              enrollmentId,
+                              title: selected ? `${selected.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}` : prev.title,
+                            }));
+                          }}
+                          className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
+                        >
+                          {enrollmentOptions.length === 0 && <option value="">No active enrollments</option>}
+                          {enrollmentOptions.map(opt => (
+                            <option key={opt.enrollmentId} value={opt.enrollmentId}>
+                              {opt.studentName} - {opt.className}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Title</label>
+                        <input type="text" value={createForm.title} onChange={e => setCreateForm(f => ({ ...f, title: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Month</label>
+                          <select value={createForm.month} onChange={e => setCreateForm(f => ({ ...f, month: e.target.value }))} className="glass-select w-full px-3 py-2.5 rounded-xl text-sm">
+                            {MONTH_NAMES.map((name, idx) => <option key={name} value={idx + 1}>{name}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Year</label>
+                          <input type="number" min="2020" value={createForm.year} onChange={e => setCreateForm(f => ({ ...f, year: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Due Date</label>
+                          <input type="date" value={createForm.dueDate} onChange={e => setCreateForm(f => ({ ...f, dueDate: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Amount (EUR)</label>
+                          <input type="number" step="0.01" min="0" value={createForm.amount} onChange={e => setCreateForm(f => ({ ...f, amount: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Discount %</label>
+                        <input type="number" step="0.1" min="0" max="100" value={createForm.discountPercent} onChange={e => setCreateForm(f => ({ ...f, discountPercent: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="px-5 py-4 border-t border-white/8 flex gap-3">
+                  <button onClick={() => setShowCreateInvoice(false)} disabled={creatingInvoice} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50">Cancel</button>
+                  <button onClick={createManualInvoice} disabled={creatingInvoice || loadingCreateOptions || enrollmentOptions.length === 0} className="flex-1 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                    {creatingInvoice && <Loader2 className="w-4 h-4 animate-spin" />}
+                    Create Invoice
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {statusInvoice && (

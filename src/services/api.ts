@@ -327,6 +327,91 @@ export const api = {
       return result.sort((a, b) => a.studentName.localeCompare(b.studentName));
     },
 
+    getActiveEnrollmentOptions: async (): Promise<Array<{
+      enrollmentId: string;
+      studentId: string;
+      studentName: string;
+      studentEmail: string;
+      classId: string;
+      className: string;
+      teacherName: string;
+    }>> => {
+      const { data, error } = await supabase
+        .from('class_enrollments')
+        .select(`
+          id,
+          student_id,
+          class_id,
+          student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email),
+          class:classes!class_enrollments_class_id_fkey(
+            title,
+            teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
+          )
+        `)
+        .eq('status', 'active')
+        .order('id', { ascending: true });
+      if (error) throw new Error(error.message);
+
+      return (data || []).map((row: any) => ({
+        enrollmentId: row.id,
+        studentId: row.student_id,
+        studentName: row.student ? `${row.student.first_name} ${row.student.last_name}` : 'Student',
+        studentEmail: row.student?.email || '',
+        classId: row.class_id,
+        className: row.class?.title || 'Class',
+        teacherName: row.class?.teacher ? `${row.class.teacher.first_name} ${row.class.teacher.last_name}` : '',
+      }));
+    },
+
+    createManualInvoice: async (params: {
+      enrollmentId: string;
+      studentId: string;
+      classId: string;
+      title: string;
+      month: number;
+      year: number;
+      dueDate: string;
+      amount: number;
+      discountPercent?: number;
+      studentName?: string;
+      studentEmail?: string;
+      className?: string;
+    }): Promise<void> => {
+      const invoiceId = api.finance._generateInvoiceId(params.year, params.month);
+      const { error } = await supabase
+        .from('invoices')
+        .insert({
+          invoice_id: invoiceId,
+          enrollment_id: params.enrollmentId,
+          student_id: params.studentId,
+          class_id: params.classId,
+          title: params.title,
+          month: params.month,
+          year: params.year,
+          due_date: params.dueDate,
+          amount: Math.round(params.amount * 100) / 100,
+          discount_percent: params.discountPercent ?? 0,
+          status: 'not_paid',
+        });
+      if (error) throw new Error(error.message);
+
+      if (params.studentEmail) {
+        try {
+          await api.finance._sendInvoiceEmail({
+            studentEmail: params.studentEmail,
+            studentName: params.studentName || 'Student',
+            className: params.className || 'Class',
+            invoiceTitle: params.title,
+            invoiceId,
+            amount: params.amount,
+            dueDate: params.dueDate,
+          });
+        } catch (emailErr) {
+          console.warn('Invoice created but email sending failed:', emailErr);
+        }
+      }
+    },
+
     deleteOverrides: async (studentIds: string[]): Promise<void> => {
       const { error } = await supabase
         .from('student_invoice_overrides')
