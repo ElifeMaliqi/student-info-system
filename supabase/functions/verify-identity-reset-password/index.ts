@@ -15,6 +15,8 @@ interface RequestBody {
   lastName: string;
   parentName: string;
   phone: string;
+  /** The one-time access token issued by send-reset-access-code */
+  accessToken: string;
   /** If provided, identity is verified AND password is changed. */
   newPassword?: string;
 }
@@ -37,11 +39,55 @@ Deno.serve(async (req: Request) => {
     const lastName = (body.lastName || "").trim().toLowerCase();
     const parentName = (body.parentName || "").trim().toLowerCase();
     const phone = (body.phone || "").trim().replace(/\s+/g, "");
+    const accessToken = (body.accessToken || "").trim();
     const newPassword = body.newPassword;
+
+    if (!accessToken) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid or missing reset link. Please request a new one." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (!email || !firstName || !lastName || !parentName || !phone) {
       return new Response(
         JSON.stringify({ success: false, error: "All fields are required." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ---------- Validate the access token ----------
+    const { data: tokenRow, error: tokenError } = await supabaseAdmin
+      .from("password_reset_tokens")
+      .select("id, email, expires_at, used")
+      .eq("token", accessToken)
+      .maybeSingle();
+
+    if (tokenError || !tokenRow) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid or expired reset link. Please request a new one." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (tokenRow.used) {
+      return new Response(
+        JSON.stringify({ success: false, error: "This reset link has already been used. Please request a new one." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (new Date(tokenRow.expires_at) < new Date()) {
+      return new Response(
+        JSON.stringify({ success: false, error: "This reset link has expired. Please request a new one." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Token email must match the email in the form
+    if ((tokenRow.email as string).toLowerCase() !== email) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Identity verification failed. Please check all fields and try again." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -117,6 +163,12 @@ Deno.serve(async (req: Request) => {
         .from("profiles")
         .update({ must_change_password: false })
         .eq("id", profile.id);
+
+      // Mark token as used — it is now permanently invalid
+      await supabaseAdmin
+        .from("password_reset_tokens")
+        .update({ used: true })
+        .eq("token", accessToken);
 
       return new Response(
         JSON.stringify({ success: true, passwordChanged: true }),

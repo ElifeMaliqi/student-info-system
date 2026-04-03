@@ -1,13 +1,17 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Mail, ArrowRight, CheckCircle, X, ShieldCheck, User, Users, Phone } from 'lucide-react';
+import { Lock, Mail, ArrowRight, CheckCircle, X, ShieldCheck, User, Users, Phone, AlertTriangle } from 'lucide-react';
 
 type Step = 'verify' | 'choose' | 'newPassword' | 'success';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+  // The secret token from the email link (?t=...)
+  const accessToken = searchParams.get('t') ?? '';
 
   // Step state
   const [step, setStep] = useState<Step>('verify');
@@ -41,7 +45,7 @@ export default function ResetPassword() {
       const res = await fetch(`${supabaseUrl}/functions/v1/verify-identity-reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, firstName, lastName, parentName, phone }),
+        body: JSON.stringify({ email, firstName, lastName, parentName, phone, accessToken }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -68,7 +72,7 @@ export default function ResetPassword() {
       const res = await fetch(`${supabaseUrl}/functions/v1/verify-identity-reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, firstName, lastName, parentName, phone, newPassword: password }),
+        body: JSON.stringify({ email, firstName, lastName, parentName, phone, accessToken, newPassword: password }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -92,6 +96,42 @@ export default function ResetPassword() {
     newPassword: 'Set a new password for your account',
     success: '',
   };
+
+  // Guard: no valid token in URL → don't show the form at all
+  if (!accessToken) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ background: 'linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 50%, #0a0a0a 100%)' }}>
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-[#fc0ce4]/5 blur-[120px] mix-blend-screen animate-blob" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-[#949ce4]/5 blur-[120px] mix-blend-screen animate-blob animation-delay-2000" />
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ duration: 0.4 }} className="relative w-full max-w-md z-10">
+          <div className="glass-panel rounded-[2rem] shadow-2xl shadow-black/60 border border-white/10 overflow-hidden">
+            <div className="px-8 pt-8 pb-4">
+              <div className="flex items-center gap-3 mb-1">
+                <div className="w-10 h-10 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-red-400" />
+                </div>
+                <div>
+                  <h2 className="font-display text-xl font-medium tracking-tight">Invalid Reset Link</h2>
+                  <p className="text-white/40 text-xs mt-0.5">This page requires a secure link from your email</p>
+                </div>
+              </div>
+            </div>
+            <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <div className="px-8 py-6 space-y-4">
+              <p className="text-white/60 text-sm leading-relaxed">
+                You cannot access the password reset page directly. Please use the <strong className="text-white/80">Forgot?</strong> link on the login page and follow the link sent to your email.
+              </p>
+              <button onClick={() => navigate('/login')} className="w-full bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]">
+                Go to Login
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ background: 'linear-gradient(135deg, #0a0a0a 0%, #1a0a2e 50%, #0a0a0a 100%)' }}>
