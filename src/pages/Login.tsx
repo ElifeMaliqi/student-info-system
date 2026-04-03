@@ -3,7 +3,6 @@ import { motion } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
-import { supabase } from '../lib/supabase';
 import { useUser } from '../context/UserContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -34,10 +33,22 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: resetRedirectUrl,
+      const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-password-reset-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          redirectTo: resetRedirectUrl,
+        }),
       });
-      if (error) throw error;
+
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'Failed to send reset link.');
+      }
+
       setResetSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send reset link.');

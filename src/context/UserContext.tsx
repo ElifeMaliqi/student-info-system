@@ -19,6 +19,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const hydratedRef = useRef(false);
 
+  const isInvalidRefreshTokenError = (message?: string | null) =>
+    !!message && /invalid refresh token|refresh token not found/i.test(message);
+
   useEffect(() => {
     let active = true;
 
@@ -33,9 +36,15 @@ export function UserProvider({ children }: { children: ReactNode }) {
     });
 
     const hydrateUser = async () => {
-      const { data, error } = await supabase.auth.getUser();
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 
-      if (error || !data.user) {
+      if (sessionError && isInvalidRefreshTokenError(sessionError.message)) {
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+
+      const sessionUser = sessionData?.session?.user;
+
+      if (sessionError || !sessionUser) {
         if (active) {
           setUser(null);
           setReady(true);
@@ -46,7 +55,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
-        .eq('id', data.user.id)
+        .eq('id', sessionUser.id)
         .maybeSingle();
 
       if (!active) return;
@@ -54,7 +63,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (profileError || !profile) {
         setUser(null);
       } else {
-        setUser(toAppUser({ id: data.user.id, email: data.user.email }, profile));
+        setUser(toAppUser({ id: sessionUser.id, email: sessionUser.email }, profile));
         hydratedRef.current = true;
       }
 
