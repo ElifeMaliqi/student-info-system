@@ -85,10 +85,23 @@ CREATE POLICY installments_student_read ON installment_plans FOR SELECT USING (
   )
 );
 
--- Teachers can read payment status (view-only)
+-- Teachers can read payment status (view-only) for their own students
 CREATE POLICY invoices_teacher_read ON invoices FOR SELECT USING (
   EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher')
+  AND EXISTS (
+    SELECT 1 FROM class_enrollments ce
+    JOIN classes c ON c.id = ce.class_id
+    WHERE ce.student_id = invoices.student_id
+      AND c.teacher_id = auth.uid()
+  )
 );
 CREATE POLICY payments_teacher_read ON payments FOR SELECT USING (
   EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'teacher')
+  AND EXISTS (
+    SELECT 1 FROM invoices i
+    JOIN class_enrollments ce ON ce.student_id = i.student_id
+    JOIN classes c ON c.id = ce.class_id
+    WHERE i.id = payments.invoice_id
+      AND c.teacher_id = auth.uid()
+  )
 );

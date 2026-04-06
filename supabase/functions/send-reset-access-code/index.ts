@@ -9,6 +9,8 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
+const RESET_REQUEST_MIN_INTERVAL_MS = 60 * 1000;
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -50,6 +52,20 @@ Deno.serve(async (req: Request) => {
     // Don't reveal whether the email exists — just return ok silently
     if (!profile) return ok;
 
+    // Soft-rate-limit reset requests per email (silent, no UX change).
+    const { data: latestToken } = await supabaseAdmin
+      .from("password_reset_tokens")
+      .select("created_at")
+      .eq("email", normalizedEmail)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestToken?.created_at) {
+      const elapsed = Date.now() - new Date(latestToken.created_at).getTime();
+      if (elapsed < RESET_REQUEST_MIN_INTERVAL_MS) return ok;
+    }
+
     // Generate a cryptographically secure 64-char hex token
     const tokenBytes = new Uint8Array(32);
     crypto.getRandomValues(tokenBytes);
@@ -74,7 +90,7 @@ Deno.serve(async (req: Request) => {
       return ok;
     }
 
-    const resetLink = `${siteUrl}/resetpassword?t=${token}`;
+    const resetLink = `${siteUrl}/resetpassword#t=${token}`;
     const firstName = profile.first_name ?? "there";
 
     const htmlBody = `

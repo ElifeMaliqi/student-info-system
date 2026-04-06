@@ -59,7 +59,7 @@ Deno.serve(async (req: Request) => {
     // ---------- Validate the access token ----------
     const { data: tokenRow, error: tokenError } = await supabaseAdmin
       .from("password_reset_tokens")
-      .select("id, email, expires_at, used")
+      .select("id, email, expires_at, used, failed_attempts, locked")
       .eq("token", accessToken)
       .maybeSingle();
 
@@ -67,6 +67,14 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({ success: false, error: "Invalid or expired reset link. Please request a new one." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Check if token is locked due to too many failed attempts
+    if (tokenRow.locked) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Too many failed attempts. Please request a new password reset link." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "3600" } }
       );
     }
 
@@ -100,6 +108,15 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (profileError || !profile) {
+      // Increment failed attempt on failed lookup
+      const newAttempts = (tokenRow.failed_attempts || 0) + 1;
+      const shouldLock = newAttempts >= 5;
+      
+      await supabaseAdmin
+        .from("password_reset_tokens")
+        .update({ failed_attempts: newAttempts, locked: shouldLock })
+        .eq("id", tokenRow.id);
+
       // Generic message to avoid user-enumeration
       return new Response(
         JSON.stringify({ success: false, error: "Identity verification failed. Please check all fields and try again." }),
@@ -120,6 +137,21 @@ Deno.serve(async (req: Request) => {
     const phoneMatch = phone === dbPhone || phone === dbSecondaryPhone;
 
     if (!firstNameMatch || !lastNameMatch || !parentNameMatch || !phoneMatch) {
+      const newAttempts = (tokenRow.failed_attempts || 0) + 1;
+      const shouldLock = newAttempts >= 5;
+
+      await supabaseAdmin
+        .from("password_reset_tokens")
+        .update({ failed_attempts: newAttempts, locked: shouldLock })
+        .eq("id", tokenRow.id);
+
+      if (shouldLock) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Too many failed attempts. Please request a new password reset link." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "3600" } }
+        );
+      }
+
       return new Response(
         JSON.stringify({ success: false, error: "Identity verification failed. Please check all fields and try again." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -130,22 +162,16 @@ Deno.serve(async (req: Request) => {
 
     // If newPassword is supplied, change it
     if (newPassword) {
-      if (newPassword.length < 6) {
+      if (newPassword.length < 8) {
         return new Response(
-          JSON.stringify({ success: false, error: "New password must be at least 6 characters." }),
+          JSON.stringify({ success: false, error: "New password must be at least 8 characters." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      // Find the auth user by email
-      const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
-      if (listError) throw listError;
-
-      const authUser = (listData?.users || []).find(
-        (u: { email?: string }) => (u.email || "").toLowerCase() === email
-      );
-
-      if (!authUser) {
+      // Find the auth user by email (direct lookup instead of scanning all users)
+      const { data: authUser, error: lookupError } = await supabaseAdmin.auth.admin.getUserByEmail(email);
+      if (lookupError || !authUser) {
         return new Response(
           JSON.stringify({ success: false, error: "Could not locate authentication record." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -183,9 +209,8 @@ Deno.serve(async (req: Request) => {
     );
   } catch (err) {
     console.error("verify-identity-reset-password error:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
     return new Response(
-      JSON.stringify({ success: false, error: message }),
+      JSON.stringify({ success: false, error: "An error occurred. Please try again." }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

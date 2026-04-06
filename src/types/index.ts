@@ -145,7 +145,7 @@ export interface RegistrationApplication {
   email: string;
   firstName: string;
   lastName: string;
-  passwordHash: string;
+  passwordHash?: string;
   role: 'teacher' | 'student';
   program?: string;
   location?: string;

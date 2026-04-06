@@ -86,7 +86,8 @@ Deno.serve(async (req: Request) => {
     });
 
     if (createAuthError || !authData.user) {
-      throw new Error(`Failed to create auth user: ${createAuthError?.message}`);
+      console.error("Failed to create auth user:", createAuthError?.message);
+      throw new Error("Failed to create account. Please try again or contact support.");
     }
 
     const userId = authData.user.id;
@@ -148,7 +149,8 @@ Deno.serve(async (req: Request) => {
 
       if (studentError) {
         await supabaseAdmin.auth.admin.deleteUser(userId);
-        throw new Error(`Failed to create student record: ${studentError.message}`);
+        console.error("Failed to create student record:", studentError.message);
+        throw new Error("Failed to create student profile. Please try again or contact support.");
       }
     }
 
@@ -212,7 +214,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error occurred",
+        error: "An error occurred while processing your request. Please try again or contact support.",
       }),
       {
         headers: {

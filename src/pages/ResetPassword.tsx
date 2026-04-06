@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, Mail, ArrowRight, CheckCircle, X, ShieldCheck, User, Users, Phone, AlertTriangle } from 'lucide-react';
 
@@ -7,11 +7,11 @@ type Step = 'verify' | 'choose' | 'newPassword' | 'success';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 
-  // The secret token from the email link (?t=...)
-  const accessToken = searchParams.get('t') ?? '';
+  // The secret token from the email link (#t=...). 
+  // Fragments are never sent to servers, keeping the token private
+  const accessToken = window.location.hash.slice(1).split('=')[1] ?? '';
 
   // Step state
   const [step, setStep] = useState<Step>('verify');
@@ -64,7 +64,7 @@ export default function ResetPassword() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
     if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
 
     setIsLoading(true);

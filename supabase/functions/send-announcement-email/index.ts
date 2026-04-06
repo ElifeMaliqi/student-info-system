@@ -3,7 +3,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS, GET, PUT, DELETE",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers":
     "Content-Type, Authorization, X-Client-Info, Apikey, x-client-info, x-supabase-auth",
   "Access-Control-Max-Age": "86400",
@@ -244,12 +244,10 @@ Deno.serve(async (req: Request) => {
     );
   } catch (err) {
     console.error("Error in send-announcement-email function:", err);
-    const message = err instanceof Error ? err.message : "Unknown error";
     return new Response(
       JSON.stringify({
         success: false,
-        error: message,
-        errorDetails: err instanceof Error ? err.stack : undefined,
+        error: "An error occurred while sending announcements. Please try again or contact support.",
       }),
       {
         status: 400,

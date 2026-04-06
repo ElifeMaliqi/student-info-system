@@ -1676,14 +1676,40 @@ export const api = {
       const { data, error } = await supabase
         .from('registration_applications')
         .select(`
-          *,
+          id,
+          email,
+          first_name,
+          last_name,
+          parent_first_name,
+          role,
+          program,
+          location,
+          phone,
+          secondary_phone,
+          status,
+          created_at,
+          reviewed_at,
+          notes,
+          specialization,
+          qualifications,
+          experience_years,
+          date_of_birth,
+          address,
+          city,
+          country,
+          emergency_contact_name,
+          emergency_contact_phone,
+          id_document_url,
           reviewer:profiles!registration_applications_reviewed_by_fkey(first_name, last_name)
         `)
         .order('created_at', { ascending: false });
 
       if (error) throw new Error(error.message);
 
-      return (data || []).map(app => ({
+      return (data || []).map(app => {
+        const reviewer = Array.isArray(app.reviewer) ? app.reviewer[0] : app.reviewer;
+
+        return ({
         id: app.id,
         email: app.email,
         firstName: app.first_name,
@@ -1696,7 +1722,7 @@ export const api = {
         secondaryPhone: app.secondary_phone,
         status: app.status,
         createdAt: formatDate(app.created_at),
-        reviewedBy: app.reviewer ? `${app.reviewer.first_name} ${app.reviewer.last_name}` : undefined,
+        reviewedBy: reviewer ? `${reviewer.first_name} ${reviewer.last_name}` : undefined,
         reviewedAt: app.reviewed_at ? formatDate(app.reviewed_at) : undefined,
         notes: app.notes,
         specialization: app.specialization,
@@ -1708,9 +1734,9 @@ export const api = {
         country: app.country,
         emergencyContactName: app.emergency_contact_name,
         emergencyContactPhone: app.emergency_contact_phone,
-        idDocumentUrl: app.id_document_url,
-        passwordHash: app.password_hash
-      }));
+        idDocumentUrl: app.id_document_url
+      });
+      });
     },
 
     approve: async (applicationId: string, classId?: string) => {
@@ -1801,12 +1827,14 @@ export const api = {
       }
 
       // Insert as a pending application
+      // Use a secure random temp password (will not be exposed in frontend bundle)
+      const tempPassword = crypto.randomUUID().substring(0, 16);
       const fullPayload = {
         email:             enrollData.email,
         first_name:        enrollData.firstName,
         last_name:         enrollData.lastName,
         parent_first_name: enrollData.parentFirstName,
-        password_hash:     'FMA#2026',
+        password_hash:     tempPassword,
         role:              'student',
         program:           enrollData.program,
         location:          enrollData.location,
@@ -1827,7 +1855,7 @@ export const api = {
           first_name:        enrollData.firstName,
           last_name:         enrollData.lastName,
           parent_first_name: enrollData.parentFirstName,
-          password_hash:     'FMA#2026',
+          password_hash:     tempPassword,
           role:              'student',
           program:           enrollData.program,
           phone:             enrollData.phone,

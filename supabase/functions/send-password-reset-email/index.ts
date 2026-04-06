@@ -10,7 +10,7 @@ const corsHeaders = {
 
 interface RequestBody {
   email: string;
-  redirectTo: string;
+  redirectTo?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -24,6 +24,9 @@ Deno.serve(async (req: Request) => {
 
     const rawFrom = Deno.env.get("RESEND_FROM_EMAIL") ?? "info@futureminds.io";
     const fromEmail = `Future Minds Academy <${extractEmail(rawFrom)}>`;
+    const siteUrl = (Deno.env.get("SITE_URL") ?? "https://studentinfosystems.netlify.app").trim();
+    const body: RequestBody = await req.json();
+    const safeRedirectTo = resolveSafeRedirectTo(body.redirectTo, siteUrl);
 
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -31,15 +34,10 @@ Deno.serve(async (req: Request) => {
       { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
-    const { email, redirectTo }: RequestBody = await req.json();
+    const { email } = body;
     const normalizedEmail = (email || "").trim().toLowerCase();
     if (!normalizedEmail || !normalizedEmail.includes("@")) {
       throw new Error("Valid email is required");
-    }
-
-    const safeRedirectTo = (redirectTo || "").trim();
-    if (!safeRedirectTo) {
-      throw new Error("redirectTo is required");
     }
 
     let resetLink: string | null = null;
@@ -143,9 +141,9 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return new Response(JSON.stringify({ success: false, error: message }), {
-      status: 400,
+    console.error("send-password-reset-email error:", err);
+    return new Response(JSON.stringify({ success: false, error: "An error occurred. Please try again." }), {
+      status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
@@ -167,4 +165,36 @@ function escapeHtml(str: string): string {
 
 function escapeHtmlAttr(str: string): string {
   return escapeHtml(str).replace(/`/g, "&#096;");
+}
+
+function resolveSafeRedirectTo(rawRedirect: string | undefined, siteUrl: string): string {
+  const fallback = new URL("/resetpassword", siteUrl).toString();
+  const candidate = (rawRedirect || "").trim();
+  if (!candidate) return fallback;
+
+  try {
+    const candidateUrl = new URL(candidate);
+    const fallbackUrl = new URL(fallback);
+
+    const allowedOrigins = new Set<string>([fallbackUrl.origin]);
+    const extraAllowedOrigins = (Deno.env.get("ALLOWED_RESET_REDIRECT_ORIGINS") || "")
+      .split(",")
+      .map((o) => o.trim())
+      .filter(Boolean);
+
+    for (const origin of extraAllowedOrigins) {
+      try {
+        allowedOrigins.add(new URL(origin).origin);
+      } catch {
+        // Ignore malformed origin entries.
+      }
+    }
+
+    if (!allowedOrigins.has(candidateUrl.origin)) return fallback;
+    if (candidateUrl.pathname !== "/resetpassword") return fallback;
+
+    return candidateUrl.toString();
+  } catch {
+    return fallback;
+  }
 }

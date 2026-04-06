@@ -54,8 +54,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       return;
     }
 
-    if (!password || password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!password || password.length < 8) {
+      setError('Password must be at least 8 characters.');
       setIsLoading(false);
       return;
     }
@@ -64,8 +64,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       const result = await api.auth.login(email, password);
       setUser({
         ...result.user,
-        // Fallback enforcement while DB migration / RPC rollout catches up.
-        mustChangePassword: !!result.user.mustChangePassword || password === 'FMA#2026',
+        // Password change requirement is enforced server-side
+        mustChangePassword: !!result.user.mustChangePassword,
       });
       onLogin();
     } catch (err) {
