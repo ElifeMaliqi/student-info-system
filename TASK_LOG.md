@@ -812,4 +812,13 @@ VALIDATION
 - `npx supabase db push`: PASS (applied `20260406123000_tighten_grade_table_rls.sql`)
 - `npm audit --omit=dev --audit-level=moderate`: PASS (0 vulnerabilities)
 
+REVALIDATION (2026-04-07)
+---
+- Re-ran security scan and dependency audit.
+- Updated Vite patch level during audit remediation (`vite v6.4.2` shown in build output).
+- `npm audit --omit=dev --audit-level=moderate`: PASS (0 production vulnerabilities).
+- `npm run lint`: PASS.
+- `npm run build`: PASS.
+- User experience unchanged: all fixes remain backend/security hardening only.
+
 ================================================================================
