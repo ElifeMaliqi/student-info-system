@@ -1,16 +1,33 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
-import { api } from '../services/api';
+import { supabase } from '../lib/supabase';
 import { useUser } from '../context/UserContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isHoveringBtn, setIsHoveringBtn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const { setUser } = useUser();
+  const { user } = useUser();
   const navigate = useNavigate();
+  const safetyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // When UserContext sets the user (via onAuthStateChange SIGNED_IN),
+  // App.tsx routing auto-redirects away from /auth.  Clear the safety
+  // timer so it doesn't fire after the component unmounts.
+  useEffect(() => {
+    if (user && safetyTimer.current) {
+      clearTimeout(safetyTimer.current);
+    }
+  }, [user]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (safetyTimer.current) clearTimeout(safetyTimer.current);
+    };
+  }, []);
 
   // Form State
   const [email, setEmail] = useState('');
@@ -61,16 +78,26 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
-      const result = await api.auth.login(email, password);
-      setUser({
-        ...result.user,
-        // Password change requirement is enforced server-side
-        mustChangePassword: !!result.user.mustChangePassword,
-      });
-      onLogin();
+      const result = await Promise.race([
+        supabase.auth.signInWithPassword({ email, password }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Sign-in timed out. Please check your connection and try again.')), 8_000)
+        ),
+      ]);
+
+      const { error: authError } = result as Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
+      if (authError) throw new Error(authError.message);
+
+      // Auth succeeded. onAuthStateChange in UserContext will fetch the
+      // profile and call setUser(). App.tsx routing then redirects away
+      // from /auth automatically. Keep spinner visible until that happens.
+      // Safety timer: if profile loading stalls, reset the UI.
+      safetyTimer.current = setTimeout(() => {
+        setIsLoading(false);
+        setError('Your profile couldn\'t be loaded. Please try again.');
+      }, 6_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
-    } finally {
       setIsLoading(false);
     }
   };
