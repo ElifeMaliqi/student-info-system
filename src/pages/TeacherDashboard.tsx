@@ -36,6 +36,7 @@ export default function TeacherDashboard() {
 
     (async () => {
       try {
+        // 1. Fetch classes and grade tables for this teacher
         const [classesRes, gradeTablesRes] = await Promise.all([
           supabase
             .from('classes')
@@ -53,13 +54,13 @@ export default function TeacherDashboard() {
         const classIds = (classes || []).map(c => c.id);
         const gradeTableIds = (gradeTables || []).map(g => g.id);
 
-        // 2. Total unique students across teacher's classes
+        // 2. Total unique students & upcoming classes
         let totalStudents = 0;
         let studentsTrend = '';
         let upcomingClasses = 0;
         if (classIds.length > 0) {
           const today = new Date();
-          const jsDayToday = today.getDay(); // 0=Sun,1=Mon..6=Sat
+          const jsDayToday = today.getDay();
           const remainingDays = new Set<number>();
           for (let jsDay = jsDayToday; jsDay <= 6; jsDay++) {
             remainingDays.add(jsDay === 0 ? 6 : jsDay - 1);
@@ -84,9 +85,8 @@ export default function TeacherDashboard() {
           totalStudents = uniqueStudents.size;
           studentsTrend = `Across ${classIds.length} class${classIds.length !== 1 ? 'es' : ''}`;
 
-          // For today's sessions, only count those that haven't started yet
           const dbDayToday = jsDayToday === 0 ? 6 : jsDayToday - 1;
-          const nowTime = today.toTimeString().slice(0, 5); // "HH:MM"
+          const nowTime = today.toTimeString().slice(0, 5);
           upcomingClasses = (sessions || []).filter(s => {
             if (s.day_of_week === dbDayToday) {
               return (s.start_time || '00:00') > nowTime;
@@ -95,34 +95,31 @@ export default function TeacherDashboard() {
           }).length;
         }
 
-        // 4. Average grade across teacher's grade tables
+        // 3. Average grade & recent grades
         let avgGrade = '—';
-        const { data: gradeTables } = await supabase
-          .from('grade_tables')
-          .select('id')
-          .eq('teacher_id', teacherId);
-        const gradeTableIds = (gradeTables || []).map(g => g.id);
         if (gradeTableIds.length > 0) {
-          const { data: entries } = await supabase
-            .from('grade_table_entries')
-            .select('total_points')
-            .in('grade_table_id', gradeTableIds)
-            .not('total_points', 'is', null);
+          const [entriesRes, recentEntriesRes] = await Promise.all([
+            supabase
+              .from('grade_table_entries')
+              .select('total_points')
+              .in('grade_table_id', gradeTableIds)
+              .not('total_points', 'is', null),
+            supabase
+              .from('grade_table_entries')
+              .select('id, total_points, graded_at, student:profiles!grade_table_entries_student_id_fkey(first_name, last_name), grade_table:grade_tables!inner(name, class:classes(title))')
+              .in('grade_table_id', gradeTableIds)
+              .not('total_points', 'is', null)
+              .order('graded_at', { ascending: false })
+              .limit(5),
+          ]);
+
+          const { data: entries } = entriesRes;
+          const { data: recentEntries } = recentEntriesRes;
+
           if (entries && entries.length > 0) {
             const avg = entries.reduce((sum, e) => sum + (parseFloat(e.total_points) || 0), 0) / entries.length;
             avgGrade = `${Math.round(avg)} pts`;
           }
-        }
-
-        // 5. Recent graded entries
-        if (gradeTableIds.length > 0) {
-          const { data: recentEntries } = await supabase
-            .from('grade_table_entries')
-            .select('id, total_points, graded_at, student:profiles!grade_table_entries_student_id_fkey(first_name, last_name), grade_table:grade_tables!inner(name, class:classes(title))')
-            .in('grade_table_id', gradeTableIds)
-            .not('total_points', 'is', null)
-            .order('graded_at', { ascending: false })
-            .limit(5);
 
           setRecentGrades((recentEntries || []).map((e: any) => ({
             id: e.id,
@@ -144,29 +141,26 @@ export default function TeacherDashboard() {
       } finally {
         setIsLoading(false);
       }
+    })();
+  }, [user]);
+
+  const statCards = [
+    { label: 'teacher.total_students', value: stats.totalStudents, trend: stats.studentsTrend, icon: Users, color: 'text-[#fc0ce4]' },
+    { label: 'teacher.upcoming_classes', value: stats.upcomingClasses, trend: 'This week', icon: CalendarCheck, color: 'text-[#949ce4]' },
+    { label: 'teacher.avg_grade', value: stats.avgGrade, trend: 'All classes', icon: Award, color: 'text-emerald-400' },
+  ];
+
+  return (
+    <div className="space-y-6">
       {/* Welcome Section */}
-                const [entriesRes, recentEntriesRes] = await Promise.all([
-                  supabase
-                    .from('grade_table_entries')
-                    .select('total_points')
-                    .in('grade_table_id', gradeTableIds)
-                    .not('total_points', 'is', null),
-                  supabase
-                    .from('grade_table_entries')
-                    .select('id, total_points, graded_at, student:profiles!grade_table_entries_student_id_fkey(first_name, last_name), grade_table:grade_tables!inner(name, class:classes(title))')
-                    .in('grade_table_id', gradeTableIds)
-                    .not('total_points', 'is', null)
-                    .order('graded_at', { ascending: false })
-                    .limit(5),
-                ]);
+      <div>
+        <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('teacher.portal')}</h1>
+        <p className="text-white/50 text-sm">{t('teacher.desc')}</p>
+      </div>
 
-                const { data: entries } = entriesRes;
-                const { data: recentEntries } = recentEntriesRes;
-
-      >
-        <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('teacher.portal')}</h1>
-          <p className="text-white/50 text-sm">{t('teacher.desc')}</p>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {statCards.map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}
@@ -191,13 +185,6 @@ export default function TeacherDashboard() {
           </motion.div>
         ))}
       </div>
-
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Recent Grades */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}
           className="lg:col-span-2 glass-card rounded-3xl p-6 overflow-hidden flex flex-col"
