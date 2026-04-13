@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
-import { supabase } from '../lib/supabase';
+import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -61,34 +61,10 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
-      const authResult = await Promise.race([
-        supabase.auth.signInWithPassword({ email, password }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Sign-in timed out. Please check your connection and try again.')), 8_000)
-        ),
-      ]);
-
-      const { data, error: authError } = authResult as Awaited<ReturnType<typeof supabase.auth.signInWithPassword>>;
-      if (authError) throw new Error(authError.message);
-      if (!data.user || !data.session) throw new Error('Authentication failed');
-
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
-        .eq('id', data.user.id)
-        .maybeSingle();
-
-      if (profileError) throw new Error(profileError.message);
-      if (!profile) throw new Error('User profile not found');
-
+      const result = await api.auth.login(email, password);
       setUser({
-        id: profile.id,
-        email: data.user.email || '',
-        firstName: profile.first_name,
-        lastName: profile.last_name,
-        role: profile.role,
-        avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email || data.user.id}`,
-        mustChangePassword: !!profile.must_change_password,
+        ...result.user,
+        mustChangePassword: !!result.user.mustChangePassword,
       });
       onLogin();
     } catch (err) {
