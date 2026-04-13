@@ -36,38 +36,55 @@ export function UserProvider({ children }: { children: ReactNode }) {
     });
 
     const hydrateUser = async () => {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      try {
+        // Race getSession() against a 10-second timeout so a hung network
+        // call never leaves the app stuck on the invisible loading screen.
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Session check timed out')), 10_000)
+          ),
+        ]);
+        const { data: sessionData, error: sessionError } = sessionResult as
+          Awaited<ReturnType<typeof supabase.auth.getSession>>;
 
-      if (sessionError && isInvalidRefreshTokenError(sessionError.message)) {
-        await supabase.auth.signOut({ scope: 'local' });
-      }
 
-      const sessionUser = sessionData?.session?.user;
+        if (sessionError && isInvalidRefreshTokenError(sessionError.message)) {
+          await supabase.auth.signOut({ scope: 'local' });
+        }
 
-      if (sessionError || !sessionUser) {
+        const sessionUser = sessionData?.session?.user;
+
+        if (sessionError || !sessionUser) {
+          if (active) {
+            setUser(null);
+            setReady(true);
+          }
+          return;
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
+          .eq('id', sessionUser.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        if (profileError || !profile) {
+          setUser(null);
+        } else {
+          setUser(toAppUser({ id: sessionUser.id, email: sessionUser.email }, profile));
+          hydratedRef.current = true;
+        }
+
+        setReady(true);
+      } catch {
         if (active) {
           setUser(null);
           setReady(true);
         }
-        return;
       }
-
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
-        .eq('id', sessionUser.id)
-        .maybeSingle();
-
-      if (!active) return;
-
-      if (profileError || !profile) {
-        setUser(null);
-      } else {
-        setUser(toAppUser({ id: sessionUser.id, email: sessionUser.email }, profile));
-        hydratedRef.current = true;
-      }
-
-      setReady(true);
     };
 
     void hydrateUser();
@@ -88,19 +105,24 @@ export function UserProvider({ children }: { children: ReactNode }) {
       }
 
       if (_event === 'SIGNED_IN' && session?.user && !hydratedRef.current) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
-          .eq('id', session.user.id)
-          .maybeSingle();
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
+            .eq('id', session.user.id)
+            .maybeSingle();
 
-        if (!active) return;
+          if (!active) return;
 
-        if (profile) {
-          setUser(toAppUser({ id: session.user.id, email: session.user.email }, profile));
-          hydratedRef.current = true;
+          if (profile) {
+            setUser(toAppUser({ id: session.user.id, email: session.user.email }, profile));
+            hydratedRef.current = true;
+          }
+        } catch {
+          // profile load failed — user stays null, app redirects to auth
+        } finally {
+          if (active) setReady(true);
         }
-        setReady(true);
       }
     });
 

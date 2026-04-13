@@ -5,8 +5,8 @@ import {
   Loader2, DollarSign, Search, Download,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
-import { supabase } from '../lib/supabase';
 import { Invoice } from '../types';
 import { exportCsv } from '../utils/csv';
 
@@ -34,6 +34,7 @@ const STATUS_ICON: Record<string, typeof CheckCircle> = {
 
 export default function StudentInvoices() {
   const { t } = useLanguage();
+  const { user } = useUser();
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -43,11 +44,9 @@ export default function StudentInvoices() {
   const [filterYear, setFilterYear] = useState('');
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data?.user?.id ?? null;
-      if (uid) void loadAll(uid);
-    });
-  }, []);
+    if (!user) return;
+    void loadAll(user.id);
+  }, [user]);
 
   async function loadAll(uid: string) {
     setLoading(true);
