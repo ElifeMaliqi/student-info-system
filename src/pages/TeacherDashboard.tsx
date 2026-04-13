@@ -36,45 +36,54 @@ export default function TeacherDashboard() {
 
     (async () => {
       try {
-        // 1. Get classes taught by this teacher
-        const { data: classes } = await supabase
-          .from('classes')
-          .select('id, title, program_id')
-          .eq('teacher_id', teacherId);
+        const [classesRes, gradeTablesRes] = await Promise.all([
+          supabase
+            .from('classes')
+            .select('id, title, program_id')
+            .eq('teacher_id', teacherId),
+          supabase
+            .from('grade_tables')
+            .select('id')
+            .eq('teacher_id', teacherId),
+        ]);
+
+        const { data: classes } = classesRes;
+        const { data: gradeTables } = gradeTablesRes;
 
         const classIds = (classes || []).map(c => c.id);
+        const gradeTableIds = (gradeTables || []).map(g => g.id);
 
         // 2. Total unique students across teacher's classes
         let totalStudents = 0;
         let studentsTrend = '';
-        if (classIds.length > 0) {
-          const { data: enrollments } = await supabase
-            .from('class_enrollments')
-            .select('student_id')
-            .in('class_id', classIds);
-          const uniqueStudents = new Set((enrollments || []).map(e => e.student_id));
-          totalStudents = uniqueStudents.size;
-          studentsTrend = `Across ${classIds.length} class${classIds.length !== 1 ? 'es' : ''}`;
-        }
-
-        // 3. Upcoming classes (remaining sessions this week, today onward)
         let upcomingClasses = 0;
         if (classIds.length > 0) {
           const today = new Date();
           const jsDayToday = today.getDay(); // 0=Sun,1=Mon..6=Sat
-          // Remaining days from today through Sunday (end of week)
           const remainingDays = new Set<number>();
           for (let jsDay = jsDayToday; jsDay <= 6; jsDay++) {
-            // Convert JS day (0=Sun,1=Mon..6=Sat) → DB day (0=Mon..6=Sun)
             remainingDays.add(jsDay === 0 ? 6 : jsDay - 1);
           }
-          // Always include Sunday (DB day 6) if today is Sunday
           if (jsDayToday === 0) remainingDays.add(6);
-          const { data: sessions } = await supabase
-            .from('class_sessions')
-            .select('day_of_week, start_time')
-            .in('class_id', classIds)
-            .in('day_of_week', Array.from(remainingDays));
+
+          const [enrollmentsRes, sessionsRes] = await Promise.all([
+            supabase
+              .from('class_enrollments')
+              .select('student_id')
+              .in('class_id', classIds),
+            supabase
+              .from('class_sessions')
+              .select('day_of_week, start_time')
+              .in('class_id', classIds)
+              .in('day_of_week', Array.from(remainingDays)),
+          ]);
+
+          const { data: enrollments } = enrollmentsRes;
+          const { data: sessions } = sessionsRes;
+          const uniqueStudents = new Set((enrollments || []).map(e => e.student_id));
+          totalStudents = uniqueStudents.size;
+          studentsTrend = `Across ${classIds.length} class${classIds.length !== 1 ? 'es' : ''}`;
+
           // For today's sessions, only count those that haven't started yet
           const dbDayToday = jsDayToday === 0 ? 6 : jsDayToday - 1;
           const nowTime = today.toTimeString().slice(0, 5); // "HH:MM"
@@ -135,31 +144,29 @@ export default function TeacherDashboard() {
       } finally {
         setIsLoading(false);
       }
-    })();
-  }, [user]);
-
-  return (
-    <div className="space-y-8">
       {/* Welcome Section */}
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"
+                const [entriesRes, recentEntriesRes] = await Promise.all([
+                  supabase
+                    .from('grade_table_entries')
+                    .select('total_points')
+                    .in('grade_table_id', gradeTableIds)
+                    .not('total_points', 'is', null),
+                  supabase
+                    .from('grade_table_entries')
+                    .select('id, total_points, graded_at, student:profiles!grade_table_entries_student_id_fkey(first_name, last_name), grade_table:grade_tables!inner(name, class:classes(title))')
+                    .in('grade_table_id', gradeTableIds)
+                    .not('total_points', 'is', null)
+                    .order('graded_at', { ascending: false })
+                    .limit(5),
+                ]);
+
+                const { data: entries } = entriesRes;
+                const { data: recentEntries } = recentEntriesRes;
+
       >
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('teacher.portal')}</h1>
           <p className="text-white/50 text-sm">{t('teacher.desc')}</p>
-        </div>
-      </motion.div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[
-          { label: 'teacher.total_students', value: stats.totalStudents, trend: stats.studentsTrend, icon: Users, color: 'text-blue-400' },
-          { label: 'teacher.upcoming_classes', value: stats.upcomingClasses, trend: 'This Week', icon: CalendarCheck, color: 'text-purple-400' },
-          { label: 'teacher.avg_grade', value: stats.avgGrade, trend: 'Overall', icon: Award, color: 'text-emerald-400' },
-        ].map((stat, i) => (
           <motion.div
             key={stat.label}
             initial={{ opacity: 0, y: 20 }}

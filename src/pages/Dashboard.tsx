@@ -39,31 +39,35 @@ export default function Dashboard() {
   useEffect(() => {
     const load = async () => {
       try {
-        // Total students
-        const { count: studentCount } = await supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student');
+        const now = new Date();
+        const [studentRes, programRes, attendanceRes, paidRes, enrollmentsRes, pendingRes, overdueRes] = await Promise.all([
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
+          supabase.from('programs').select('id', { count: 'exact', head: true }).eq('is_active', true),
+          supabase.from('class_attendance').select('status, student_id'),
+          supabase.from('invoices').select('amount').eq('status', 'paid').eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+          supabase
+            .from('class_enrollments')
+            .select('student_id, enrolled_at, status, class:classes(program_id)')
+            .order('enrolled_at', { ascending: false })
+            .limit(5),
+          supabase.from('registration_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+          supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue'),
+        ]);
 
-        // Active programs
-        const { count: programCount } = await supabase.from('programs').select('id', { count: 'exact', head: true }).eq('is_active', true);
+        const { count: studentCount } = studentRes;
+        const { count: programCount } = programRes;
+        const { data: attData } = attendanceRes;
+        const { data: paidData } = paidRes;
+        const { data: enrollments } = enrollmentsRes;
+        const { count: pendingApps } = pendingRes;
+        const { count: overdueInv } = overdueRes;
 
-        // Average attendance
-        const { data: attData } = await supabase.from('class_attendance').select('status');
         let attTotal = 0, attPresent = 0;
         (attData || []).forEach((r: any) => { attTotal++; if (r.status === 'present' || r.status === 'late') attPresent++; });
         const avgAtt = attTotal > 0 ? Math.round((attPresent / attTotal) * 1000) / 10 : 0;
-
-        // Monthly revenue (paid invoices this month)
-        const now = new Date();
-        const { data: paidData } = await supabase.from('invoices').select('amount').eq('status', 'paid').eq('month', now.getMonth() + 1).eq('year', now.getFullYear());
         const monthRev = (paidData || []).reduce((sum: number, r: any) => sum + parseFloat(r.amount), 0);
 
         setStats({ totalStudents: studentCount || 0, activePrograms: programCount || 0, avgAttendance: avgAtt, monthlyRevenue: monthRev });
-
-        // Recent enrollments (latest 5 students by enrollment date)
-        const { data: enrollments } = await supabase
-          .from('class_enrollments')
-          .select('student_id, enrolled_at, status, class:classes(program_id)')
-          .order('enrolled_at', { ascending: false })
-          .limit(5);
 
         const studentIds = [...new Set((enrollments || []).map((e: any) => e.student_id))];
         const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, avatar_url').in('id', studentIds.length ? studentIds : ['__none__']);
@@ -86,10 +90,6 @@ export default function Dashboard() {
           });
         }
         setRecentStudents(recent);
-
-        // Attention hub
-        const { count: pendingApps } = await supabase.from('registration_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending');
-        const { count: overdueInv } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue');
 
         // At-risk students: attendance < 70%
         const attByStudent: Record<string, { total: number; present: number }> = {};

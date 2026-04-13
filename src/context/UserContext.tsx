@@ -37,12 +37,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     const hydrateUser = async () => {
       try {
-        // Race getSession() against a 10-second timeout so a hung network
+        // Race getSession() against a short timeout so a hung network
         // call never leaves the app stuck on the invisible loading screen.
         const sessionResult = await Promise.race([
           supabase.auth.getSession(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Session check timed out')), 10_000)
+            setTimeout(() => reject(new Error('Session check timed out')), 4_000)
           ),
         ]);
         const { data: sessionData, error: sessionError } = sessionResult as
