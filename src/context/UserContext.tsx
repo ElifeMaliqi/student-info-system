@@ -15,9 +15,17 @@ const UserContext = createContext<UserContextType>({
 });
 
 export function UserProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserRaw] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const hydratedRef = useRef(false);
+
+  // Wrap setUser so that external callers (e.g. Login.tsx) also mark the
+  // user as hydrated, preventing onAuthStateChange from doing a redundant
+  // profile fetch.
+  const setUser = (u: User | null) => {
+    if (u) hydratedRef.current = true;
+    setUserRaw(u);
+  };
 
   const isInvalidRefreshTokenError = (message?: string | null) =>
     !!message && /invalid refresh token|refresh token not found/i.test(message);
@@ -99,7 +107,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       // is either handled by hydrateUser() or irrelevant to app state.
       if (_event === 'SIGNED_OUT') {
         hydratedRef.current = false;
-        setUser(null);
+        setUserRaw(null);
         setReady(true);
         return;
       }
