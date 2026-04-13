@@ -61,16 +61,22 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
 
     try {
+      console.log('[Login] handleLogin called, email:', email);
       const result = await api.auth.login(email, password);
+      console.log('[Login] api.auth.login returned, user:', result.user.id, result.user.role);
       setUser({
         ...result.user,
         mustChangePassword: !!result.user.mustChangePassword,
       });
+      console.log('[Login] setUser called, calling onLogin()');
       onLogin();
+      console.log('[Login] onLogin() finished');
     } catch (err) {
+      console.error('[Login] login error:', err);
       setError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     } finally {
       setIsLoading(false);
+      console.log('[Login] handleLogin complete, isLoading=false');
     }
   };
 

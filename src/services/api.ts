@@ -15,10 +15,12 @@ const statusMap: Record<string, 'Active' | 'Pending' | 'Suspended' | 'Graduated'
 export const api = {
   auth: {
     login: async (email: string, password: string): Promise<{ user: User, token: string }> => {
+      console.log('[api.auth.login] signInWithPassword starting...');
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+      console.log('[api.auth.login] signInWithPassword done, error:', error?.message || 'none');
 
       if (error) {
         throw new Error(error.message);
@@ -28,11 +30,13 @@ export const api = {
         throw new Error('Authentication failed');
       }
 
+      console.log('[api.auth.login] auth OK, fetching profile for:', data.user.id);
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', data.user.id)
         .maybeSingle();
+      console.log('[api.auth.login] profile fetch done, error:', profileError?.message || 'none', 'profile:', profile?.id || 'null');
 
       if (profileError) {
         throw new Error(profileError.message);
@@ -42,6 +46,7 @@ export const api = {
         throw new Error('User profile not found');
       }
 
+      console.log('[api.auth.login] returning user, role:', profile.role);
       return {
         user: {
           id: profile.id,

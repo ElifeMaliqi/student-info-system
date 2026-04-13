@@ -44,10 +44,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     // Check for existing session on mount
     const hydrateUser = async () => {
       try {
+        console.log('[UserContext] hydrateUser starting, calling getSession...');
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        console.log('[UserContext] getSession done, error:', sessionError?.message || 'none', 'hasSession:', !!sessionData?.session);
 
         if (sessionError) {
           if (/invalid refresh token|refresh token not found/i.test(sessionError.message || '')) {
+            console.log('[UserContext] invalid refresh token, signing out locally');
             await supabase.auth.signOut({ scope: 'local' });
           }
           if (active) { setUser(null); setReady(true); }
@@ -56,16 +59,21 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
         const sessionUser = sessionData?.session?.user;
         if (!sessionUser) {
+          console.log('[UserContext] no session user, setting ready=true (logged out)');
           if (active) { setUser(null); setReady(true); }
           return;
         }
 
+        console.log('[UserContext] session user found:', sessionUser.id, ', loading profile...');
         const appUser = await loadProfile(sessionUser);
+        console.log('[UserContext] profile loaded, role:', appUser?.role || 'null');
         if (active) {
           setUser(appUser);
           setReady(true);
+          console.log('[UserContext] hydrateUser complete, ready=true, user:', appUser ? 'set' : 'null');
         }
-      } catch {
+      } catch (err) {
+        console.error('[UserContext] hydrateUser error:', err);
         if (active) { setUser(null); setReady(true); }
       }
     };
@@ -75,6 +83,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('[UserContext] onAuthStateChange event:', _event, 'hasSession:', !!session);
       if (!active) return;
 
       if (_event === 'SIGNED_OUT') {
