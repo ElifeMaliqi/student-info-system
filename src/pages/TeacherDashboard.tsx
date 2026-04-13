@@ -185,6 +185,12 @@ export default function TeacherDashboard() {
           </motion.div>
         ))}
       </div>
+
+      {/* Two Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Recent Grades */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.4 }}
           className="lg:col-span-2 glass-card rounded-3xl p-6 overflow-hidden flex flex-col"
