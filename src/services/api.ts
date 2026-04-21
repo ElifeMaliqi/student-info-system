@@ -1261,31 +1261,26 @@ export const api = {
       if (!session) throw new Error('Not authenticated');
 
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-sms`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify(params),
-          }
-        );
+        const { data, error } = await supabase.functions.invoke('send-announcement-sms', {
+          body: params,
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
 
-        if (!res.ok) {
-          const result = await res.json().catch(() => ({}));
-          throw new Error(
-            result.error ||
-            `Server error: ${res.status} ${res.statusText}`
-          );
+        if (error) {
+          throw new Error(error.message || 'Failed to invoke SMS function');
         }
 
-        const result = await res.json();
-        if (result.error) {
+        const result = data as { sent?: number; total?: number; error?: string } | null;
+        if (result?.error) {
           throw new Error(result.error);
         }
-        return { sent: result.sent, total: result.total };
+
+        return {
+          sent: result?.sent ?? 0,
+          total: result?.total ?? 0,
+        };
       } catch (error) {
         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
           throw new Error(
