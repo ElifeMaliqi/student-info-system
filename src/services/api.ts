@@ -1282,6 +1282,26 @@ export const api = {
           total: result?.total ?? 0,
         };
       } catch (error) {
+        // Supabase functions.invoke may throw a generic message for non-2xx responses.
+        // Try to extract the real function error payload for actionable debugging.
+        if (error && typeof error === 'object' && 'context' in error) {
+          const response = (error as { context?: Response }).context;
+          if (response) {
+            try {
+              const payload = await response.clone().json() as { error?: string; message?: string };
+              const detailed = payload?.error || payload?.message;
+              if (detailed) throw new Error(detailed);
+            } catch {
+              try {
+                const text = await response.text();
+                if (text) throw new Error(text);
+              } catch {
+                // Fall through to default handling below.
+              }
+            }
+          }
+        }
+
         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
           throw new Error(
             'Network error: Could not connect to SMS service. ' +

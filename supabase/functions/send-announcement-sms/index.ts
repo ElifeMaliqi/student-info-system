@@ -24,6 +24,11 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    console.log("send-announcement-sms: request received", {
+      method: req.method,
+      hasAuthHeader: Boolean(req.headers.get("Authorization")),
+    });
+
     // ── Twilio credentials (set these as Supabase secrets) ──────────
     const twilioSid = Deno.env.get("TWILIO_ACCOUNT_SID");
     const twilioAuth = Deno.env.get("TWILIO_AUTH_TOKEN");
@@ -144,6 +149,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (phones.length === 0) {
+      console.log("send-announcement-sms: no recipients with phone", { audience });
       return new Response(
         JSON.stringify({
           success: true,
@@ -156,6 +162,11 @@ Deno.serve(async (req: Request) => {
 
     // Deduplicate & normalise
     const uniquePhones = [...new Set(phones.map(normalizePhone).filter(Boolean))];
+    console.log("send-announcement-sms: recipients resolved", {
+      audience,
+      rawCount: phones.length,
+      uniqueCount: uniquePhones.length,
+    });
 
     // Compose SMS body (160 chars is 1 segment — keep it short)
     const smsBody =
@@ -187,12 +198,28 @@ Deno.serve(async (req: Request) => {
           totalSent++;
         } else {
           const errBody = await res.text();
+          console.error("send-announcement-sms: twilio request failed", {
+            phone,
+            status: res.status,
+            statusText: res.statusText,
+            body: errBody,
+          });
           errors.push(`${phone}: ${errBody}`);
         }
       } catch (fetchErr) {
+        console.error("send-announcement-sms: twilio fetch exception", {
+          phone,
+          error: fetchErr instanceof Error ? fetchErr.message : "fetch failed",
+        });
         errors.push(`${phone}: ${fetchErr instanceof Error ? fetchErr.message : "fetch failed"}`);
       }
     }
+
+    console.log("send-announcement-sms: completed", {
+      sent: totalSent,
+      total: uniquePhones.length,
+      hasErrors: errors.length > 0,
+    });
 
     return new Response(
       JSON.stringify({
