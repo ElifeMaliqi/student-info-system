@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Megaphone, Plus, Calendar, Globe, GraduationCap, BookOpen,
-  Users, Shield, Layers, Loader2, AlertCircle, X, Mail,
+  Users, Shield, Layers, Loader2, AlertCircle, X, Mail, MessageSquare,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -39,7 +39,7 @@ function audienceLabel(ann: Announcement) {
   return ann.audience;
 }
 
-const EMPTY_FORM = { title: '', content: '', priority: 'medium' as Priority, audience: '' as AudienceType | '', programId: '', classId: '', sendAsEmail: false };
+const EMPTY_FORM = { title: '', content: '', priority: 'medium' as Priority, audience: '' as AudienceType | '', programId: '', classId: '', sendAsEmail: false, sendAsSms: false };
 const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'urgent'];
 
 export default function Announcements({ role }: { role: Role }) {
@@ -95,21 +95,31 @@ export default function Announcements({ role }: { role: Role }) {
         author: '',
       });
 
+      const senderName = user ? `${user.firstName} ${user.lastName}` : 'Future Minds';
+      const notifyParams = {
+        title: form.title,
+        content: form.content,
+        audience: form.audience as AudienceType,
+        programId: form.audience === 'program_specific' ? form.programId : undefined,
+        classId: form.audience === 'class_specific' ? form.classId : undefined,
+        senderName,
+      };
+
       // Send email if checkbox is checked
       if (form.sendAsEmail) {
         try {
-          const senderName = user ? `${user.firstName} ${user.lastName}` : 'Future Minds';
-          await api.announcements.sendEmail({
-            title: form.title,
-            content: form.content,
-            audience: form.audience as AudienceType,
-            programId: form.audience === 'program_specific' ? form.programId : undefined,
-            classId: form.audience === 'class_specific' ? form.classId : undefined,
-            senderName,
-          });
+          await api.announcements.sendEmail(notifyParams);
         } catch (emailErr) {
           console.error('Email sending failed:', emailErr);
-          // Don't block announcement creation if email fails
+        }
+      }
+
+      // Send SMS if checkbox is checked
+      if (form.sendAsSms) {
+        try {
+          await api.announcements.sendSms(notifyParams);
+        } catch (smsErr) {
+          console.error('SMS sending failed:', smsErr);
         }
       }
 
@@ -399,21 +409,37 @@ export default function Announcements({ role }: { role: Role }) {
             />
           </div>
 
-          {/* Send as Email */}
+          {/* Notification channels */}
           {role !== 'student' && (
-            <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/[0.07] transition-colors group">
-              <input
-                type="checkbox"
-                checked={form.sendAsEmail}
-                onChange={e => setForm(f => ({ ...f, sendAsEmail: e.target.checked }))}
-                className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#fc0ce4] focus:ring-[#fc0ce4]/30 focus:ring-offset-0 cursor-pointer accent-[#fc0ce4]"
-              />
-              <Mail className={`w-4 h-4 shrink-0 transition-colors ${form.sendAsEmail ? 'text-[#fc0ce4]' : 'text-white/40 group-hover:text-white/60'}`} />
-              <div>
-                <p className={`text-sm font-medium transition-colors ${form.sendAsEmail ? 'text-white' : 'text-white/60'}`}>Send as email</p>
-                <p className="text-[11px] text-white/35">Also send this announcement via email to the selected audience</p>
-              </div>
-            </label>
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Also notify via</label>
+              <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/[0.07] transition-colors group">
+                <input
+                  type="checkbox"
+                  checked={form.sendAsEmail}
+                  onChange={e => setForm(f => ({ ...f, sendAsEmail: e.target.checked }))}
+                  className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#fc0ce4] focus:ring-[#fc0ce4]/30 focus:ring-offset-0 cursor-pointer accent-[#fc0ce4]"
+                />
+                <Mail className={`w-4 h-4 shrink-0 transition-colors ${form.sendAsEmail ? 'text-[#fc0ce4]' : 'text-white/40 group-hover:text-white/60'}`} />
+                <div>
+                  <p className={`text-sm font-medium transition-colors ${form.sendAsEmail ? 'text-white' : 'text-white/60'}`}>Send as email</p>
+                  <p className="text-[11px] text-white/35">Send via email to the selected audience</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/[0.07] transition-colors group">
+                <input
+                  type="checkbox"
+                  checked={form.sendAsSms}
+                  onChange={e => setForm(f => ({ ...f, sendAsSms: e.target.checked }))}
+                  className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#fc0ce4] focus:ring-[#fc0ce4]/30 focus:ring-offset-0 cursor-pointer accent-[#fc0ce4]"
+                />
+                <MessageSquare className={`w-4 h-4 shrink-0 transition-colors ${form.sendAsSms ? 'text-[#fc0ce4]' : 'text-white/40 group-hover:text-white/60'}`} />
+                <div>
+                  <p className={`text-sm font-medium transition-colors ${form.sendAsSms ? 'text-white' : 'text-white/60'}`}>Send as SMS</p>
+                  <p className="text-[11px] text-white/35">Send via SMS to recipients with phone numbers</p>
+                </div>
+              </label>
+            </div>
           )}
 
           {submitError && (

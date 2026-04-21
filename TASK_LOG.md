@@ -822,3 +822,4 @@ REVALIDATION (2026-04-07)
 - User experience unchanged: all fixes remain backend/security hardening only.
 
 ================================================================================
+  

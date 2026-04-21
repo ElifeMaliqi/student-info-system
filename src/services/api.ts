@@ -1248,6 +1248,54 @@ export const api = {
         throw error;
       }
     },
+
+    sendSms: async (params: {
+      title: string;
+      content: string;
+      audience: string;
+      programId?: string;
+      classId?: string;
+      senderName: string;
+    }): Promise<{ sent: number; total: number }> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-sms`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify(params),
+          }
+        );
+
+        if (!res.ok) {
+          const result = await res.json().catch(() => ({}));
+          throw new Error(
+            result.error ||
+            `Server error: ${res.status} ${res.statusText}`
+          );
+        }
+
+        const result = await res.json();
+        if (result.error) {
+          throw new Error(result.error);
+        }
+        return { sent: result.sent, total: result.total };
+      } catch (error) {
+        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+          throw new Error(
+            'Network error: Could not connect to SMS service. ' +
+            'Please check that the Supabase Edge Function is deployed and accessible.'
+          );
+        }
+        throw error;
+      }
+    },
   },
 
   teacher: {
