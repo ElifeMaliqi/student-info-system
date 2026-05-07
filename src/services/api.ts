@@ -242,7 +242,10 @@ export const api = {
     },
 
     _generateInvoiceId: (year: number, month: number): string => {
-      const rand = crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase();
+      const rand = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID().replace(/-/g, '')
+        : Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => b.toString(16).padStart(2, '0')).join('')
+      ).slice(0, 8).toUpperCase();
       return `INV-${year}${String(month).padStart(2, '0')}-${rand}`;
     },
 
