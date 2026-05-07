@@ -146,8 +146,8 @@ export default function TeacherDashboard() {
 
   const statCards = [
     { label: 'teacher.total_students', value: stats.totalStudents, trend: stats.studentsTrend, icon: Users, color: 'text-[#fc0ce4]' },
-    { label: 'teacher.upcoming_classes', value: stats.upcomingClasses, trend: 'This week', icon: CalendarCheck, color: 'text-[#949ce4]' },
-    { label: 'teacher.avg_grade', value: stats.avgGrade, trend: 'All classes', icon: Award, color: 'text-emerald-400' },
+    { label: 'teacher.upcoming_classes', value: stats.upcomingClasses, trend: 'teacher.this_week', icon: CalendarCheck, color: 'text-[#949ce4]' },
+    { label: 'teacher.avg_grade', value: stats.avgGrade, trend: 'teacher.all_classes_trend', icon: Award, color: 'text-emerald-400' },
   ];
 
   return (
@@ -173,7 +173,7 @@ export default function TeacherDashboard() {
                 <stat.icon className={`w-5 h-5 ${stat.color}`} />
               </div>
               <div className="flex items-center gap-1 text-[11px] font-medium text-white/40 bg-white/5 px-2 py-1 rounded-full">
-                {stat.trend}
+                {t(stat.trend)}
               </div>
             </div>
             <div>
@@ -223,7 +223,7 @@ export default function TeacherDashboard() {
                     </tr>
                   ))
                 ) : recentGrades.length === 0 ? (
-                  <tr><td colSpan={4} className="py-8 text-center text-white/30 text-sm">No grades yet</td></tr>
+                  <tr><td colSpan={4} className="py-8 text-center text-white/30 text-sm">{t('teacher.no_grades')}</td></tr>
                 ) : (
                   recentGrades.map((grade) => (
                   <tr key={grade.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
@@ -265,9 +265,9 @@ export default function TeacherDashboard() {
 
           <div className="flex-1 flex flex-col gap-3">
             {[
-              { label: 'teacher.grade_submissions', desc: 'Review and grade students', icon: Award, path: '/grading' },
-              { label: 'dash.record_attendance', desc: 'Mark daily class attendance', icon: CalendarCheck, path: '/classes' },
-              { label: 'teacher.message_class', desc: 'Send an announcement', icon: Users, path: '/announcements' },
+              { label: 'teacher.grade_submissions', desc: 'teacher.grade_submissions_desc', icon: Award, path: '/grading' },
+              { label: 'dash.record_attendance', desc: 'teacher.record_attendance_desc', icon: CalendarCheck, path: '/classes' },
+              { label: 'teacher.message_class', desc: 'teacher.message_class_desc', icon: Users, path: '/announcements' },
             ].map((action, i) => (
               <button key={i} onClick={() => navigate(action.path)} className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-[#fc0ce4]/5 hover:border-[#fc0ce4]/20 transition-all text-left group">
                 <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center border border-white/5 group-hover:bg-gradient-to-br group-hover:from-[#fc0ce4] group-hover:to-[#949ce4] group-hover:text-white group-hover:border-transparent transition-all">
@@ -275,7 +275,7 @@ export default function TeacherDashboard() {
                 </div>
                 <div>
                   <div className="text-sm font-medium text-white/90 group-hover:text-white transition-colors">{t(action.label)}</div>
-                  <div className="text-xs text-white/40 mt-0.5">{action.desc}</div>
+                  <div className="text-xs text-white/40 mt-0.5">{t(action.desc)}</div>
                 </div>
               </button>
             ))}

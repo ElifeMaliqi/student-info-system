@@ -86,7 +86,7 @@ export default function StudentDashboard() {
             className: e.grade_table?.class?.title || '',
             score: `${pts} pts`,
             date: e.graded_at ? new Date(e.graded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
-            status: pts >= 90 ? 'Excellent' : pts >= 70 ? 'Good' : 'Needs Improvement',
+            status: pts >= 90 ? 'excellent' : pts >= 70 ? 'good' : 'needs_improvement',
           };
         });
         setRecentGrades(gradeRows);
@@ -113,7 +113,7 @@ export default function StudentDashboard() {
           id: inv.id.slice(0, 8).toUpperCase(),
           title: inv.title,
           amount: `€${parseFloat(inv.amount).toLocaleString()}`,
-          status: inv.status === 'paid' ? 'Paid' : inv.status === 'overdue' ? 'Overdue' : 'Pending',
+          status: inv.status === 'paid' ? 'paid' : inv.status === 'overdue' ? 'overdue' : 'pending',
           date: inv.title,
           due: inv.due_date ? fmt(inv.due_date) : '',
         }));
@@ -125,7 +125,7 @@ export default function StudentDashboard() {
         const nextAmt = next ? parseFloat(next.amount) : 0;
         const nextDue = next?.due_date ? (() => {
           const diff = Math.ceil((new Date(next.due_date + 'T12:00:00').getTime() - Date.now()) / 86400000);
-          return diff > 0 ? `Due in ${diff} days` : diff === 0 ? 'Due today' : `${Math.abs(diff)} days overdue`;
+          return diff > 0 ? t('student.due_in_days').replace('{n}', String(diff)) : diff === 0 ? t('student.due_today') : t('student.days_overdue').replace('{n}', String(Math.abs(diff)));
         })() : '';
 
         setStats({ overallGrade, attendanceRate, activeCourses: courses.length, nextPaymentAmount: nextAmt, nextPaymentDue: nextDue });
@@ -176,9 +176,9 @@ export default function StudentDashboard() {
         ) : (
           [
             { label: 'student.overall_grade', value: stats.overallGrade, trend: '', icon: Award, color: 'text-emerald-400' },
-            { label: 'student.attendance', value: `${stats.attendanceRate}%`, trend: stats.attendanceRate >= 90 ? 'Excellent' : stats.attendanceRate >= 70 ? 'Good' : 'Needs Improvement', icon: CalendarCheck, color: 'text-blue-400' },
+            { label: 'student.attendance', value: `${stats.attendanceRate}%`, trend: stats.attendanceRate >= 90 ? 'student.grade_excellent' : stats.attendanceRate >= 70 ? 'student.grade_good' : 'student.grade_needs_improvement', icon: CalendarCheck, color: 'text-blue-400' },
             { label: 'student.active_courses', value: String(stats.activeCourses), trend: '', icon: BookOpen, color: 'text-purple-400' },
-            { label: 'student.next_payment', value: stats.nextPaymentAmount ? `€${stats.nextPaymentAmount.toLocaleString()}` : 'None', trend: stats.nextPaymentDue, icon: CreditCard, color: 'text-amber-400' },
+            { label: 'student.next_payment', value: stats.nextPaymentAmount ? `€${stats.nextPaymentAmount.toLocaleString()}` : t('common.none'), trend: stats.nextPaymentDue, icon: CreditCard, color: 'text-amber-400' },
           ].map((stat, i) => (
           <motion.div
             key={stat.label}
@@ -192,7 +192,7 @@ export default function StudentDashboard() {
                 <stat.icon className={`w-5 h-5 ${stat.color}`} />
               </div>
               <div className="flex items-center gap-1 text-[11px] font-medium text-white/40 bg-white/5 px-2 py-1 rounded-full">
-                {stat.trend}
+                {stat.trend ? t(stat.trend) : ''}
               </div>
             </div>
             <div>
@@ -240,7 +240,7 @@ export default function StudentDashboard() {
                     </tr>
                   ))
                 ) : recentGrades.length === 0 ? (
-                  <tr><td colSpan={3} className="py-8 text-center text-white/30 text-sm">No grades yet</td></tr>
+                  <tr><td colSpan={3} className="py-8 text-center text-white/30 text-sm">{t('student.no_grades')}</td></tr>
                 ) : (
                   recentGrades.map((grade) => (
                   <tr key={grade.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
@@ -250,9 +250,9 @@ export default function StudentDashboard() {
                     </td>
                     <td className="py-4">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
-                        grade.status === 'Excellent' 
+                        grade.status === 'excellent' 
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                          : grade.status === 'Good'
+                          : grade.status === 'good'
                           ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                           : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       }`}>
@@ -303,7 +303,7 @@ export default function StudentDashboard() {
                     </tr>
                   ))
                 ) : invoices.length === 0 ? (
-                  <tr><td colSpan={4} className="py-8 text-center text-white/30 text-sm">No invoices yet</td></tr>
+                  <tr><td colSpan={4} className="py-8 text-center text-white/30 text-sm">{t('student.no_invoices')}</td></tr>
                 ) : (
                   invoices.map((invoice) => (
                   <tr key={invoice.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group">
@@ -314,12 +314,12 @@ export default function StudentDashboard() {
                     <td className="py-4 font-medium text-white/90">{invoice.amount}</td>
                     <td className="py-4">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${
-                        invoice.status === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
-                        invoice.status === 'Overdue' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                        invoice.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+                        invoice.status === 'overdue' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
                         'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       }`}>
-                        {invoice.status === 'Paid' ? <CheckCircle className="w-3 h-3" /> : invoice.status === 'Overdue' ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                        {t(`status.${invoice.status.toLowerCase()}`)}
+                        {invoice.status === 'paid' ? <CheckCircle className="w-3 h-3" /> : invoice.status === 'overdue' ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                        {t(`status.${invoice.status}`)}
                       </span>
                     </td>
                     <td className="py-4 text-right text-white/60 text-xs">{invoice.due}</td>

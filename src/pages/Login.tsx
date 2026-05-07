@@ -4,12 +4,14 @@ import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 import { useUser } from '../context/UserContext';
+import { useLanguage } from '../context/LanguageContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [isHoveringBtn, setIsHoveringBtn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { setUser } = useUser();
+  const { t } = useLanguage();
   const navigate = useNavigate();
 
   // Form State
@@ -96,7 +98,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             className="flex items-center gap-3"
           >
             <img 
-              src="https://futureminds.io/assets/imgs/logo/site-logo-white-2.png" 
+              src="/site-logo.png" 
               alt="Future Minds Logo" 
               className="h-8 object-contain"
               referrerPolicy="no-referrer"
@@ -141,7 +143,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         {/* Mobile Header */}
         <div className="absolute top-8 left-8 lg:hidden flex items-center gap-3">
           <img 
-            src="https://futureminds.io/assets/imgs/logo/site-logo-white-2.png" 
+            src="/site-logo.png" 
             alt="Future Minds Logo" 
             className="h-6 object-contain"
             referrerPolicy="no-referrer"
@@ -156,8 +158,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             className="w-full"
           >
                 <div className="mb-8 lg:mb-10 text-center lg:text-left">
-                  <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">{forgotMode ? 'Reset Password' : 'Welcome back'}</h2>
-                  <p className="text-white/50 text-sm">{forgotMode ? "Enter your email and we'll send you a secure access link." : 'Enter your credentials to access the portal.'}</p>
+                  <h2 className="font-display text-3xl font-medium mb-2 lg:mb-3 tracking-tight">{forgotMode ? t('login.reset_title') : t('login.welcome_title')}</h2>
+                  <p className="text-white/50 text-sm">{forgotMode ? t('login.reset_subtitle') : t('login.login_subtitle')}</p>
                 </div>
 
                 <div className="glass-panel p-6 lg:p-8 rounded-[2rem] shadow-2xl shadow-black/50">
@@ -165,11 +167,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                     resetSent ? (
                       <div className="space-y-5">
                         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm text-center">
-                          If that email exists in our system, a secure reset link has been sent. Check your inbox — it expires in 1 hour.
+                          {t('login.reset_success')}
                         </div>
                         <button type="button" onClick={() => { setForgotMode(false); setResetSent(false); setError(''); }}
                           className="w-full py-3.5 rounded-2xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
-                          Back to Sign In
+                          {t('login.back_signin')}
                         </button>
                       </div>
                     ) : (
@@ -181,7 +183,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                           </motion.div>
                         )}
                         <div className="space-y-2">
-                          <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address</label>
+                          <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('login.email_label')}</label>
                           <div className="relative group">
                             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                               <Mail className="h-4 w-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
@@ -193,11 +195,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                         </div>
                         <button type="submit" disabled={isLoading}
                           className="w-full mt-2 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white py-3.5 lg:py-4 rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] disabled:opacity-50 disabled:cursor-not-allowed">
-                          {isLoading ? 'Sending…' : 'Send Reset Link'}
+                          {isLoading ? t('login.sending') : t('login.send_reset')}
                         </button>
                         <button type="button" onClick={() => { setForgotMode(false); setError(''); }}
                           className="w-full py-3 rounded-2xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors">
-                          Back to Sign In
+                          {t('login.back_signin')}
                         </button>
                       </form>
                     )
@@ -215,7 +217,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                     )}
                     
                     <div className="space-y-2">
-                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address</label>
+                      <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('login.email_label')}</label>
                       <div className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-white">
                           <Mail className="h-4 w-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
@@ -232,8 +234,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
 
                     <div className="space-y-2">
                       <div className="flex items-center justify-between ml-1">
-                        <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest">Password</label>
-                        <button type="button" onClick={() => { setForgotMode(true); setError(''); }} className="text-[10px] lg:text-[11px] font-medium text-white/40 hover:text-[#fc0ce4] transition-colors">Forgot?</button>
+                        <label className="text-[10px] lg:text-[11px] font-semibold text-white/60 uppercase tracking-widest">{t('login.password_label')}</label>
+                        <button type="button" onClick={() => { setForgotMode(true); setError(''); }} className="text-[10px] lg:text-[11px] font-medium text-white/40 hover:text-[#fc0ce4] transition-colors">{t('login.forgot')}</button>
                       </div>
                       <div className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-white">
@@ -256,7 +258,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                       onMouseEnter={() => setIsHoveringBtn(true)}
                       onMouseLeave={() => setIsHoveringBtn(false)}
                     >
-                      <span>{isLoading ? 'Signing In...' : 'Sign In to Portal'}</span>
+                      <span>{isLoading ? t('login.signin_loading') : t('login.signin_button')}</span>
                       {!isLoading && (
                         <motion.div
                           animate={{ x: isHoveringBtn ? 4 : 0 }}
@@ -271,7 +273,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                   <div className="mt-6 lg:mt-8 pt-6 border-t border-white/5 flex flex-col gap-4">
                     <button className="w-full py-3 lg:py-3.5 rounded-2xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-colors flex items-center justify-center gap-2 bg-white/5">
                       <Fingerprint className="w-4 h-4 text-white/40" />
-                      Sign in with Passkey
+                      {t('login.passkey')}
                     </button>
                   </div>
                   </>

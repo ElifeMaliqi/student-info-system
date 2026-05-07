@@ -52,7 +52,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   // --- Sidebar sections ---
   const adminSections = [
     { id: 'profile', label: t('settings.profile'), icon: User },
-    { id: 'platform', label: 'Platform Settings', icon: Building },
+    { id: 'platform', label: t('settings.platform'), icon: Building },
     { id: 'data', label: t('settings.data'), icon: Database },
   ];
 
@@ -98,13 +98,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
 
     const maxSize = 2 * 1024 * 1024; // 2 MB
     if (file.size > maxSize) {
-      showToast('error', 'File too large. Maximum 2 MB.');
+      showToast('error', t('settings.file_too_large'));
       return;
     }
 
     const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowed.includes(file.type)) {
-      showToast('error', 'Only JPG, PNG, GIF, or WebP files allowed.');
+      showToast('error', t('settings.file_type'));
       return;
     }
 
@@ -126,9 +126,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);
       setAvatarUrl(publicUrl);
       setUser({ ...user, avatar: publicUrl });
-      showToast('success', 'Profile picture uploaded.');
+      showToast('success', t('settings.upload_success'));
     } catch (err: any) {
-      showToast('error', err.message || 'Upload failed.');
+      showToast('error', err.message || t('settings.upload_failed'));
     } finally {
       setUploading(false);
       e.target.value = ''; // reset input
@@ -157,12 +157,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         // Password change (optional — only if fields are filled)
         if (newPassword || confirmPassword) {
           if (newPassword.length < 6) {
-            showToast('error', 'Password must be at least 6 characters.');
+            showToast('error', t('settings.pw_too_short'));
             setSaving(false);
             return;
           }
           if (newPassword !== confirmPassword) {
-            showToast('error', 'Passwords do not match.');
+            showToast('error', t('settings.pw_mismatch'));
             setSaving(false);
             return;
           }
@@ -171,7 +171,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           setNewPassword('');
           setConfirmPassword('');
         }
-        showToast('success', 'Profile saved.');
+        showToast('success', t('settings.profile_saved'));
       } else if (activeSection === 'platform' && appSettings) {
         const { error } = await supabase.from('app_settings').update({
           institution_name: instName,
@@ -185,10 +185,10 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           updated_at: new Date().toISOString(),
         }).eq('id', appSettings.id);
         if (error) throw error;
-        showToast('success', 'Platform settings saved.');
+        showToast('success', t('settings.platform_saved'));
       }
     } catch (err: any) {
-      showToast('error', err.message || 'Failed to save.');
+      showToast('error', err.message || t('settings.save_failed'));
     } finally {
       setSaving(false);
     }
@@ -200,7 +200,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       const { data, error } = await supabase.from(table).select('*');
       if (error) throw error;
       if (!data || data.length === 0) {
-        showToast('error', `No data found in ${table}.`);
+        showToast('error', t('settings.no_data_found'));
         return;
       }
       const headers = Object.keys(data[0]);
@@ -227,9 +227,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       a.download = `${table}_export_${new Date().toISOString().split('T')[0]}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      showToast('success', `${table} exported.`);
+      showToast('success', t('settings.exported'));
     } catch (err: any) {
-      showToast('error', err.message || 'Export failed.');
+      showToast('error', err.message || t('settings.export_failed'));
     } finally {
       setExporting('');
     }
@@ -261,7 +261,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{role === 'admin' ? t('settings.title') : t('settings.profile')}</h1>
-          <p className="text-white/50 text-sm">{role === 'admin' ? t('settings.desc') : 'Manage your personal information and preferences.'}</p>
+          <p className="text-white/50 text-sm">{role === 'admin' ? t('settings.desc') : t('settings.profile_desc')}</p>
         </div>
         {activeSection !== 'data' && (
           <button
@@ -311,7 +311,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Email — read-only */}
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email (Username)</label>
+                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.email_username')}</label>
                       <input type="email" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white/50 cursor-not-allowed" value={user?.email || ''} disabled />
                     </div>
                     {/* Phone */}
@@ -336,10 +336,10 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                         <img src={avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id || role}`} alt="Avatar" className="w-12 h-12 rounded-full border border-white/10" referrerPolicy="no-referrer" />
                         <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors cursor-pointer">
                           {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                          {uploading ? 'Uploading…' : 'Upload Photo'}
+                          {uploading ? t('settings.uploading') : t('settings.upload_photo')}
                           <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" className="hidden" onChange={handleAvatarUpload} disabled={uploading} />
                         </label>
-                        <span className="text-[11px] text-white/40">JPG, PNG, GIF, or WebP · Max 2 MB</span>
+                        <span className="text-[11px] text-white/40">{t('settings.file_hints')}</span>
                       </div>
                     </div>
                   </div>
@@ -350,19 +350,19 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-6">
                 <h2 className="font-display text-xl font-medium">
                   <Lock className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                  Change Password
+                  {t('settings.change_password')}
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">New Password</label>
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.new_password')}</label>
                     <input type="password" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="••••••••" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Confirm Password</label>
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.confirm_password')}</label>
                     <input type="password" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="••••••••" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
                   </div>
                 </div>
-                <p className="text-[11px] text-white/40">Minimum 6 characters. Leave blank to keep current password.</p>
+                <p className="text-[11px] text-white/40">{t('settings.password_hint')}</p>
               </div>
             </>
           )}
@@ -407,9 +407,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                       )}
                     </div>
                     <div className="space-y-2 flex-1">
-                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Logo URL</label>
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.logo_url')}</label>
                       <input type="url" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="https://..." value={instLogo} onChange={e => setInstLogo(e.target.value)} />
-                      <p className="text-[11px] text-white/40">Recommended size: 512x512px (PNG or SVG)</p>
+                      <p className="text-[11px] text-white/40">{t('settings.logo_hint')}</p>
                     </div>
                   </div>
                 </div>
@@ -419,7 +419,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-6">
                 <h2 className="font-display text-xl font-medium">
                   <Phone className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                  Contact Information
+                  {t('settings.contact_info')}
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
@@ -427,24 +427,24 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                     <input type="email" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" value={platEmail} onChange={e => setPlatEmail(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Primary Phone</label>
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.primary_phone')}</label>
                     <input type="tel" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" value={platPhone} onChange={e => setPlatPhone(e.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Secondary Phone</label>
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.secondary_phone')}</label>
                     <input type="tel" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="Optional" value={platPhone2} onChange={e => setPlatPhone2(e.target.value)} />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
                       <Clock className="w-3 h-3 inline-block mr-1" />
-                      Open Hours
+                      {t('settings.open_hours')}
                     </label>
                     <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="Mon–Fri 08:00–17:00" value={platHours} onChange={e => setPlatHours(e.target.value)} />
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
                       <MapPin className="w-3 h-3 inline-block mr-1" />
-                      Address
+                      {t('settings.address')}
                     </label>
                     <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="Street, City, Country" value={platAddress} onChange={e => setPlatAddress(e.target.value)} />
                   </div>
@@ -459,16 +459,16 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               <div>
                 <h2 className="font-display text-xl font-medium mb-2">
                   <Database className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                  Data Export
+                  {t('settings.data_export')}
                 </h2>
-                <p className="text-white/40 text-sm mb-6">Download your institution data as Excel-compatible CSV files.</p>
+                <p className="text-white/40 text-sm mb-6">{t('settings.data_export_desc')}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
-                    { table: 'profiles', label: 'User Profiles' },
-                    { table: 'enrollments', label: 'Enrollments' },
-                    { table: 'attendance', label: 'Attendance Records' },
-                    { table: 'invoices', label: 'Invoices' },
-                    { table: 'grade_table_entries', label: 'Grade Entries' },
+                    { table: 'profiles', label: t('settings.export_profiles') },
+                    { table: 'enrollments', label: t('settings.export_enrollments') },
+                    { table: 'attendance', label: t('settings.export_attendance') },
+                    { table: 'invoices', label: t('settings.export_invoices') },
+                    { table: 'grade_table_entries', label: t('settings.export_grades') },
                   ].map(item => (
                     <button
                       key={item.table}

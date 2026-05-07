@@ -2,7 +2,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CreditCard, Search, CheckCircle, Clock,
-  AlertCircle, X, Loader2, Trash2, DollarSign, Settings2, Pencil, Users, RotateCcw, Download,
+  AlertCircle, X, Loader2, Trash2, DollarSign, Settings2, Pencil, Users, RotateCcw, Download, Archive,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { api } from '../services/api';
@@ -16,6 +16,10 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+const MONTH_KEYS = [
+  'january','february','march','april','may','june',
+  'july','august','september','october','november','december',
+] as const;
 const fmtMoney = (n: number) =>
   `\u20AC${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d: string) =>
@@ -28,7 +32,7 @@ const STATUS_BADGE: Record<string, string> = {
   overdue:  'bg-red-500/10 text-red-400 border-red-500/20',
 };
 const STATUS_LABEL: Record<string, string> = {
-  paid: 'Paid', partial: 'Partial', not_paid: 'Not Paid', overdue: 'Overdue',
+  paid: 'status.paid', partial: 'status.partial', not_paid: 'status.not_paid', overdue: 'status.overdue',
 };
 const STATUS_ICON: Record<string, typeof CheckCircle> = {
   paid: CheckCircle, partial: DollarSign, not_paid: Clock, overdue: AlertCircle,
@@ -57,6 +61,7 @@ export default function Finance() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [restoringDefaults, setRestoringDefaults] = useState(false);
+  const [archivingStudentId, setArchivingStudentId] = useState<string | null>(null);
 
   const [statusInvoice, setStatusInvoice] = useState<Invoice | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
@@ -172,6 +177,17 @@ export default function Finance() {
       s.classes.some(c => c.toLowerCase().includes(q))
     );
   }, [settingsStudents, settingsSearch]);
+
+  async function handleArchiveStudent(studentId: string) {
+    setArchivingStudentId(studentId);
+    try {
+      await api.finance.archiveStudent(studentId);
+      playPopSound();
+      const students = await api.finance.getStudentsForSettings();
+      setSettingsStudents(students);
+    } catch (err) { console.error(err); }
+    finally { setArchivingStudentId(null); }
+  }
 
   async function restoreToDefault() {
     if (selectedStudentIds.size === 0) return;
@@ -456,6 +472,7 @@ export default function Finance() {
                       <th className="pb-3 font-medium">Amount</th>
                       <th className="pb-3 font-medium">Discount</th>
                       <th className="pb-3 font-medium">Override</th>
+                      <th className="pb-3 font-medium w-10"></th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
@@ -479,6 +496,16 @@ export default function Finance() {
                           {s.hasOverride && (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">Custom</span>
                           )}
+                        </td>
+                        <td className="py-4" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleArchiveStudent(s.studentId)}
+                            disabled={archivingStudentId === s.studentId}
+                            className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                            title="Archive student"
+                          >
+                            {archivingStudentId === s.studentId ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -606,45 +633,38 @@ export default function Finance() {
             </div>
             <button onClick={handleExportCsv} disabled={filtered.length === 0} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start">
               <Download className="w-4 h-4" />
-              Export CSV
-            </button>
+              {t('common.export_csv')}
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
             {(['all', 'paid', 'partial', 'not_paid', 'overdue'] as StatusFilter[]).map(s => (
               <button key={s} onClick={() => setStatusFilter(s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${statusFilter === s ? 'bg-[#fc0ce4]/15 border-[#fc0ce4]/30 text-[#fc0ce4]' : 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/60'}`}>
-                {s === 'all' ? 'All' : STATUS_LABEL[s]}
+                {s === 'all' ? t('finance.all') : t(STATUS_LABEL[s])}
               </button>
             ))}
 
             <div className="w-px h-5 bg-white/10 mx-1" />
 
             <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Months</option>
-              {filterOptions.months.map(m => <option key={m} value={m}>{MONTH_NAMES[m - 1]}</option>)}
+              <option value="">{t('finance.all_months')}</option>
+              {filterOptions.months.map(m => <option key={m} value={m}>{t(`months.${MONTH_KEYS[m - 1]}`)}</option>)}
             </select>
             <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Years</option>
+              <option value="">{t('finance.all_years')}</option>
               {filterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
             <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Classes</option>
+              <option value="">{t('finance.all_classes')}</option>
               {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Teachers</option>
+              <option value="">{t('finance.all_teachers')}</option>
               {filterOptions.teachers.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
             {hasActiveFilters && (
               <button onClick={clearAllFilters} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
-                Clear all
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="overflow-x-auto pb-4 custom-scrollbar flex-1 -mx-6 px-6">
+              {t('common.clear_all')}
           {loading ? (
             <div className="flex items-center justify-center py-16 text-white/30 gap-2"><Loader2 className="w-5 h-5 animate-spin" /></div>
           ) : filtered.length === 0 ? (
@@ -656,12 +676,12 @@ export default function Finance() {
             <table className="w-full text-left border-collapse min-w-[1050px]">
               <thead>
                 <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
-                  <th className="pb-3 font-medium">Invoice ID</th>
+                  <th className="pb-3 font-medium">{t('finance.invoice_id')}</th>
                   <th className="pb-3 font-medium">{t('table.student')}</th>
-                  <th className="pb-3 font-medium">Title</th>
-                  <th className="pb-3 font-medium">Teacher</th>
-                  <th className="pb-3 font-medium">Month</th>
-                  <th className="pb-3 font-medium">Year</th>
+                  <th className="pb-3 font-medium">{t('finance.col_title')}</th>
+                  <th className="pb-3 font-medium">{t('finance.col_teacher')}</th>
+                  <th className="pb-3 font-medium">{t('finance.col_month')}</th>
+                  <th className="pb-3 font-medium">{t('finance.col_year')}</th>
                   <th className="pb-3 font-medium">{t('finance.due_date')}</th>
                   <th className="pb-3 font-medium">{t('finance.amount')}</th>
                   <th className="pb-3 font-medium">{t('table.status')}</th>
@@ -677,15 +697,14 @@ export default function Finance() {
                       <td className="py-4 font-medium text-white/90">{inv.studentName}</td>
                       <td className="py-4 text-white/70 max-w-[200px] truncate">{inv.title}</td>
                       <td className="py-4 text-white/50 text-xs">{inv.teacherName || '-'}</td>
-                      <td className="py-4 text-white/60 text-xs">{MONTH_NAMES[inv.month - 1]}</td>
+                      <td className="py-4 text-white/60 text-xs">{t(`months.${MONTH_KEYS[inv.month - 1]}`)}</td>
                       <td className="py-4 text-white/60 text-xs">{inv.year}</td>
                       <td className="py-4 text-white/60 text-xs">{fmtDate(inv.dueDate)}</td>
                       <td className="py-4 font-medium text-white/90">{fmtMoney(inv.amount)}</td>
                       <td className="py-4">
                         <button onClick={() => setStatusInvoice(inv)} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border cursor-pointer hover:opacity-80 transition-opacity ${STATUS_BADGE[inv.status]}`}>
                           <Icon className="w-3 h-3" />
-                          {STATUS_LABEL[inv.status]}
-                        </button>
+                          {t(STATUS_LABEL[inv.status])}
                       </td>
                       <td className="py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -758,7 +777,7 @@ export default function Finance() {
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Month</label>
                           <select value={createForm.month} onChange={e => setCreateForm(f => ({ ...f, month: e.target.value }))} className="glass-select w-full px-3 py-2.5 rounded-xl text-sm">
-                            {MONTH_NAMES.map((name, idx) => <option key={name} value={idx + 1}>{name}</option>)}
+                            {MONTH_KEYS.map((mk, idx) => <option key={mk} value={idx + 1}>{t(`months.${mk}`)}</option>)}
                           </select>
                         </div>
                         <div className="space-y-1.5">
@@ -815,7 +834,7 @@ export default function Finance() {
                 <div className="px-5 py-4 space-y-4">
                   <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/[0.04] border border-white/8">
                     <span className="text-sm text-white/60">Current Status</span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[statusInvoice.status]}`}>{STATUS_LABEL[statusInvoice.status]}</span>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[statusInvoice.status]}`}>{t(STATUS_LABEL[statusInvoice.status])}</span>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Mark Status As:</label>
@@ -826,7 +845,7 @@ export default function Finance() {
                         return (
                           <button key={st} disabled={changingStatus || isActive} onClick={() => changeStatus(st)} className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-sm font-medium transition-all ${isActive ? 'border-white/20 bg-white/[0.06] text-white/30 cursor-default' : `${STATUS_BADGE[st]} hover:opacity-80 cursor-pointer`}`}>
                             {changingStatus ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ic className="w-3.5 h-3.5" />}
-                            {STATUS_LABEL[st]}
+                            {t(STATUS_LABEL[st])}
                           </button>
                         );
                       })}

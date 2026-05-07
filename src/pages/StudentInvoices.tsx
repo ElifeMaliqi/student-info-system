@@ -16,6 +16,7 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+const MONTH_KEYS = ['january','february','march','april','may','june','july','august','september','october','november','december'] as const;
 const fmtMoney = (n: number) => `\u20AC${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate  = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -26,7 +27,7 @@ const STATUS_BADGE: Record<string, string> = {
   overdue:  'bg-red-500/10 text-red-400 border-red-500/20',
 };
 const STATUS_LABEL: Record<string, string> = {
-  paid: 'Paid', partial: 'Partial', not_paid: 'Not Paid', overdue: 'Overdue',
+  paid: 'status.paid', partial: 'status.partial', not_paid: 'status.not_paid', overdue: 'status.overdue',
 };
 const STATUS_ICON: Record<string, typeof CheckCircle> = {
   paid: CheckCircle, partial: DollarSign, not_paid: Clock, overdue: AlertCircle,
@@ -113,7 +114,7 @@ export default function StudentInvoices() {
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('nav.invoices')}</h1>
-        <p className="text-white/50 text-sm">View your tuition invoices and payment status.</p>
+        <p className="text-white/50 text-sm">{t('student.invoices_desc')}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -151,29 +152,29 @@ export default function StudentInvoices() {
           <div className="flex flex-col md:flex-row gap-4 justify-between">
             <div className="relative w-full md:w-96 group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-              <input type="text" placeholder="Search invoices..." value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
+              <input type="text" placeholder={t('student.invoices_search')} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
             </div>
             <button onClick={handleExportCsv} disabled={filtered.length === 0} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start">
               <Download className="w-4 h-4" />
-              Export CSV
+              {t('common.export_csv')}
             </button>
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
             {(['all', 'paid', 'partial', 'not_paid', 'overdue'] as StatusFilter[]).map(s => (
               <button key={s} onClick={() => setStatusFilter(s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${statusFilter === s ? 'bg-[#fc0ce4]/15 border-[#fc0ce4]/30 text-[#fc0ce4]' : 'border-white/10 text-white/40 hover:bg-white/5 hover:text-white/60'}`}>
-                {s === 'all' ? 'All' : STATUS_LABEL[s]}
+                {s === 'all' ? t('student.invoices_all') : t(STATUS_LABEL[s])}
               </button>
             ))}
 
             <div className="w-px h-5 bg-white/10 mx-1" />
 
             <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Months</option>
-              {invoiceFilterOptions.months.map(m => <option key={m} value={m}>{MONTH_NAMES[m - 1]}</option>)}
+              <option value="">{t('student.invoices_all_months')}</option>
+              {invoiceFilterOptions.months.map(m => <option key={m} value={m}>{t(`months.${MONTH_KEYS[m - 1]}`)}</option>)}
             </select>
             <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Years</option>
+              <option value="">{t('student.invoices_all_years')}</option>
               {invoiceFilterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
 
@@ -191,17 +192,17 @@ export default function StudentInvoices() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-white/30 gap-3">
               <CreditCard className="w-8 h-8 opacity-40" />
-              <p className="text-sm">{hasFilters ? 'No invoices match your filters.' : 'No invoices yet.'}</p>
+              <p className="text-sm">{hasFilters ? t('student.invoices_empty_filtered') : t('student.invoices_empty')}</p>
             </div>
           ) : (
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead>
                 <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
-                  <th className="pb-3 font-medium">Title</th>
-                  <th className="pb-3 font-medium">Class</th>
-                  <th className="pb-3 font-medium">Teacher</th>
-                  <th className="pb-3 font-medium">Month</th>
-                  <th className="pb-3 font-medium">Year</th>
+                  <th className="pb-3 font-medium">{t('finance.col_title')}</th>
+                  <th className="pb-3 font-medium">{t('table.class')}</th>
+                  <th className="pb-3 font-medium">{t('table.teacher')}</th>
+                  <th className="pb-3 font-medium">{t('finance.col_month')}</th>
+                  <th className="pb-3 font-medium">{t('finance.col_year')}</th>
                   <th className="pb-3 font-medium">{t('finance.due_date')}</th>
                   <th className="pb-3 font-medium">{t('finance.amount')}</th>
                   <th className="pb-3 font-medium">{t('table.status')}</th>
@@ -215,14 +216,14 @@ export default function StudentInvoices() {
                       <td className="py-4 font-medium text-white/90">{inv.title}</td>
                       <td className="py-4 text-white/60 text-xs">{inv.className || '-'}</td>
                       <td className="py-4 text-white/50 text-xs">{inv.teacherName || '-'}</td>
-                      <td className="py-4 text-white/60 text-xs">{MONTH_NAMES[inv.month - 1]}</td>
+                      <td className="py-4 text-white/60 text-xs">{t(`months.${MONTH_KEYS[inv.month - 1]}`)}</td>
                       <td className="py-4 text-white/60 text-xs">{inv.year}</td>
                       <td className="py-4 text-white/60 text-xs">{fmtDate(inv.dueDate)}</td>
                       <td className="py-4 font-medium text-white/90">{fmtMoney(inv.amount)}</td>
                       <td className="py-4">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[inv.status]}`}>
                           <Icon className="w-3 h-3" />
-                          {STATUS_LABEL[inv.status]}
+                          {t(STATUS_LABEL[inv.status])}
                         </span>
                       </td>
                     </tr>

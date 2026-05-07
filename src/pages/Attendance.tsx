@@ -12,7 +12,7 @@ import type { CalendarEvent } from '../types';
 import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
 import { exportCsv } from '../utils/csv';
 
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTH_KEYS = ['jan','feb','mar','apr','may_s','jun','jul','aug','sep','oct','nov','dec'] as const;
 
 type AttendanceSession = {
   classId: string;
@@ -167,7 +167,7 @@ export default function Attendance() {
           >
             <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-red-300">Low participation alert</p>
+              <p className="text-sm font-medium text-red-300">{t('attendance.low_alert')}</p>
               <p className="text-xs text-red-400/70 mt-0.5">
                 {lowParticipationSessions.length} class session{lowParticipationSessions.length !== 1 ? 's' : ''}{' '}
                 ha{lowParticipationSessions.length !== 1 ? 've' : 's'} a participation rate below 40%:{' '}
@@ -223,7 +223,7 @@ export default function Attendance() {
       {/* â”€â”€ Attendance Overview â”€â”€ */}
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-5 shrink-0">
-          <h2 className="font-display text-lg font-medium">Attendance Overview</h2>
+          <h2 className="font-display text-lg font-medium">{t('attendance.overview')}</h2>
           <button
             onClick={() => {
               if (filtered.length === 0) return;
@@ -241,7 +241,7 @@ export default function Attendance() {
             className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30"
           >
             <Download className="w-4 h-4" />
-            Export
+            {t('attendance.export')}
           </button>
         </div>
 
@@ -252,7 +252,7 @@ export default function Attendance() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
             <input
               type="text"
-              placeholder="Search class or teacher…"
+              placeholder={t('attendance.search_placeholder')}
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 transition-all"
@@ -282,9 +282,9 @@ export default function Attendance() {
               onChange={e => { setFilterMonth(e.target.value); setFilterDate(''); }}
               className="glass-select pl-3 py-2.5 rounded-xl text-sm"
             >
-              <option value="">All Months</option>
-              {MONTH_NAMES.map((m, i) => (
-                <option key={m} value={String(i + 1)}>{m}</option>
+              <option value="">{t('attendance.all_months')}</option>
+              {MONTH_KEYS.map((mk, i) => (
+                <option key={mk} value={String(i + 1)}>{t(`months.${mk}`)}</option>
               ))}
             </select>
           </div>
@@ -296,7 +296,7 @@ export default function Attendance() {
               onChange={e => { setFilterYear(e.target.value); setFilterDate(''); }}
               className="glass-select pl-3 py-2.5 rounded-xl text-sm"
             >
-              <option value="">All Years</option>
+              <option value="">{t('attendance.all_years')}</option>
               {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
@@ -308,7 +308,7 @@ export default function Attendance() {
               onChange={e => setFilterClass(e.target.value)}
               className="glass-select pl-3 py-2.5 rounded-xl text-sm"
             >
-              <option value="">All Classes</option>
+              <option value="">{t('attendance.all_classes')}</option>
               {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -317,7 +317,7 @@ export default function Attendance() {
         {/* Active filter chips */}
         {(filterDate || filterMonth || filterYear || filterClass) && (
           <div className="flex items-center gap-2 mb-4 shrink-0 flex-wrap">
-            <span className="text-xs text-white/40">Filtering by:</span>
+            <span className="text-xs text-white/40">{t('attendance.filtering_by')}</span>
             {filterDate && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">
                 {new Date(`${filterDate}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
@@ -325,7 +325,7 @@ export default function Attendance() {
             )}
             {filterMonth && !filterDate && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">
-                {MONTH_NAMES[parseInt(filterMonth) - 1]}
+                {t(`months.${MONTH_KEYS[parseInt(filterMonth) - 1]}`)}
               </span>
             )}
             {filterYear && !filterDate && (
@@ -342,7 +342,7 @@ export default function Attendance() {
               onClick={() => { setFilterDate(''); setFilterMonth(''); setFilterYear(''); setFilterClass(''); }}
               className="text-xs text-white/30 hover:text-white transition-colors"
             >
-              Clear all
+              {t('common.clear_all')}
             </button>
           </div>
         )}
@@ -357,12 +357,12 @@ export default function Attendance() {
             <table className="w-full text-left border-collapse min-w-[780px]">
               <thead>
                 <tr className="border-b border-white/5 text-[11px] uppercase tracking-widest text-white/30">
-                  <th className="pb-3 pl-4 font-medium w-44"><SortBtn col="date" label="Date" /></th>
-                  <th className="pb-3 px-4 font-medium">Class</th>
-                  <th className="pb-3 px-4 font-medium"><SortBtn col="rate" label="Rate" /></th>
-                  <th className="pb-3 px-4 font-medium"><SortBtn col="present" label="Present" /></th>
-                  <th className="pb-3 px-4 font-medium"><SortBtn col="late" label="Late" /></th>
-                  <th className="pb-3 px-4 font-medium"><SortBtn col="absent" label="Absent" /></th>
+                  <th className="pb-3 pl-4 font-medium w-44"><SortBtn col="date" label={t('attendance.col_date')} /></th>
+                  <th className="pb-3 px-4 font-medium">{t('attendance.col_class')}</th>
+                  <th className="pb-3 px-4 font-medium"><SortBtn col="rate" label={t('attendance.col_rate')} /></th>
+                  <th className="pb-3 px-4 font-medium"><SortBtn col="present" label={t('attendance.col_present')} /></th>
+                  <th className="pb-3 px-4 font-medium"><SortBtn col="late" label={t('attendance.col_late')} /></th>
+                  <th className="pb-3 px-4 font-medium"><SortBtn col="absent" label={t('attendance.col_absent')} /></th>
                 </tr>
               </thead>
               <tbody className="text-sm">
@@ -370,7 +370,7 @@ export default function Attendance() {
                   <tr>
                     <td colSpan={6} className="py-16 text-center">
                       <GraduationCap className="w-10 h-10 text-white/10 mx-auto mb-3" />
-                      <p className="text-white/30 text-sm">No attendance records found.</p>
+                      <p className="text-white/30 text-sm">{t('attendance.no_records')}</p>
                     </td>
                   </tr>
                 ) : (

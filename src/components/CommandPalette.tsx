@@ -39,25 +39,25 @@ export function CommandPalette({ role }: Props) {
   }, [isOpen]);
 
   const baseActions = [
-    { id: 'dash', name: 'Go to Dashboard', icon: Home, path: '/dashboard' },
-    { id: 'settings', name: 'Settings', icon: Settings, path: '/settings' },
+    { id: 'dash', name: t('cmd.action_dashboard'), icon: Home, path: '/dashboard' },
+    { id: 'settings', name: t('cmd.action_settings'), icon: Settings, path: '/settings' },
   ];
 
   const roleActions = role === 'admin'
     ? [
-        { id: 'students', name: 'Manage Students', icon: Users, path: '/students' },
-        { id: 'finance', name: 'View Finance', icon: CreditCard, path: '/finance' },
-        { id: 'attendance', name: 'Attendance', icon: BookOpen, path: '/attendance' },
+        { id: 'students', name: t('cmd.action_students'), icon: Users, path: '/students' },
+        { id: 'finance', name: t('cmd.action_finance'), icon: CreditCard, path: '/finance' },
+        { id: 'attendance', name: t('cmd.action_attendance'), icon: BookOpen, path: '/attendance' },
       ]
     : role === 'teacher'
       ? [
-          { id: 'students', name: 'My Students', icon: Users, path: '/students' },
-          { id: 'classes', name: 'My Classes', icon: BookOpen, path: '/classes' },
+          { id: 'students', name: t('cmd.action_my_students'), icon: Users, path: '/students' },
+          { id: 'classes', name: t('cmd.action_my_classes'), icon: BookOpen, path: '/classes' },
         ]
       : [
-          { id: 'grades', name: 'My Grades', icon: BookOpen, path: '/grades' },
-          { id: 'invoices', name: 'My Invoices', icon: CreditCard, path: '/invoices' },
-          { id: 'profile', name: 'My Profile', icon: User, path: '/settings' },
+          { id: 'grades', name: t('cmd.action_my_grades'), icon: BookOpen, path: '/grades' },
+          { id: 'invoices', name: t('cmd.action_my_invoices'), icon: CreditCard, path: '/invoices' },
+          { id: 'profile', name: t('cmd.action_my_profile'), icon: User, path: '/settings' },
         ];
 
   const actions = [...baseActions, ...roleActions];
@@ -96,7 +96,7 @@ export function CommandPalette({ role }: Props) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Type a command or search..."
+                placeholder={t('cmd.placeholder')}
                 className="flex-1 bg-transparent border-none text-white px-4 focus:outline-none placeholder:text-white/30"
               />
               <button onClick={() => setIsOpen(false)} className="p-1 text-white/40 hover:text-white transition-colors rounded-lg hover:bg-white/10">
@@ -107,9 +107,9 @@ export function CommandPalette({ role }: Props) {
             <div className="max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
               {filteredActions.length > 0 ? (
                 <div className="space-y-1">
-                  <div className="px-3 py-2 text-xs font-semibold text-white/30 uppercase tracking-widest">
-                    Quick Actions
-                  </div>
+                    <div className="px-3 py-2 text-xs font-semibold text-white/30 uppercase tracking-widest">
+                      {t('cmd.quick_actions')}
+                    </div>
                   {filteredActions.map((action) => (
                     <button
                       key={action.id}
@@ -125,14 +125,14 @@ export function CommandPalette({ role }: Props) {
                 </div>
               ) : (
                 <div className="py-12 text-center text-white/40 text-sm">
-                  No results found for "{search}"
+                  {t('cmd.no_results')} "{search}"
                 </div>
               )}
             </div>
             
             <div className="bg-white/5 px-4 py-3 border-t border-white/10 flex items-center justify-between text-xs text-white/40">
-              <span>Use <kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">↑</kbd> <kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">↓</kbd> to navigate</span>
-              <span><kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">esc</kbd> to close</span>
+              <span>Use <kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">↑</kbd> <kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">↓</kbd> {t('cmd.navigate')}</span>
+              <span><kbd className="bg-white/10 px-1.5 py-0.5 rounded text-white/60 font-sans">esc</kbd> {t('cmd.close')}</span>
             </div>
           </motion.div>
         </>

@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -275,12 +275,15 @@ export const api = {
 
     /* ─── Per-student overrides ─── */
     getStudentsForSettings: async (): Promise<SettingsStudent[]> => {
-      // Active enrollments with student + class info
+      // Active enrollments with student + class info (exclude archived profiles)
       const { data: enrollments, error } = await supabase
         .from('class_enrollments')
-        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name)')
+        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, is_archived)')
         .eq('status', 'active');
       if (error || !enrollments) return [];
+
+      // Filter out archived students
+      const activeEnrollments = enrollments.filter((e: any) => !(e.student as any)?.is_archived);
 
       // Global defaults
       const settings = await api.finance.getSettings();
@@ -293,7 +296,7 @@ export const api = {
 
       // Group by student
       const map = new Map<string, { name: string; programs: Set<string>; classes: string[]; override: any | null }>();
-      for (const enr of enrollments) {
+      for (const enr of activeEnrollments) {
         const sid = enr.student_id;
         const s = enr.student as any;
         const cls = enr.class as any;
@@ -430,6 +433,22 @@ export const api = {
         .from('student_invoice_overrides')
         .delete()
         .in('student_id', studentIds);
+      if (error) throw new Error(error.message);
+    },
+
+    archiveStudent: async (studentId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_archived: true })
+        .eq('id', studentId);
+      if (error) throw new Error(error.message);
+    },
+
+    unarchiveStudent: async (studentId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_archived: false })
+        .eq('id', studentId);
       if (error) throw new Error(error.message);
     },
 
@@ -995,8 +1014,25 @@ export const api = {
       if (entryErr) throw new Error(entryErr.message);
     },
 
-    /** Grade a single student entry */
+    /** Grade a single student entry, then email the student */
     gradeStudent: async (entryId: string, totalPoints: number, passed: boolean, note?: string): Promise<void> => {
+      // Fetch current entry state + student/exam info for email
+      const { data: current } = await supabase
+        .from('grade_table_entries')
+        .select(`
+          passed,
+          student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, email),
+          grade_table:grade_tables!grade_table_entries_grade_table_id_fkey(
+            name,
+            class:classes!grade_tables_class_id_fkey(title),
+            teacher:profiles!grade_tables_teacher_id_fkey(first_name, last_name)
+          )
+        `)
+        .eq('id', entryId)
+        .single();
+
+      const wasGraded = (current as any)?.passed != null;
+
       const { data: authData } = await supabase.auth.getUser();
       const { error } = await supabase
         .from('grade_table_entries')
@@ -1010,6 +1046,60 @@ export const api = {
         .eq('id', entryId);
 
       if (error) throw new Error(error.message);
+
+      // Send grade email (non-blocking — don't fail the save if email errors)
+      try {
+        const student = (current as any)?.student;
+        const gradeTable = (current as any)?.grade_table;
+        if (student?.email && gradeTable) {
+          await api.gradeTables._sendGradeEmail({
+            studentEmail: student.email,
+            studentName: `${student.first_name} ${student.last_name}`,
+            examName: gradeTable.name || 'Exam',
+            className: gradeTable.class?.title || 'Class',
+            teacherName: gradeTable.teacher
+              ? `${gradeTable.teacher.first_name} ${gradeTable.teacher.last_name}`
+              : 'Teacher',
+            totalPoints,
+            passed,
+            note,
+            mode: wasGraded ? 'updated' : 'submitted',
+          });
+        }
+      } catch (emailErr) {
+        console.warn('Grade saved but email failed:', emailErr);
+      }
+    },
+
+    /** Send a grade notification email via Edge Function */
+    _sendGradeEmail: async (params: {
+      studentEmail: string;
+      studentName: string;
+      examName: string;
+      className: string;
+      teacherName: string;
+      totalPoints: number;
+      passed: boolean;
+      note?: string;
+      mode: 'submitted' | 'updated';
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-grade-email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify(params),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`send-grade-email: ${err}`);
+      }
     },
 
     /** Delete a grade table and all its entries */
@@ -1771,6 +1861,7 @@ export const api = {
           emergency_contact_name,
           emergency_contact_phone,
           id_document_url,
+          is_archived,
           reviewer:profiles!registration_applications_reviewed_by_fkey(first_name, last_name)
         `)
         .order('created_at', { ascending: false });
@@ -1805,9 +1896,26 @@ export const api = {
         country: app.country,
         emergencyContactName: app.emergency_contact_name,
         emergencyContactPhone: app.emergency_contact_phone,
-        idDocumentUrl: app.id_document_url
+        idDocumentUrl: app.id_document_url,
+        isArchived: app.is_archived ?? false,
       });
       });
+    },
+
+    archive: async (applicationId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('registration_applications')
+        .update({ is_archived: true })
+        .eq('id', applicationId);
+      if (error) throw new Error(error.message);
+    },
+
+    unarchive: async (applicationId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('registration_applications')
+        .update({ is_archived: false, status: 'pending' })
+        .eq('id', applicationId);
+      if (error) throw new Error(error.message);
     },
 
     approve: async (applicationId: string, classId?: string) => {
@@ -2029,7 +2137,7 @@ export const api = {
   },
 
   calendar: {
-    getEvents: async (year: number, month: number): Promise<CalendarEvent[]> => {
+    getEvents: async (year: number, month: number, role?: string): Promise<CalendarEvent[]> => {
       // Fetch range slightly wider than the month to catch multi-day events
       const rangeStart = new Date(year, month - 1, 24).toISOString();
       const rangeEnd   = new Date(year, month + 1,  7).toISOString();
@@ -2079,7 +2187,9 @@ export const api = {
 
       // Get class sessions and convert to calendar events
       try {
-        const classEvents = await api.calendar.getClassEventsForUser(user.id, year, month);
+        const classEvents = role === 'admin'
+          ? await api.calendar.getClassEventsForAdmin(year, month)
+          : await api.calendar.getClassEventsForUser(user.id, year, month);
         events = [...events, ...classEvents];
       } catch (e) {
         console.error('Failed to fetch class events:', e);
@@ -2176,6 +2286,261 @@ export const api = {
       });
 
       return calendarEvents;
+    },
+
+    /** Fetch ALL class events for admin (every class on the platform, reschedule-aware). */
+    getClassEventsForAdmin: async (year: number, month: number): Promise<CalendarEvent[]> => {
+      const startDate = new Date(year, month, 1);
+      const endDate   = new Date(year, month + 1, 0);
+
+      const toDateStr = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+
+      const rangeStart = toDateStr(new Date(year, month - 1, 20));
+      const rangeEnd   = toDateStr(new Date(year, month + 1, 10));
+
+      // All classes with sessions + teacher
+      const { data: allClasses, error } = await supabase
+        .from('classes')
+        .select(`
+          id, title, program_id, teacher_id,
+          sessions:class_sessions(id, day_of_week, start_time, end_time),
+          teacher:profiles!classes_teacher_id_fkey(first_name, last_name, email, avatar_url)
+        `);
+      if (error) throw new Error(error.message);
+
+      // Reschedules in range
+      let reschedules: any[] = [];
+      try {
+        const [orig, moved] = await Promise.all([
+          supabase.from('class_reschedules').select('*').gte('original_date', rangeStart).lte('original_date', rangeEnd),
+          supabase.from('class_reschedules').select('*').not('new_date', 'is', null).gte('new_date', rangeStart).lte('new_date', rangeEnd),
+        ]);
+        const seen = new Set<string>();
+        for (const r of [...(orig.data || []), ...(moved.data || [])]) {
+          if (!seen.has(r.id)) { seen.add(r.id); reschedules.push(r); }
+        }
+      } catch { /* table might not exist yet */ }
+
+      // Build a quick lookup: "classId::originalDate" → reschedule row
+      const rescheduleByOriginal = new Map<string, any>();
+      for (const r of reschedules) rescheduleByOriginal.set(`${r.class_id}::${r.original_date}`, r);
+
+      const calendarEvents: CalendarEvent[] = [];
+
+      for (const cls of (allClasses || [])) {
+        if (!cls.sessions?.length) continue;
+
+        for (const session of cls.sessions) {
+          const current = new Date(year, month, 1);
+          while (current <= endDate) {
+            if ((current.getDay() + 6) % 7 === session.day_of_week) {
+              const dateStr = toDateStr(current);
+              const reschedule = rescheduleByOriginal.get(`${cls.id}::${dateStr}`);
+
+              if (!reschedule) {
+                // Normal occurrence
+                const [sh, sm] = session.start_time.split(':').map(Number);
+                const [eh, em] = session.end_time.split(':').map(Number);
+                const es = new Date(current); es.setHours(sh, sm, 0);
+                const ee = new Date(current); ee.setHours(eh, em, 0);
+                calendarEvents.push({
+                  id: `class-${cls.id}-${session.id}-${current.getTime()}`,
+                  title: cls.title,
+                  description: `${cls.program_id}`,
+                  start_time: es.toISOString(),
+                  end_time: ee.toISOString(),
+                  all_day: false,
+                  color: '#3b82f6',
+                  event_type: 'class',
+                  class_id: cls.id,
+                  created_by: cls.teacher_id,
+                  creator_profile: cls.teacher ? {
+                    firstName: (cls.teacher as any).first_name,
+                    lastName:  (cls.teacher as any).last_name,
+                    email:     (cls.teacher as any).email,
+                    avatar:    (cls.teacher as any).avatar_url,
+                  } : undefined,
+                  participants: [],
+                });
+              }
+              // else: cancelled (new_date=null) or rescheduled (new_date set) — skip original slot
+            }
+            current.setDate(current.getDate() + 1);
+          }
+        }
+      }
+
+      // Add rescheduled occurrences that land in this month
+      for (const r of reschedules) {
+        if (!r.new_date) continue;
+        const newDate = new Date(r.new_date + 'T12:00:00');
+        if (newDate.getFullYear() !== year || newDate.getMonth() !== month) continue;
+        const cls = (allClasses || []).find((c: any) => c.id === r.class_id);
+        if (!cls) continue;
+        const sh = r.new_start_time ? parseInt(r.new_start_time.split(':')[0]) : 9;
+        const sm = r.new_start_time ? parseInt(r.new_start_time.split(':')[1]) : 0;
+        const eh = r.new_end_time   ? parseInt(r.new_end_time.split(':')[0])   : 10;
+        const em = r.new_end_time   ? parseInt(r.new_end_time.split(':')[1])   : 0;
+        const es = new Date(newDate); es.setHours(sh, sm, 0);
+        const ee = new Date(newDate); ee.setHours(eh, em, 0);
+        calendarEvents.push({
+          id: `class-rescheduled-${r.id}`,
+          title: `↪ ${cls.title}`,
+          description: cls.program_id,
+          start_time: es.toISOString(),
+          end_time: ee.toISOString(),
+          all_day: false,
+          color: '#f59e0b',
+          event_type: 'class',
+          class_id: cls.id,
+          created_by: cls.teacher_id,
+          creator_profile: cls.teacher ? {
+            firstName: (cls.teacher as any).first_name,
+            lastName:  (cls.teacher as any).last_name,
+            email:     (cls.teacher as any).email,
+            avatar:    (cls.teacher as any).avatar_url,
+          } : undefined,
+          participants: [],
+        });
+      }
+
+      return calendarEvents;
+    },
+
+    /** All classes scheduled on a given date (YYYY-MM-DD), reschedule-aware. */
+    getClassesForDay: async (date: string): Promise<AdminDayClass[]> => {
+      const d = new Date(date + 'T12:00:00');
+      const storedDayOfWeek = (d.getDay() + 6) % 7; // 0=Mon … 6=Sun
+
+      // Query from the classes side — proven pattern used throughout the codebase.
+      // This avoids the reserved-keyword alias issue with `class:classes(...)`.
+      const { data: allClasses, error } = await supabase
+        .from('classes')
+        .select(`
+          id, title, program_id, teacher_id,
+          teacher:profiles!classes_teacher_id_fkey(first_name, last_name),
+          sessions:class_sessions(id, day_of_week, start_time, end_time)
+        `);
+      if (error) throw new Error(error.message);
+
+      // Reschedules affecting this date
+      let reschedules: any[] = [];
+      try {
+        const [orig, moved] = await Promise.all([
+          supabase.from('class_reschedules').select('*').eq('original_date', date),
+          supabase.from('class_reschedules').select('*').eq('new_date', date),
+        ]);
+        reschedules = [...(orig.data || []), ...(moved.data || [])];
+      } catch { /* class_reschedules may not exist yet */ }
+
+      const cancelledClassIds = new Set<string>();
+      const movedAwayClassIds  = new Set<string>();
+      const movedHere: any[]   = [];
+
+      for (const r of reschedules) {
+        if (r.original_date === date) {
+          if (r.new_date === null || r.new_date === date) cancelledClassIds.add(r.class_id);
+          else movedAwayClassIds.add(r.class_id);
+        } else if (r.new_date === date) {
+          movedHere.push(r);
+        }
+      }
+
+      const result: AdminDayClass[] = [];
+
+      // Regular sessions matching this weekday (not cancelled or moved away)
+      for (const cls of (allClasses || [])) {
+        if (cancelledClassIds.has(cls.id) || movedAwayClassIds.has(cls.id)) continue;
+        const sessions = ((cls.sessions as any[]) || []).filter(
+          (s: any) => s.day_of_week === storedDayOfWeek,
+        );
+        for (const s of sessions) {
+          const teacher = (cls.teacher as any) || {};
+          result.push({
+            classId:      cls.id,
+            sessionId:    s.id,
+            className:    cls.title,
+            programId:    cls.program_id,
+            programName:  cls.program_id,
+            teacherName:  teacher.first_name
+              ? `${teacher.first_name} ${teacher.last_name}`
+              : 'Unknown',
+            teacherId:    cls.teacher_id,
+            startTime:    s.start_time,
+            endTime:      s.end_time,
+            originalDate: date,
+            isRescheduled: false,
+          });
+        }
+      }
+
+      // Classes moved to this date from somewhere else
+      if (movedHere.length > 0) {
+        const classIds = [...new Set(movedHere.map((r: any) => r.class_id))];
+        const { data: movedClasses } = await supabase
+          .from('classes')
+          .select(`
+            id, title, program_id, teacher_id,
+            teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
+          `)
+          .in('id', classIds);
+        const classMap = new Map((movedClasses || []).map((c: any) => [c.id, c]));
+        for (const r of movedHere) {
+          const cls     = classMap.get(r.class_id) as any;
+          if (!cls) continue;
+          const teacher = (cls.teacher as any) || {};
+          result.push({
+            classId:      cls.id,
+            sessionId:    r.session_id || null,
+            className:    cls.title,
+            programId:    cls.program_id,
+            programName:  cls.program_id,
+            teacherName:  teacher.first_name
+              ? `${teacher.first_name} ${teacher.last_name}`
+              : 'Unknown',
+            teacherId:    cls.teacher_id,
+            startTime:    r.new_start_time || '09:00',
+            endTime:      r.new_end_time   || '10:00',
+            originalDate: date,
+            isRescheduled: true,
+            rescheduleId: r.id,
+          });
+        }
+      }
+
+      return result.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    },
+
+    /** Save a reschedule or cancellation for one class occurrence. */
+    rescheduleClassOccurrence: async (params: {
+      classId: string;
+      sessionId?: string | null;
+      originalDate: string;
+      newDate: string | null;
+      newStartTime?: string;
+      newEndTime?: string;
+      reason?: string;
+    }): Promise<void> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const payload: any = {
+        class_id:      params.classId,
+        session_id:    params.sessionId || null,
+        original_date: params.originalDate,
+        new_date:      params.newDate,
+        new_start_time: params.newDate ? (params.newStartTime || null) : null,
+        new_end_time:   params.newDate ? (params.newEndTime   || null) : null,
+        reason:        params.reason || null,
+        created_by:    user?.id || null,
+      };
+      const { error } = await supabase
+        .from('class_reschedules')
+        .upsert(payload, { onConflict: 'class_id,original_date' });
+      if (error) throw new Error(error.message);
     },
 
     createEvent: async (payload: {

@@ -167,6 +167,7 @@ export interface RegistrationApplication {
   reviewedBy?: string;
   reviewedAt?: string;
   createdAt?: string;
+  isArchived?: boolean;
 }
 
 export interface CalendarParticipant {
@@ -268,4 +269,25 @@ export interface GradeTableEntry {
   note: string | null;
   attendanceRate: number | null;
   previousFailedExams: number;
+}
+
+/** A class occurrence on a specific calendar date, used in the admin day modal. */
+export interface AdminDayClass {
+  classId: string;
+  sessionId: string | null;
+  className: string;
+  programId: string;
+  programName: string;
+  teacherName: string;
+  teacherId: string;
+  /** HH:MM */
+  startTime: string;
+  /** HH:MM */
+  endTime: string;
+  /** YYYY-MM-DD — the day requested */
+  originalDate: string;
+  /** True when this occurrence was moved FROM another date to this date */
+  isRescheduled: boolean;
+  /** Present when isRescheduled = true */
+  rescheduleId?: string;
 }

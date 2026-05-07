@@ -596,14 +596,14 @@ export default function Students() {
     e.preventDefault();
     setEnrollError('');
 
-    if (!form.firstName.trim())  { setEnrollError('First name is required.'); return; }
-    if (!form.lastName.trim())   { setEnrollError('Last name is required.'); return; }
-    if (!form.parentFirstName.trim()) { setEnrollError("Parent's first name is required."); return; }
-    if (!form.email.includes('@')) { setEnrollError('Please enter a valid email address.'); return; }
-    if (!form.phone.trim()) { setEnrollError('Phone number is required.'); return; }
-    if (!form.location) { setEnrollError('Please select a location.'); return; }
-    if (!form.program) { setEnrollError('Please select a degree.'); return; }
-    if (!form.classId) { setEnrollError('Please select a class for this degree.'); return; }
+    if (!form.firstName.trim())  { setEnrollError(t('students.err_first_name')); return; }
+    if (!form.lastName.trim())   { setEnrollError(t('students.err_last_name')); return; }
+    if (!form.parentFirstName.trim()) { setEnrollError(t('students.err_parent')); return; }
+    if (!form.email.includes('@')) { setEnrollError(t('students.err_email')); return; }
+    if (!form.phone.trim()) { setEnrollError(t('students.err_phone')); return; }
+    if (!form.location) { setEnrollError(t('students.err_location')); return; }
+    if (!form.program) { setEnrollError(t('students.err_program')); return; }
+    if (!form.classId) { setEnrollError(t('students.err_class')); return; }
 
     setEnrolling(true);
     try {
@@ -622,7 +622,7 @@ export default function Students() {
       setForm(BLANK_FORM);
       setView('success');
     } catch (err) {
-      setEnrollError(err instanceof Error ? err.message : 'Enrollment failed. Please try again.');
+      setEnrollError(err instanceof Error ? err.message : t('students.enrollment_failed'));
     } finally {
       setEnrolling(false);
     }
@@ -639,24 +639,24 @@ export default function Students() {
           <div className="w-16 h-16 rounded-full bg-emerald-400/10 border border-emerald-400/20 flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-8 h-8 text-emerald-400" />
           </div>
-          <h2 className="font-display text-2xl font-medium mb-2">Enrollment Successful</h2>
+          <h2 className="font-display text-2xl font-medium mb-2">{t('students.enrollment_success')}</h2>
           <p className="text-white/50 text-sm mb-1">
-            <span className="text-white/80 font-medium">{enrolledName}</span> has been enrolled and their account is active.
+            <span className="text-white/80 font-medium">{enrolledName}</span> {t('students.enrollment_success_msg')}
           </p>
-          <p className="text-white/35 text-xs mb-1">Temporary password: <span className="text-white/70 font-medium">FMA#2026</span></p>
-          <p className="text-white/35 text-xs mb-8">The student will be required to change this password on first login.</p>
+          <p className="text-white/35 text-xs mb-1">{t('students.temp_password')} <span className="text-white/70 font-medium">FMA#2026</span></p>
+          <p className="text-white/35 text-xs mb-8">{t('students.password_change_hint')}</p>
           <div className="flex gap-3 justify-center">
             <button
               onClick={() => { setView('add'); }}
               className="px-5 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
             >
-              Enroll Another
+              {t('students.enroll_another')}
             </button>
             <button
               onClick={() => setView('list')}
               className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all"
             >
-              Back to Students
+              {t('students.back_to_list')}
             </button>
           </div>
         </div>
@@ -674,8 +674,8 @@ export default function Students() {
       >
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">Manual Enrollment</h1>
-            <p className="text-white/50 text-sm">Create and immediately activate a student account.</p>
+            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('students.manual_enrollment')}</h1>
+            <p className="text-white/50 text-sm">{t('students.manual_enrollment_desc')}</p>
           </div>
           <button
             onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); }}
@@ -732,7 +732,7 @@ export default function Students() {
             {/* Email + Phone */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Email Address *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.email_req')}</label>
                 <input
                   type="email" value={form.email}
                   onChange={e => setField('email', e.target.value)}
@@ -740,7 +740,7 @@ export default function Students() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Phone Number *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.phone_req')}</label>
                 <input
                   type="tel" value={form.phone}
                   onChange={e => setField('phone', e.target.value)}
@@ -748,7 +748,7 @@ export default function Students() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Secondary Phone (Optional)</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.secondary_phone_opt')}</label>
                 <input
                   type="tel" value={form.secondaryPhone}
                   onChange={e => setField('secondaryPhone', e.target.value)}
@@ -760,39 +760,39 @@ export default function Students() {
             {/* Location + Password */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Location *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.location_req')}</label>
                 <select
                   value={form.location}
                   onChange={e => setField('location', e.target.value)}
                   className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
                 >
-                  <option value="">Select Location</option>
+                  <option value="">{t('students.select_location')}</option>
                   {LOCATION_OPTIONS.map(loc => (
                     <option key={loc} value={loc}>{loc}</option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Initial Password *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.initial_password')}</label>
                 <input
                   type="text" value={form.password}
                   readOnly
                   className={`${inp} opacity-80 cursor-not-allowed`}
                 />
-                <p className="text-[11px] text-white/35 ml-1">Students must change this password on first login.</p>
+                <p className="text-[11px] text-white/35 ml-1">{t('students.password_hint')}</p>
               </div>
             </div>
 
             {/* Degree + Class */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Select Degree *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.select_degree_req')}</label>
                 <select
                   value={form.program}
                   onChange={e => setField('program', e.target.value)}
                   className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
                 >
-                  <option value="">Select Degree</option>
+                  <option value="">{t('students.select_degree_ph')}</option>
                   {PROGRAMS.map(p => (
                     <option key={p} value={p}>{p}</option>
                   ))}
@@ -800,14 +800,14 @@ export default function Students() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Select Class *</label>
+                <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('students.select_class_req')}</label>
                 <select
                   value={form.classId}
                   onChange={e => setField('classId', e.target.value)}
                   disabled={!form.program || loadingClasses}
                   className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <option value="">{!form.program ? 'Select degree first' : loadingClasses ? 'Loading classes...' : 'Select Class'}</option>
+                  <option value="">{!form.program ? t('students.select_degree_first') : loadingClasses ? t('students.loading_classes') : t('students.select_class_ph')}</option>
                   {degreeClasses.map(cls => (
                     <option key={cls.id} value={cls.id}>{cls.title}</option>
                   ))}
@@ -840,7 +840,7 @@ export default function Students() {
                 className="flex items-center gap-2 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
               >
                 {enrolling ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                {enrolling ? 'Enrolling...' : 'Enroll Student'}
+                {enrolling ? t('students.enrolling') : t('students.enroll_student')}
               </button>
             </div>
           </form>
@@ -877,7 +877,7 @@ export default function Students() {
             className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
             {importingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {importingCsv ? 'Importing...' : 'Import CSV'}
+            {importingCsv ? t('students.importing') : t('students.import_csv')}
           </button>
           <button
             onClick={() => setView('add')}
@@ -925,7 +925,7 @@ export default function Students() {
               {studentFilterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
             <select value={filterLocation} onChange={e => { setFilterLocation(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Locations</option>
+              <option value="">{t('students.all_locations')}</option>
               {studentFilterOptions.locations.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
             {hasStudentFilters && (
@@ -1583,7 +1583,7 @@ export default function Students() {
                           <div className="space-y-1">
                             <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Location *</label>
                             <select value={f.location} onChange={e => setCsvField(idx, 'location', e.target.value)} className="glass-select w-full px-4 py-2.5 rounded-xl text-sm">
-                              <option value="">Select Location</option>
+                              <option value="">{t('students.select_location')}</option>
                               {LOCATION_OPTIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
                             </select>
                           </div>
@@ -1598,7 +1598,7 @@ export default function Students() {
                           <div className="space-y-1">
                             <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Degree *</label>
                             <select value={f.program} onChange={e => setCsvField(idx, 'program', e.target.value)} className="glass-select w-full px-4 py-2.5 rounded-xl text-sm">
-                              <option value="">Select Degree</option>
+                              <option value="">{t('students.select_degree_ph')}</option>
                               {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
                           </div>
@@ -1610,7 +1610,7 @@ export default function Students() {
                               disabled={!f.program || csvLoadingClasses}
                               className="glass-select w-full px-4 py-2.5 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <option value="">{!f.program ? 'Select degree first' : programClasses.length === 0 ? 'No classes found' : 'Select Class'}</option>
+                              <option value="">{!f.program ? t('students.select_degree_first') : programClasses.length === 0 ? t('students.no_classes_found') : t('students.select_class_ph')}</option>
                               {programClasses.map(c => (
                                 <option key={c.id} value={c.id}>{c.title}{c.teacherName ? ` — ${c.teacherName}` : ''} ({c.count})</option>
                               ))}
@@ -1737,7 +1737,7 @@ export default function Students() {
                     onChange={(e) => setEditForm((f) => ({ ...f, location: e.target.value }))}
                     className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
                   >
-                    <option value="">Select location</option>
+                    <option value="">{t('students.select_location')}</option>
                     {LOCATION_OPTIONS.map(loc => (
                       <option key={loc} value={loc}>{loc}</option>
                     ))}
@@ -1756,7 +1756,7 @@ export default function Students() {
                     disabled={savingEdit}
                     className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold disabled:opacity-60"
                   >
-                    {savingEdit ? 'Saving...' : 'Save Changes'}
+                    {savingEdit ? t('common.saving') : t('common.save_changes')}
                   </button>
                 </div>
               </div>

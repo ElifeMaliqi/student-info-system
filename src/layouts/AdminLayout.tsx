@@ -11,6 +11,8 @@ import { useUser } from '../context/UserContext';
 import { CommandPalette } from '../components/CommandPalette';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
+import { api } from '../services/api';
+import type { Announcement } from '../types';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -23,6 +25,11 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const [isScrolled, setIsScrolled] = useState(false);
   const [isFaqOpen, setIsFaqOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Announcement[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifSeen, setNotifSeen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { language, setLanguage, t } = useLanguage();
   const { user } = useUser();
@@ -47,11 +54,33 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     }
   }, [theme]);
 
+  // Load notifications (announcements for this user)
+  useEffect(() => {
+    if (!user) return;
+    setNotifLoading(true);
+    api.announcements.getAll(role, user.id)
+      .then(data => setNotifications(data.slice(0, 20)))
+      .catch(() => {})
+      .finally(() => setNotifLoading(false));
+  }, [role, user]);
+
+  // Close notif panel on outside click
+  useEffect(() => {
+    if (!isNotifOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setIsNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isNotifOpen]);
+
   const adminNavItems = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
     { id: 'students', label: t('nav.students'), icon: Users },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
-    { id: 'registrations', label: 'Registrations', icon: UserPlus },
+    { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
     { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
     { id: 'grades', label: t('nav.grades'), icon: ClipboardList },
@@ -61,8 +90,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
 
   const teacherNavItems = [
     { id: 'dashboard',     label: t('nav.dashboard'),     icon: LayoutDashboard },
-    { id: 'classes',       label: 'My Classes',           icon: BookOpen        },
-    { id: 'grading',       label: 'Grading',              icon: ClipboardList   },
+    { id: 'classes',       label: t('nav.my_classes'),    icon: BookOpen        },
+    { id: 'grading',       label: t('nav.grading'),       icon: ClipboardList   },
     { id: 'students',      label: t('nav.my_students'),   icon: Users           },
     { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays    },
     { id: 'announcements', label: t('nav.announcements'), icon: Megaphone       },
@@ -83,7 +112,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     <>
       <div className="h-20 flex items-center px-6 border-b border-white/5 shrink-0">
         <img 
-          src="https://futureminds.io/assets/imgs/logo/site-logo-white-2.png" 
+          src="/site-logo.png" 
           alt="Future Minds Logo" 
           className="h-8 object-contain"
           referrerPolicy="no-referrer"
@@ -259,7 +288,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
             <button 
               onClick={() => { playPopSound(); setIsFaqOpen(true); }}
               className={`w-10 h-10 rounded-full ${theme === 'dark' ? 'bg-white/5 border-white/5 text-white/60 hover:text-white hover:bg-white/10' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-gray-900 hover:bg-gray-200'} border flex items-center justify-center transition-all`}
-              title="Help & FAQ"
+              title={t('layout.help_faq')}
             >
               <HelpCircle className="w-4 h-4" />
             </button>
@@ -287,10 +316,79 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
-            <button className={`w-10 h-10 rounded-full ${theme === 'dark' ? 'bg-white/5 border-white/5 text-white/60 hover:text-[#fc0ce4] hover:bg-[#fc0ce4]/10 hover:border-[#fc0ce4]/20' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-[#fc0ce4] hover:bg-[#fc0ce4]/10 hover:border-[#fc0ce4]/20'} border flex items-center justify-center transition-all relative`}>
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-[#fc0ce4] rounded-full border-2 border-[#050505]"></span>
-            </button>
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => { playPopSound(); setIsNotifOpen(v => !v); setNotifSeen(true); }}
+                className={`w-10 h-10 rounded-full ${theme === 'dark' ? 'bg-white/5 border-white/5 text-white/60 hover:text-[#fc0ce4] hover:bg-[#fc0ce4]/10 hover:border-[#fc0ce4]/20' : 'bg-gray-100 border-gray-200 text-gray-500 hover:text-[#fc0ce4] hover:bg-[#fc0ce4]/10 hover:border-[#fc0ce4]/20'} border flex items-center justify-center transition-all relative`}
+                title={t('layout.notifications')}
+              >
+                <Bell className="w-4 h-4" />
+                {!notifSeen && notifications.length > 0 && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-[#fc0ce4] rounded-full border-2 border-[#050505]" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isNotifOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                    transition={{ duration: 0.15 }}
+                    className={`absolute right-0 top-12 w-80 rounded-2xl border shadow-2xl z-50 overflow-hidden ${theme === 'dark' ? 'bg-[#0f0f0f] border-white/10' : 'bg-white border-gray-200'}`}
+                  >
+                    <div className={`px-4 py-3 border-b flex items-center justify-between ${theme === 'dark' ? 'border-white/10' : 'border-gray-100'}`}>
+                      <span className="text-sm font-semibold">{t('layout.notifications')}</span>
+                      <span className="text-[11px] text-white/40">{notifications.length} {t('layout.notifications').toLowerCase()}</span>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto custom-scrollbar">
+                      {notifLoading ? (
+                        <div className="flex items-center justify-center py-10 text-white/30 text-sm gap-2">
+                          <span className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
+                          {t('layout.loading')}
+                        </div>
+                      ) : notifications.length === 0 ? (
+                        <div className="flex flex-col items-center py-10 text-white/30 gap-2">
+                          <Bell className="w-6 h-6 opacity-40" />
+                          <p className="text-sm">{t('layout.no_announcements')}</p>
+                        </div>
+                      ) : (
+                        notifications.map(n => {
+                          const priorityColor: Record<string, string> = {
+                            urgent: 'bg-red-500',
+                            high: 'bg-amber-500',
+                            medium: 'bg-blue-500',
+                            low: 'bg-white/20',
+                          };
+                          return (
+                            <button
+                              key={n.id}
+                              onClick={() => { setIsNotifOpen(false); navigate('/announcements'); }}
+                              className={`w-full text-left px-4 py-3 border-b transition-colors ${theme === 'dark' ? 'border-white/5 hover:bg-white/5' : 'border-gray-50 hover:bg-gray-50'}`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${priorityColor[n.priority] ?? 'bg-white/20'}`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{n.title}</p>
+                                  <p className={`text-xs truncate mt-0.5 ${theme === 'dark' ? 'text-white/40' : 'text-gray-400'}`}>{n.content}</p>
+                                  <p className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-white/25' : 'text-gray-300'}`}>{n.date} · {n.author}</p>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setIsNotifOpen(false); navigate('/announcements'); }}
+                      className={`w-full py-3 text-xs font-medium text-[#fc0ce4] hover:text-[#fc0ce4]/80 transition-colors border-t ${theme === 'dark' ? 'border-white/10' : 'border-gray-100'}`}
+                    >
+                      {t('layout.view_all_announcements')}
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             
             {role === 'admin' && (
               <button
@@ -319,23 +417,23 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
 
       <CommandPalette role={role} />
 
-      <SlideOver isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} title="Help & FAQ">
+      <SlideOver isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} title={t('layout.help_faq')}>
         <div className="space-y-6">
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-white">How do I search quickly?</h3>
-            <p className="text-sm text-white/50 leading-relaxed">Press <kbd className="bg-white/10 px-1 rounded text-white/70">Cmd</kbd> + <kbd className="bg-white/10 px-1 rounded text-white/70">K</kbd> (or Ctrl+K on Windows) anywhere in the app to open the Command Palette. You can jump to any page instantly.</p>
+            <h3 className="text-sm font-medium text-white">{t('faq.search_q')}</h3>
+            <p className="text-sm text-white/50 leading-relaxed">{t('faq.search_a')}</p>
           </div>
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-white">How do I view a student's full profile?</h3>
-            <p className="text-sm text-white/50 leading-relaxed">Click on any student row in the Students table to open their quick-view panel. From there, you can click "View Full Profile" to see all their details.</p>
+            <h3 className="text-sm font-medium text-white">{t('faq.profile_q')}</h3>
+            <p className="text-sm text-white/50 leading-relaxed">{t('faq.profile_a')}</p>
           </div>
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-white">Can I export data?</h3>
-            <p className="text-sm text-white/50 leading-relaxed">Yes! Look for the "Export" button on the Students, Finance, and Attendance pages to download a CSV or PDF report.</p>
+            <h3 className="text-sm font-medium text-white">{t('faq.export_q')}</h3>
+            <p className="text-sm text-white/50 leading-relaxed">{t('faq.export_a')}</p>
           </div>
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-white">How do I select multiple students?</h3>
-            <p className="text-sm text-white/50 leading-relaxed">Use the checkboxes on the left side of the Students table to select multiple records for bulk actions.</p>
+            <h3 className="text-sm font-medium text-white">{t('faq.select_q')}</h3>
+            <p className="text-sm text-white/50 leading-relaxed">{t('faq.select_a')}</p>
           </div>
         </div>
       </SlideOver>

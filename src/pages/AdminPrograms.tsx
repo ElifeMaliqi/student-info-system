@@ -444,8 +444,8 @@ export default function AdminPrograms() {
       >
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">Degrees</h1>
-            <p className="text-white/50 text-sm">Manage degrees, create classes, and assign teachers & students.</p>
+            <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('programs.degrees_title')}</h1>
+            <p className="text-white/50 text-sm">{t('programs.degrees_desc')}</p>
           </div>
           <button
             onClick={() => {
@@ -456,7 +456,7 @@ export default function AdminPrograms() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
           >
             <Plus size={18} />
-            New Degree
+            {t('programs.new_degree')}
           </button>
         </div>
 
@@ -469,7 +469,7 @@ export default function AdminPrograms() {
         {programs.length === 0 ? (
           <div className="glass-card rounded-2xl p-12 text-center text-white/50">
             <GraduationCap size={32} className="mx-auto mb-4 opacity-50" />
-            <p>No degrees created yet. Click "New Degree" to get started.</p>
+            <p>{t('programs.empty_hint')}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -510,9 +510,9 @@ export default function AdminPrograms() {
                   </div>
                   <h3 className="font-semibold mb-2 text-white">{program.name}</h3>
                   <div className="space-y-1 text-xs text-white/60">
-                    <p>Duration: {program.duration} months</p>
-                    <p>Price: €{program.price.toLocaleString()}</p>
-                    <p>Capacity: {program.capacity} students</p>
+                    <p>{t('programs.duration_label').replace('{n}', String(program.duration))}</p>
+                    <p>{t('programs.price_label').replace('{n}', program.price.toLocaleString())}</p>
+                    <p>{t('programs.capacity_label').replace('{n}', String(program.capacity))}</p>
                   </div>
                 </button>
               </motion.div>
@@ -538,7 +538,7 @@ export default function AdminPrograms() {
                 className="glass-card rounded-3xl p-8 max-w-md w-full space-y-6"
               >
                 <div className="flex items-center justify-between">
-                  <h2 className="font-display text-2xl font-medium">{editingDegree ? 'Edit Degree' : 'New Degree'}</h2>
+                  <h2 className="font-display text-2xl font-medium">{editingDegree ? t('programs.edit_degree') : t('programs.new_degree')}</h2>
                   <button
                     onClick={() => { setShowDegreeModal(false); setEditingDegree(null); }}
                     className="p-1 hover:bg-white/10 rounded-lg transition-colors"
@@ -550,13 +550,13 @@ export default function AdminPrograms() {
                 <form onSubmit={handleCreateDegree} className="space-y-4">
                   <div>
                     <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                      Degree Name *
+                      {t('programs.degree_name_req')}
                     </label>
                     <input
                       type="text"
                       value={degreeForm.name}
                       onChange={(e) => setDegreeForm({ ...degreeForm, name: e.target.value })}
-                      placeholder="e.g., Web Development"
+                      placeholder={t('programs.degree_name_ph')}
                       className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
                       required
                     />
@@ -564,12 +564,12 @@ export default function AdminPrograms() {
 
                   <div>
                     <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                      Description
+                      {t('programs.description')}
                     </label>
                     <textarea
                       value={degreeForm.description}
                       onChange={(e) => setDegreeForm({ ...degreeForm, description: e.target.value })}
-                      placeholder="Brief description of the degree..."
+                      placeholder={t('programs.description_ph')}
                       rows={3}
                       className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white resize-none"
                     />
@@ -578,7 +578,7 @@ export default function AdminPrograms() {
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                        Duration (mo)
+                        {t('programs.duration_mo')}
                       </label>
                       <input
                         type="number"
@@ -591,7 +591,7 @@ export default function AdminPrograms() {
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                        Price (€)
+                        {t('programs.price_eur')}
                       </label>
                       <input
                         type="number"
@@ -605,7 +605,7 @@ export default function AdminPrograms() {
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                        Capacity
+                        {t('programs.capacity')}
                       </label>
                       <input
                         type="number"
@@ -624,7 +624,7 @@ export default function AdminPrograms() {
                     className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium flex items-center justify-center gap-2"
                   >
                     {loading && <Loader2 size={16} className="animate-spin" />}
-                    {loading ? 'Saving...' : (editingDegree ? 'Save Changes' : 'Create Degree')}
+                    {loading ? t('programs.saving') : (editingDegree ? t('programs.save_changes') : t('programs.create_degree'))}
                   </button>
                 </form>
               </motion.div>
@@ -659,7 +659,7 @@ export default function AdminPrograms() {
             </button>
             <h1 className="font-display text-3xl font-medium tracking-tight">{selectedProgram}</h1>
           </div>
-          <p className="text-white/50 text-sm ml-14">Manage classes for this degree</p>
+          <p className="text-white/50 text-sm ml-14">{t('programs.manage_classes')}</p>
         </div>
         <button
           onClick={() => {
@@ -677,7 +677,7 @@ export default function AdminPrograms() {
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
         >
           <Plus size={18} />
-          New Class
+          {t('programs.new_class')}
         </button>
       </div>
 
@@ -693,18 +693,18 @@ export default function AdminPrograms() {
           {classes.length === 0 ? (
             <div className="rounded-2xl p-12 text-center text-white/50">
               <BookOpen size={32} className="mx-auto mb-4 opacity-50" />
-              <p>No classes created yet</p>
+              <p>{t('programs.no_classes')}</p>
             </div>
           ) : (
             <table className="w-full min-w-[920px] text-sm">
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-widest text-white/35 border-b border-white/10">
-                  <th className="py-3 px-3">Class Name</th>
-                  <th className="py-3 px-3">Teacher</th>
-                  <th className="py-3 px-3">Number of Students</th>
-                  <th className="py-3 px-3">Schedule</th>
-                  <th className="py-3 px-3">Degree</th>
-                  <th className="py-3 px-3">Action</th>
+                  <th className="py-3 px-3">{t('programs.col_class_name')}</th>
+                  <th className="py-3 px-3">{t('programs.col_teacher')}</th>
+                  <th className="py-3 px-3">{t('programs.col_students_num')}</th>
+                  <th className="py-3 px-3">{t('programs.col_schedule')}</th>
+                  <th className="py-3 px-3">{t('programs.col_degree')}</th>
+                  <th className="py-3 px-3">{t('programs.col_action')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -723,7 +723,7 @@ export default function AdminPrograms() {
                       </button>
                     </td>
                     <td className="py-3 px-3 text-white/70">
-                      {cls.teacher ? `${cls.teacher.firstName} ${cls.teacher.lastName}` : 'Not assigned'}
+                      {cls.teacher ? `${cls.teacher.firstName} ${cls.teacher.lastName}` : t('programs.not_assigned')}
                     </td>
                     <td className="py-3 px-3 text-white/70">{cls.enrollmentCount || 0}</td>
                     <td className="py-3 px-3 text-white/70 max-w-[280px] truncate" title={formatSchedule(cls.sessions)}>{formatSchedule(cls.sessions)}</td>
@@ -734,13 +734,13 @@ export default function AdminPrograms() {
                           onClick={() => { void openClassEditModal(cls); }}
                           className="px-2 py-1 text-xs rounded-lg border border-white/15 hover:bg-white/10 transition-colors"
                         >
-                          Edit
+                          {t('programs.edit')}
                         </button>
                         <button
                           onClick={() => handleDeleteClass(cls.id)}
                           className="px-2 py-1 text-xs rounded-lg border border-red-500/25 text-red-300 hover:bg-red-500/10 transition-colors"
                         >
-                          Remove
+                          {t('programs.remove')}
                         </button>
                       </div>
                     </td>
@@ -801,7 +801,7 @@ export default function AdminPrograms() {
                 }}
                 className="px-3 py-2 rounded-lg border border-white/10 text-sm hover:bg-white/5 transition-colors"
               >
-                {isInlineEditing ? 'Cancel Edit' : 'Edit Class'}
+                {isInlineEditing ? t('programs.cancel_edit') : t('programs.edit_class')}
               </button>
               {isInlineEditing && (
                 <button
@@ -809,7 +809,7 @@ export default function AdminPrograms() {
                   disabled={loading}
                   className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm transition-colors"
                 >
-                  Save
+                  {t('common.save')}
                 </button>
               )}
               <button
@@ -824,7 +824,7 @@ export default function AdminPrograms() {
           {/* Teacher Assignment */}
           <div className="glass-card rounded-2xl p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-white">Teacher</h3>
+              <h3 className="font-semibold text-white">{t('programs.col_teacher')}</h3>
               {!isInlineEditing && (
                 <button
                   onClick={() => {
@@ -833,7 +833,7 @@ export default function AdminPrograms() {
                   }}
                   className="text-sm px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                 >
-                  {selectedClass.teacher ? 'Change' : 'Assign'}
+                  {selectedClass.teacher ? t('common.change') : t('common.assign')}
                 </button>
               )}
             </div>
@@ -843,7 +843,7 @@ export default function AdminPrograms() {
                 onChange={(e) => setInlineClassForm((f) => ({ ...f, teacherId: e.target.value }))}
                 className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
               >
-                <option value="">Select a teacher...</option>
+                <option value="">{t('programs.select_teacher_ph')}</option>
                 {teachers.map((teacher) => (
                   <option key={teacher.id} value={teacher.id}>
                     {teacher.firstName} {teacher.lastName}
@@ -861,13 +861,13 @@ export default function AdminPrograms() {
                 </div>
               </div>
             ) : (
-              <p className="text-white/50 text-sm">No teacher assigned</p>
+              <p className="text-white/50 text-sm">{t('programs.no_teacher')}</p>
             )}
           </div>
 
           {/* Sessions */}
           <div className="glass-card rounded-2xl p-6">
-            <h3 className="font-semibold text-white mb-4">Weekly Sessions</h3>
+            <h3 className="font-semibold text-white mb-4">{t('programs.weekly_sessions')}</h3>
             {isInlineEditing ? (
               <div className="space-y-2">
                 {inlineClassForm.sessions.map((session, idx) => (
@@ -883,7 +883,7 @@ export default function AdminPrograms() {
                         className="glass-select flex-1 px-3 py-2 rounded-lg text-xs text-white"
                       >
                         {DAYS.map((day, i) => (
-                          <option key={i} value={i}>{day}</option>
+                          <option key={i} value={i}>{t(`programs.day_${day.toLowerCase()}`)}</option>
                         ))}
                       </select>
                       <button
@@ -893,7 +893,7 @@ export default function AdminPrograms() {
                         }}
                         className="px-2 py-1 text-xs rounded-lg border border-red-500/25 text-red-300 hover:bg-red-500/10"
                       >
-                        Remove
+                        {t('programs.remove')}
                       </button>
                     </div>
                     <div className="flex gap-2">
@@ -924,7 +924,7 @@ export default function AdminPrograms() {
                   onClick={() => setInlineClassForm((f) => ({ ...f, sessions: [...f.sessions, { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' }] }))}
                   className="text-sm px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                 >
-                  Add Session
+                  {t('programs.add_session')}
                 </button>
               </div>
             ) : (
@@ -958,13 +958,13 @@ export default function AdminPrograms() {
                   className="text-sm px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-1"
                 >
                   <UserPlus size={16} />
-                  Add Student
+                  {t('programs.add_student')}
                 </button>
               )}
             </div>
 
             {enrollments.length === 0 ? (
-              <p className="text-white/50 text-sm">No students enrolled yet</p>
+              <p className="text-white/50 text-sm">{t('programs.no_students')}</p>
             ) : (
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {enrollments.map((enrollment) => (
@@ -1014,7 +1014,7 @@ export default function AdminPrograms() {
               className="glass-card rounded-3xl p-8 max-w-md w-full space-y-6"
             >
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-medium">{editingClassId ? 'Edit Class' : 'Create Class'}</h2>
+                <h2 className="font-display text-2xl font-medium">{editingClassId ? t('programs.edit_class') : t('programs.create_class')}</h2>
                 <button
                   onClick={() => {
                     setShowCreateClass(false);
@@ -1029,13 +1029,13 @@ export default function AdminPrograms() {
               <form onSubmit={handleCreateClass} className="space-y-4">
                 <div>
                   <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                    Class Title
+                    {t('programs.class_title')}
                   </label>
                   <input
                     type="text"
                     value={newClass.title}
                     onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
-                    placeholder="e.g., Web Dev - Batch 1"
+                    placeholder={t('programs.class_title_ph')}
                     className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
                     required
                   />
@@ -1043,7 +1043,7 @@ export default function AdminPrograms() {
 
                 <div>
                   <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                    Assign Teacher
+                    {t('programs.assign_teacher')}
                   </label>
                   <select
                     value={newClass.teacherId}
@@ -1051,7 +1051,7 @@ export default function AdminPrograms() {
                     className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
                     required
                   >
-                    <option value="">Select a teacher...</option>
+                    <option value="">{t('programs.select_teacher_ph')}</option>
                     {teachers.map((teacher) => (
                       <option key={teacher.id} value={teacher.id}>
                         {teacher.firstName} {teacher.lastName}
@@ -1062,7 +1062,7 @@ export default function AdminPrograms() {
 
                 <div className="space-y-3">
                   <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block">
-                    Weekly Sessions
+                    {t('programs.weekly_sessions')}
                   </label>
                   {newClass.sessions.map((session, idx) => (
                     <div key={idx} className="space-y-2 p-3 rounded-lg bg-white/5">
@@ -1076,7 +1076,7 @@ export default function AdminPrograms() {
                         className="glass-select w-full px-3 py-2 rounded-lg text-xs text-white"
                       >
                         {DAYS.map((day, i) => (
-                          <option key={i} value={i}>{day}</option>
+                          <option key={i} value={i}>{t(`programs.day_${day.toLowerCase()}`)}</option>
                         ))}
                       </select>
                       <div className="flex gap-2">
@@ -1110,7 +1110,7 @@ export default function AdminPrograms() {
                   disabled={loading}
                   className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
                 >
-                  {loading ? (editingClassId ? 'Saving...' : 'Creating...') : (editingClassId ? 'Save Class' : 'Create Class')}
+                  {loading ? (editingClassId ? t('programs.saving') : t('programs.creating')) : (editingClassId ? t('programs.save_class') : t('programs.create_class'))}
                 </button>
               </form>
             </motion.div>
@@ -1140,7 +1140,7 @@ export default function AdminPrograms() {
               className="glass-card rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto space-y-6"
             >
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-medium">Edit Class</h2>
+                <h2 className="font-display text-2xl font-medium">{t('programs.edit_class')}</h2>
                 <button
                   onClick={() => {
                     setShowClassEditModal(false);
@@ -1157,7 +1157,7 @@ export default function AdminPrograms() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                      Class Title
+                      {t('programs.class_title')}
                     </label>
                     <input
                       type="text"
@@ -1170,7 +1170,7 @@ export default function AdminPrograms() {
 
                   <div>
                     <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                      Assign Teacher
+                      {t('programs.assign_teacher')}
                     </label>
                     <select
                       value={newClass.teacherId}
@@ -1178,7 +1178,7 @@ export default function AdminPrograms() {
                       className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
                       required
                     >
-                      <option value="">Select a teacher...</option>
+                      <option value="">{t('programs.select_teacher_ph')}</option>
                       {teachers.map((teacher) => (
                         <option key={teacher.id} value={teacher.id}>
                           {teacher.firstName} {teacher.lastName}
@@ -1190,7 +1190,7 @@ export default function AdminPrograms() {
 
                 <div className="space-y-3">
                   <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block">
-                    Weekly Sessions
+                    {t('programs.weekly_sessions')}
                   </label>
                   {newClass.sessions.map((session, idx) => (
                     <div key={idx} className="space-y-2 p-3 rounded-lg bg-white/5">
@@ -1205,7 +1205,7 @@ export default function AdminPrograms() {
                           className="glass-select flex-1 px-3 py-2 rounded-lg text-xs text-white"
                         >
                           {DAYS.map((day, i) => (
-                            <option key={i} value={i}>{day}</option>
+                            <option key={i} value={i}>{t(`programs.day_${day.toLowerCase()}`)}</option>
                           ))}
                         </select>
                         <button
@@ -1216,7 +1216,7 @@ export default function AdminPrograms() {
                           }}
                           className="px-2 py-1 text-xs rounded-lg border border-red-500/25 text-red-300 hover:bg-red-500/10"
                         >
-                          Remove
+                          {t('programs.remove')}
                         </button>
                       </div>
                       <div className="flex gap-2">
@@ -1248,19 +1248,19 @@ export default function AdminPrograms() {
                     onClick={() => setNewClass({ ...newClass, sessions: [...newClass.sessions, { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' }] })}
                     className="text-sm px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                   >
-                    Add Session
+                    {t('programs.add_session')}
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="glass-card rounded-2xl p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-white">Enrolled Students</h3>
+                      <h3 className="font-semibold text-white">{t('programs.enrolled_students')}</h3>
                       <span className="text-xs text-white/50">{modalEnrollments.length}/40</span>
                     </div>
                     <div className="space-y-2 max-h-52 overflow-y-auto">
                       {modalEnrollments.length === 0 ? (
-                        <p className="text-white/50 text-sm">No students enrolled yet</p>
+                        <p className="text-white/50 text-sm">{t('programs.no_students')}</p>
                       ) : (
                         modalEnrollments.map((enrollment) => (
                           <div key={enrollment.id} className="flex items-center justify-between p-2 rounded-lg bg-white/5">
@@ -1283,11 +1283,11 @@ export default function AdminPrograms() {
 
                   <div className="glass-card rounded-2xl p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold text-white">Available Students</h3>
+                      <h3 className="font-semibold text-white">{t('programs.available_students')}</h3>
                     </div>
                     <div className="space-y-2 max-h-52 overflow-y-auto">
                       {modalAvailableStudents.length === 0 ? (
-                        <p className="text-white/50 text-sm">No available students</p>
+                        <p className="text-white/50 text-sm">{t('programs.no_available')}</p>
                       ) : (
                         modalAvailableStudents.map((student) => (
                           <button
@@ -1310,7 +1310,7 @@ export default function AdminPrograms() {
                   disabled={loading}
                   className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
                 >
-                  {loading ? 'Saving...' : 'Save Class'}
+                  {loading ? t('programs.saving') : t('programs.save_class')}
                 </button>
               </form>
             </motion.div>
@@ -1336,7 +1336,7 @@ export default function AdminPrograms() {
               className="glass-card rounded-3xl p-8 max-w-md w-full max-h-96 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-medium">Select Teacher</h2>
+                <h2 className="font-display text-2xl font-medium">{t('programs.select_teacher')}</h2>
                 <button
                   onClick={() => setShowTeacherModal(false)}
                   className="p-1 hover:bg-white/10 rounded-lg transition-colors"
@@ -1381,7 +1381,7 @@ export default function AdminPrograms() {
               className="glass-card rounded-3xl p-8 max-w-md w-full max-h-96 space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-medium">Add Student</h2>
+                <h2 className="font-display text-2xl font-medium">{t('programs.add_student')}</h2>
                 <button
                   onClick={() => setShowEnrollmentModal(false)}
                   className="p-1 hover:bg-white/10 rounded-lg transition-colors"
@@ -1391,7 +1391,7 @@ export default function AdminPrograms() {
               </div>
 
               {availableStudents.length === 0 ? (
-                <p className="text-white/50 text-sm text-center py-8">No available students</p>
+                <p className="text-white/50 text-sm text-center py-8">{t('programs.no_available')}</p>
               ) : (
                 <div className="space-y-2 overflow-y-auto max-h-64">
                   {availableStudents.map((student) => (
