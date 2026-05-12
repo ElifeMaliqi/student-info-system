@@ -330,6 +330,7 @@ export default function Finance() {
         discountPercent: parseFloat(createForm.discountPercent || '0'),
         studentName: selected.studentName,
         studentEmail: selected.studentEmail,
+        studentPhone: selected.studentPhone,
         className: selected.className,
       });
       playPopSound();

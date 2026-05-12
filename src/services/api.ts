@@ -208,6 +208,29 @@ export const api = {
     /* ─── Month names ─── */
     _MONTHS: ['January','February','March','April','May','June','July','August','September','October','November','December'] as const,
 
+    _sendInvoiceSms: async (params: {
+      studentPhone: string;
+      studentName: string;
+      className: string;
+      amount: number;
+      dueDate?: string;
+      status: string;
+      mode: 'created' | 'updated';
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const functionName = params.mode === 'updated' ? 'send-invoice-changed-sms' : 'send-invoice-sms';
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify(params),
+        }
+      );
+      if (!res.ok) console.warn(`${functionName} failed:`, await res.text());
+    },
+
     _sendInvoiceEmail: async (params: {
       studentEmail: string;
       studentName: string;
@@ -356,7 +379,7 @@ export const api = {
           id,
           student_id,
           class_id,
-          student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email),
+          student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone),
           class:classes!class_enrollments_class_id_fkey(
             title,
             teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
@@ -371,6 +394,7 @@ export const api = {
         studentId: row.student_id,
         studentName: row.student ? `${row.student.first_name} ${row.student.last_name}` : 'Student',
         studentEmail: row.student?.email || '',
+        studentPhone: row.student?.phone || '',
         classId: row.class_id,
         className: row.class?.title || 'Class',
         teacherName: row.class?.teacher ? `${row.class.teacher.first_name} ${row.class.teacher.last_name}` : '',
@@ -389,6 +413,7 @@ export const api = {
       discountPercent?: number;
       studentName?: string;
       studentEmail?: string;
+      studentPhone?: string;
       className?: string;
     }): Promise<void> => {
       const invoiceId = api.finance._generateInvoiceId(params.year, params.month);
@@ -425,6 +450,17 @@ export const api = {
         } catch (emailErr) {
           console.warn('Invoice created but email sending failed:', emailErr);
         }
+      }
+      if (params.studentPhone) {
+        api.finance._sendInvoiceSms({
+          studentPhone: params.studentPhone,
+          studentName: params.studentName || 'Student',
+          className: params.className || 'Class',
+          amount: params.amount,
+          dueDate: params.dueDate,
+          status: 'not_paid',
+          mode: 'created',
+        }).catch((smsErr: unknown) => console.warn('Invoice SMS failed:', smsErr));
       }
     },
 
@@ -482,7 +518,7 @@ export const api = {
       // 3. Active enrollments with class info
       const { data: enrollments, error: eErr } = await supabase
         .from('class_enrollments')
-        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email)')
+        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)')
         .eq('status', 'active');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
@@ -508,6 +544,15 @@ export const api = {
         mode?: 'created' | 'updated';
         changeSummary?: string;
       }> = [];
+      const pendingInvoiceSms: Array<{
+        studentPhone: string;
+        studentName: string;
+        className: string;
+        amount: number;
+        dueDate: string;
+        status: string;
+        mode: 'created' | 'updated';
+      }> = [];
       for (const enr of enrollments) {
         const enrolled = new Date(enr.enrolled_at);
         let y = enrolled.getFullYear();
@@ -516,6 +561,7 @@ export const api = {
         const student = enr.student as any;
         const studentName = student ? `${student.first_name || ''} ${student.last_name || ''}`.trim() : 'Student';
         const studentEmail = student?.email || '';
+        const studentPhone = student?.phone || '';
 
         // Resolve per-student or global values
         const ovr = ovrMap.get(enr.student_id);
@@ -562,6 +608,17 @@ export const api = {
                 mode: 'created',
               });
             }
+            if (studentPhone) {
+              pendingInvoiceSms.push({
+                studentPhone,
+                studentName,
+                className,
+                amount: roundedAmount,
+                dueDate,
+                status: 'not_paid',
+                mode: 'created',
+              });
+            }
           }
           m++;
           if (m > 12) { m = 1; y++; }
@@ -581,6 +638,14 @@ export const api = {
           if (failed > 0) {
             console.warn(`Failed to send ${failed} invoice email(s) out of ${pendingInvoiceEmails.length}.`);
           }
+        }
+        if (pendingInvoiceSms.length > 0) {
+          Promise.allSettled(
+            pendingInvoiceSms.map((payload) => api.finance._sendInvoiceSms(payload))
+          ).then((results) => {
+            const failed = results.filter((r) => r.status === 'rejected').length;
+            if (failed > 0) console.warn(`Failed to send ${failed} invoice SMS(s) out of ${pendingInvoiceSms.length}.`);
+          });
         }
       }
 
@@ -650,7 +715,7 @@ export const api = {
           amount,
           due_date,
           status,
-          student:profiles!invoices_student_id_fkey(first_name, last_name, email),
+          student:profiles!invoices_student_id_fkey(first_name, last_name, email, phone),
           class:classes!invoices_class_id_fkey(title)
         `)
         .eq('id', id)
@@ -709,6 +774,17 @@ export const api = {
         } catch (emailErr) {
           console.warn('Invoice updated but email sending failed:', emailErr);
         }
+      }
+      if (student?.phone && changeParts.length > 0) {
+        api.finance._sendInvoiceSms({
+          studentPhone: student.phone,
+          studentName: `${student.first_name || ''} ${student.last_name || ''}`.trim() || 'Student',
+          className: cls?.title || 'Class',
+          amount: newAmount,
+          dueDate: newDueDate,
+          status: newStatus,
+          mode: 'updated',
+        }).catch((smsErr: unknown) => console.warn('Invoice updated but SMS sending failed:', smsErr));
       }
     },
 
@@ -1021,7 +1097,7 @@ export const api = {
         .from('grade_table_entries')
         .select(`
           passed,
-          student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, email),
+          student:profiles!grade_table_entries_student_id_fkey(first_name, last_name, email, phone),
           grade_table:grade_tables!grade_table_entries_grade_table_id_fkey(
             name,
             class:classes!grade_tables_class_id_fkey(title),
@@ -1047,7 +1123,7 @@ export const api = {
 
       if (error) throw new Error(error.message);
 
-      // Send grade email (non-blocking — don't fail the save if email errors)
+      // Send grade email + SMS (non-blocking — don't fail the save if notifications error)
       try {
         const student = (current as any)?.student;
         const gradeTable = (current as any)?.grade_table;
@@ -1066,9 +1142,49 @@ export const api = {
             mode: wasGraded ? 'updated' : 'submitted',
           });
         }
+        if (student?.phone && gradeTable) {
+          await api.gradeTables._sendGradeSms({
+            studentPhone: student.phone,
+            studentName: `${student.first_name} ${student.last_name}`,
+            examName: gradeTable.name || 'Exam',
+            className: gradeTable.class?.title || 'Class',
+            teacherName: gradeTable.teacher
+              ? `${gradeTable.teacher.first_name} ${gradeTable.teacher.last_name}`
+              : 'Teacher',
+            totalPoints,
+            passed,
+            note,
+            mode: wasGraded ? 'updated' : 'submitted',
+          }).catch((smsErr: unknown) => console.warn('Grade SMS failed:', smsErr));
+        }
       } catch (emailErr) {
         console.warn('Grade saved but email failed:', emailErr);
       }
+    },
+
+    /** Send a grade notification SMS via Edge Function */
+    _sendGradeSms: async (params: {
+      studentPhone: string;
+      studentName: string;
+      examName: string;
+      className: string;
+      teacherName: string;
+      totalPoints: number;
+      passed: boolean;
+      note?: string;
+      mode: 'submitted' | 'updated';
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-grade-sms`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify(params),
+        }
+      );
+      if (!res.ok) console.warn('send-grade-sms failed:', await res.text());
     },
 
     /** Send a grade notification email via Edge Function */
@@ -2626,9 +2742,98 @@ export const api = {
 
       return { id: data.id, firstName: data.first_name, lastName: data.last_name };
     },
+
+    /** Send reschedule/cancel email + SMS to all students enrolled in a class. */
+    sendClassUpdateNotifications: async (params: {
+      classId: string;
+      className: string;
+      originalDate: string;
+      updateType: 'rescheduled' | 'cancelled';
+      newDate?: string | null;
+      newStartTime?: string;
+      newEndTime?: string;
+      reason?: string;
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      // Fetch enrolled students (email + phone)
+      const { data: enrollments, error } = await supabase
+        .from('class_enrollments')
+        .select('student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)')
+        .eq('class_id', params.classId);
+
+      if (error || !enrollments?.length) return;
+
+      const notifPayload = {
+        className:    params.className,
+        originalDate: params.originalDate,
+        updateType:   params.updateType,
+        newDate:      params.newDate ?? undefined,
+        newStartTime: params.newStartTime,
+        newEndTime:   params.newEndTime,
+        reason:       params.reason,
+      };
+
+      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` };
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+
+      await Promise.allSettled(
+        enrollments.map(async (e: any) => {
+          const student = e.student;
+          if (!student) return;
+          const studentName = `${student.first_name} ${student.last_name}`.trim();
+
+          const sends: Promise<any>[] = [];
+
+          if (student.email) {
+            sends.push(
+              fetch(`${baseUrl}/send-class-update-email`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ ...notifPayload, studentEmail: student.email, studentName }),
+              }).catch(err => console.warn('send-class-update-email failed:', err))
+            );
+          }
+
+          if (student.phone) {
+            sends.push(
+              fetch(`${baseUrl}/send-class-update-sms`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ ...notifPayload, studentPhone: student.phone, studentName }),
+              }).catch(err => console.warn('send-class-update-sms failed:', err))
+            );
+          }
+
+          await Promise.allSettled(sends);
+        })
+      );
+    },
   },
 
   classAttendance: {
+    _sendLowAttendanceAlertSms: async (params: {
+      studentPhone: string;
+      studentName: string;
+      className: string;
+      attendanceRate: number;
+      presentCount: number;
+      totalCount: number;
+    }): Promise<void> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-attendance-alert-sms`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          body: JSON.stringify(params),
+        }
+      );
+      if (!res.ok) console.warn('send-attendance-alert-sms failed:', await res.text());
+    },
+
     _sendLowAttendanceAlertEmail: async (params: {
       studentEmail: string;
       studentName: string;
@@ -2729,7 +2934,7 @@ export const api = {
 
         const { data: studentProfile } = await supabase
           .from('profiles')
-          .select('first_name, last_name, email')
+          .select('first_name, last_name, email, phone')
           .eq('id', studentId)
           .maybeSingle();
 
@@ -2752,6 +2957,16 @@ export const api = {
           } catch (emailErr) {
             console.warn('Low-attendance alert email failed:', emailErr);
           }
+        }
+        if ((studentProfile as any)?.phone) {
+          api.classAttendance._sendLowAttendanceAlertSms({
+            studentPhone: (studentProfile as any).phone,
+            studentName: `${studentProfile!.first_name || ''} ${studentProfile!.last_name || ''}`.trim() || 'Student',
+            className: classRow?.title || 'Class',
+            attendanceRate: afterRate,
+            presentCount,
+            totalCount,
+          }).catch((smsErr: unknown) => console.warn('Low-attendance alert SMS failed:', smsErr));
         }
       }
     },

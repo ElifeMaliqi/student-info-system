@@ -341,14 +341,17 @@ export default function AdminCalendar() {
   const [rescheduleMode,  setRescheduleMode ] = useState(false);
   const [rescheduleForm,  setRescheduleForm ] = useState({ date: '', startTime: '', endTime: '' });
   const [rescheduleSaving,setRescheduleSaving] = useState(false);
+  const [rescheduleReason, setRescheduleReason] = useState('');
 
   // Single-class cancel confirm
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [cancelSaving,  setCancelSaving  ] = useState(false);
+  const [cancelReason,  setCancelReason  ] = useState('');
 
   // Bulk clear confirm (per degree)
   const [bulkClearProgramId, setBulkClearProgramId] = useState<string | null>(null);
   const [bulkClearing,       setBulkClearing       ] = useState(false);
+  const [bulkClearReason,    setBulkClearReason    ] = useState('');
 
   // Bulk reschedule flow
   const [bulkOpen,           setBulkOpen           ] = useState(false);
@@ -358,6 +361,7 @@ export default function AdminCalendar() {
   const [bulkCarouselIndex,  setBulkCarouselIndex  ] = useState(0);
   const [bulkForms,          setBulkForms          ] = useState<Map<string, { date: string; startTime: string; endTime: string }>>(new Map());
   const [bulkSaving,         setBulkSaving         ] = useState(false);
+  const [bulkReason,         setBulkReason         ] = useState('');
 
   const { t } = useLanguage();
   const { user } = useUser();
@@ -474,6 +478,8 @@ export default function AdminCalendar() {
     setDetailLoading(true);
     setRescheduleMode(false);
     setConfirmCancel(false);
+    setRescheduleReason('');
+    setCancelReason('');
     setRescheduleForm({ date: '', startTime: cls.startTime, endTime: cls.endTime });
     try {
       const [students, attendance] = await Promise.all([
@@ -494,19 +500,34 @@ export default function AdminCalendar() {
   async function handleReschedule() {
     if (!detailClass || !rescheduleForm.date) return;
     setRescheduleSaving(true);
+    const snapshot = { ...detailClass };
+    const newStartTime = rescheduleForm.startTime || detailClass.startTime;
+    const newEndTime   = rescheduleForm.endTime   || detailClass.endTime;
     try {
       await api.calendar.rescheduleClassOccurrence({
-        classId:      detailClass.classId,
-        sessionId:    detailClass.sessionId,
-        originalDate: detailClass.originalDate,
+        classId:      snapshot.classId,
+        sessionId:    snapshot.sessionId,
+        originalDate: snapshot.originalDate,
         newDate:      rescheduleForm.date,
-        newStartTime: rescheduleForm.startTime || detailClass.startTime,
-        newEndTime:   rescheduleForm.endTime   || detailClass.endTime,
+        newStartTime,
+        newEndTime,
+        reason:       rescheduleReason || undefined,
       });
-      const classes = await api.calendar.getClassesForDay(detailClass.originalDate);
+      void api.calendar.sendClassUpdateNotifications({
+        classId:      snapshot.classId,
+        className:    snapshot.className,
+        originalDate: snapshot.originalDate,
+        updateType:   'rescheduled',
+        newDate:      rescheduleForm.date,
+        newStartTime,
+        newEndTime,
+        reason:       rescheduleReason || undefined,
+      });
+      const classes = await api.calendar.getClassesForDay(snapshot.originalDate);
       setAdminDayClasses(classes);
       setDetailClass(null);
       setRescheduleMode(false);
+      setRescheduleReason('');
       void loadEvents();
     } catch (e) { console.error(e); }
     finally { setRescheduleSaving(false); }
@@ -516,16 +537,26 @@ export default function AdminCalendar() {
   async function handleCancelClass() {
     if (!detailClass) return;
     setCancelSaving(true);
+    const snapshot = { ...detailClass };
     try {
       await api.calendar.rescheduleClassOccurrence({
-        classId:      detailClass.classId,
-        sessionId:    detailClass.sessionId,
-        originalDate: detailClass.originalDate,
+        classId:      snapshot.classId,
+        sessionId:    snapshot.sessionId,
+        originalDate: snapshot.originalDate,
         newDate:      null,
+        reason:       cancelReason || undefined,
       });
-      const classes = await api.calendar.getClassesForDay(detailClass.originalDate);
+      void api.calendar.sendClassUpdateNotifications({
+        classId:      snapshot.classId,
+        className:    snapshot.className,
+        originalDate: snapshot.originalDate,
+        updateType:   'cancelled',
+        reason:       cancelReason || undefined,
+      });
+      const classes = await api.calendar.getClassesForDay(snapshot.originalDate);
       setAdminDayClasses(classes);
       setDetailClass(null);
+      setCancelReason('');
       void loadEvents();
     } catch (e) { console.error(e); }
     finally { setCancelSaving(false); setConfirmCancel(false); }
@@ -536,16 +567,28 @@ export default function AdminCalendar() {
     const cls = adminDayClasses.filter(c => c.programId === programId);
     if (!adminDayOpen || !cls.length) return;
     setBulkClearing(true);
+    const reason = bulkClearReason || undefined;
     try {
       await Promise.all(cls.map(c =>
         api.calendar.rescheduleClassOccurrence({
           classId: c.classId, sessionId: c.sessionId,
           originalDate: c.originalDate, newDate: null,
+          reason,
         })
       ));
+      cls.forEach(c => {
+        void api.calendar.sendClassUpdateNotifications({
+          classId:      c.classId,
+          className:    c.className,
+          originalDate: c.originalDate,
+          updateType:   'cancelled',
+          reason,
+        });
+      });
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen));
       setAdminDayClasses(classes);
       setBulkClearProgramId(null);
+      setBulkClearReason('');
       void loadEvents();
     } catch (e) { console.error(e); }
     finally { setBulkClearing(false); }
@@ -567,6 +610,7 @@ export default function AdminCalendar() {
   async function handleBulkSave() {
     if (!adminDayOpen) return;
     setBulkSaving(true);
+    const reason = bulkReason || undefined;
     try {
       await Promise.all(bulkSelectedList.map(cls => {
         const form = bulkForms.get(cls.classId);
@@ -577,11 +621,26 @@ export default function AdminCalendar() {
           newDate:      form?.date || null,
           newStartTime: form?.startTime,
           newEndTime:   form?.endTime,
+          reason,
         });
       }));
+      bulkSelectedList.forEach(cls => {
+        const form = bulkForms.get(cls.classId);
+        void api.calendar.sendClassUpdateNotifications({
+          classId:      cls.classId,
+          className:    cls.className,
+          originalDate: cls.originalDate,
+          updateType:   'rescheduled',
+          newDate:      form?.date || undefined,
+          newStartTime: form?.startTime,
+          newEndTime:   form?.endTime,
+          reason,
+        });
+      });
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen));
       setAdminDayClasses(classes);
       setBulkOpen(false);
+      setBulkReason('');
       void loadEvents();
     } catch (e) { console.error(e); }
     finally { setBulkSaving(false); }
@@ -997,9 +1056,19 @@ export default function AdminCalendar() {
                                 />
                               </div>
                             </div>
+                            <div>
+                              <FieldLabel>Reason (optional)</FieldLabel>
+                              <textarea
+                                value={rescheduleReason}
+                                onChange={e => setRescheduleReason(e.target.value)}
+                                placeholder="Why is this class being rescheduled?"
+                                rows={2}
+                                className={inputCls('resize-none')}
+                              />
+                            </div>
                             <div className="flex gap-2">
                               <button
-                                onClick={() => setRescheduleMode(false)}
+                                onClick={() => { setRescheduleMode(false); setRescheduleReason(''); }}
                                 className="px-4 py-2 rounded-lg text-sm border border-white/10 text-white/40 hover:text-white hover:border-white/20 transition-all"
                               >
                                 Cancel
@@ -1025,9 +1094,19 @@ export default function AdminCalendar() {
                               <br />
                               <span className="text-xs text-white/35">This only affects this single occurrence. Future classes are unaffected.</span>
                             </p>
+                            <div>
+                              <FieldLabel>Reason (optional)</FieldLabel>
+                              <textarea
+                                value={cancelReason}
+                                onChange={e => setCancelReason(e.target.value)}
+                                placeholder="Why is this class being cancelled?"
+                                rows={2}
+                                className={inputCls('resize-none')}
+                              />
+                            </div>
                             <div className="flex gap-2">
                               <button
-                                onClick={() => setConfirmCancel(false)}
+                                onClick={() => { setConfirmCancel(false); setCancelReason(''); }}
                                 className="px-4 py-2 rounded-lg text-sm border border-white/10 text-white/40 hover:text-white hover:border-white/20 transition-all"
                               >
                                 Keep it
@@ -1107,21 +1186,30 @@ export default function AdminCalendar() {
                                 {/* Bulk clear confirm */}
                                 {bulkClearProgramId === programId ? (
                                   <div className="px-3 pb-3">
-                                    <div className="p-3 rounded-xl border border-red-400/20 bg-red-400/5 flex items-center gap-3">
-                                      <p className="flex-1 text-xs text-white/60">
+                                    <div className="p-3 rounded-xl border border-red-400/20 bg-red-400/5 space-y-2">
+                                      <p className="text-xs text-white/60">
                                         Cancel all {classes.length} classes for this degree on this day?
                                       </p>
-                                      <button onClick={() => setBulkClearProgramId(null)} className="text-xs text-white/40 hover:text-white px-2 py-1 rounded-lg border border-white/10 hover:border-white/20 transition-all">
-                                        No
-                                      </button>
-                                      <button
-                                        onClick={() => void handleBulkClear(programId)}
-                                        disabled={bulkClearing}
-                                        className="text-xs text-red-400 px-3 py-1 rounded-lg border border-red-400/25 bg-red-400/10 hover:bg-red-400/20 disabled:opacity-50 transition-all flex items-center gap-1"
-                                      >
-                                        {bulkClearing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                                        Yes, clear
-                                      </button>
+                                      <textarea
+                                        value={bulkClearReason}
+                                        onChange={e => setBulkClearReason(e.target.value)}
+                                        placeholder="Reason (optional)"
+                                        rows={2}
+                                        className={inputCls('resize-none text-xs')}
+                                      />
+                                      <div className="flex gap-2">
+                                        <button onClick={() => { setBulkClearProgramId(null); setBulkClearReason(''); }} className="text-xs text-white/40 hover:text-white px-2 py-1 rounded-lg border border-white/10 hover:border-white/20 transition-all">
+                                          No
+                                        </button>
+                                        <button
+                                          onClick={() => void handleBulkClear(programId)}
+                                          disabled={bulkClearing}
+                                          className="text-xs text-red-400 px-3 py-1 rounded-lg border border-red-400/25 bg-red-400/10 hover:bg-red-400/20 disabled:opacity-50 transition-all flex items-center gap-1"
+                                        >
+                                          {bulkClearing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                                          Yes, clear
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
                                 ) : (
@@ -1306,6 +1394,20 @@ export default function AdminCalendar() {
                 })()
               )}
             </div>
+
+            {/* Reason field — shown in carousel phase on the last step */}
+            {bulkPhase === 'carousel' && bulkCarouselIndex === bulkSelectedList.length - 1 && (
+              <div className="px-6 pb-4">
+                <FieldLabel>Reason for rescheduling (optional)</FieldLabel>
+                <textarea
+                  value={bulkReason}
+                  onChange={e => setBulkReason(e.target.value)}
+                  placeholder="Why are these classes being rescheduled?"
+                  rows={2}
+                  className={inputCls('resize-none')}
+                />
+              </div>
+            )}
 
             {/* Footer */}
             <div className="px-6 py-4 border-t border-white/5 flex items-center justify-between gap-3">
