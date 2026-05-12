@@ -634,6 +634,7 @@ export default function Finance() {
             <button onClick={handleExportCsv} disabled={filtered.length === 0} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start">
               <Download className="w-4 h-4" />
               {t('common.export_csv')}
+            </button>
           </div>
 
           <div className="flex flex-wrap gap-2 items-center">
@@ -664,7 +665,12 @@ export default function Finance() {
 
             {hasActiveFilters && (
               <button onClick={clearAllFilters} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
-              {t('common.clear_all')}
+                {t('common.clear_all')}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="overflow-x-auto flex-1">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-white/30 gap-2"><Loader2 className="w-5 h-5 animate-spin" /></div>
           ) : filtered.length === 0 ? (
@@ -705,6 +711,7 @@ export default function Finance() {
                         <button onClick={() => setStatusInvoice(inv)} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border cursor-pointer hover:opacity-80 transition-opacity ${STATUS_BADGE[inv.status]}`}>
                           <Icon className="w-3 h-3" />
                           {t(STATUS_LABEL[inv.status])}
+                        </button>
                       </td>
                       <td className="py-4 text-right">
                         <div className="flex items-center justify-end gap-1">

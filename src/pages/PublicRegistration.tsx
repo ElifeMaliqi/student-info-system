@@ -276,7 +276,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
             className="flex items-center gap-3"
           >
             <img
-              src="/site-logo.png"
+              src="/logo/site-logo.png"
               alt="Future Minds Logo"
               className="h-8 object-contain"
               referrerPolicy="no-referrer"
@@ -303,7 +303,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
       <div className="flex-1 flex flex-col justify-center items-center p-6 lg:p-12 relative bg-grid">
         <div className="absolute top-8 left-8 lg:hidden">
           <img
-            src="/site-logo.png"
+            src="/logo/site-logo.png"
             alt="Future Minds Logo"
             className="h-6 object-contain"
             referrerPolicy="no-referrer"

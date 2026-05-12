@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload } from 'lucide-react';
+import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
@@ -43,6 +43,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // SMS templates
+  interface SmsTemplate { type: string; label: string; sms_body: string; variables: string[]; }
+  const [smsTemplates, setSmsTemplates] = useState<SmsTemplate[]>([]);
+  const [editedBodies, setEditedBodies] = useState<Record<string, string>>({});
+  const [savingTemplate, setSavingTemplate] = useState('');
+
   // UI state
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -53,6 +59,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const adminSections = [
     { id: 'profile', label: t('settings.profile'), icon: User },
     { id: 'platform', label: t('settings.platform'), icon: Building },
+    { id: 'messages', label: t('settings.messages'), icon: MessageSquare },
     { id: 'data', label: t('settings.data'), icon: Database },
   ];
 
@@ -65,6 +72,15 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   // Load data
   useEffect(() => {
     if (role === 'admin') {
+      supabase.from('message_templates').select('type, label, sms_body, variables').order('type').then(({ data }) => {
+        if (data) {
+          setSmsTemplates(data as SmsTemplate[]);
+          const bodies: Record<string, string> = {};
+          data.forEach((t: SmsTemplate) => { bodies[t.type] = t.sms_body; });
+          setEditedBodies(bodies);
+        }
+      });
+
       supabase.from('app_settings').select('*').limit(1).single().then(({ data }) => {
         if (data) {
           setAppSettings(data);
@@ -191,6 +207,23 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       showToast('error', err.message || t('settings.save_failed'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveTemplate = async (type: string) => {
+    setSavingTemplate(type);
+    try {
+      const { error } = await supabase
+        .from('message_templates')
+        .update({ sms_body: editedBodies[type] })
+        .eq('type', type);
+      if (error) throw error;
+      setSmsTemplates(prev => prev.map(t => t.type === type ? { ...t, sms_body: editedBodies[type] } : t));
+      showToast('success', t('settings.template_saved'));
+    } catch (err: any) {
+      showToast('error', err.message || t('settings.save_failed'));
+    } finally {
+      setSavingTemplate('');
     }
   };
 
@@ -451,6 +484,72 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                 </div>
               </div>
             </>
+          )}
+
+          {/* ===== MESSAGE TEMPLATES (admin only) ===== */}
+          {activeSection === 'messages' && role === 'admin' && (
+            <div className="space-y-6">
+              <div className="glass-card rounded-3xl p-6 lg:p-8">
+                <h2 className="font-display text-xl font-medium mb-1">
+                  <MessageSquare className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                  {t('settings.sms_templates')}
+                </h2>
+                <p className="text-white/40 text-sm mb-6">{t('settings.messages_desc')}</p>
+
+                {smsTemplates.length === 0 ? (
+                  <div className="flex items-center justify-center py-10 text-white/30 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Loading templates…
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {smsTemplates.map(tpl => (
+                      <div key={tpl.type} className="border border-white/8 rounded-2xl p-5 space-y-4 bg-white/[0.02]">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="text-sm font-semibold text-white">{tpl.label}</div>
+                            <div className="text-[11px] text-white/30 mt-0.5 font-mono">{tpl.type}</div>
+                          </div>
+                          <button
+                            onClick={() => handleSaveTemplate(tpl.type)}
+                            disabled={!!savingTemplate || editedBodies[tpl.type] === tpl.sms_body}
+                            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30"
+                          >
+                            {savingTemplate === tpl.type ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            {t('settings.save')}
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                            SMS Body
+                          </label>
+                          <textarea
+                            rows={8}
+                            className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white font-mono placeholder:text-white/20 resize-y leading-relaxed"
+                            value={editedBodies[tpl.type] ?? tpl.sms_body}
+                            onChange={e => setEditedBodies(prev => ({ ...prev, [tpl.type]: e.target.value }))}
+                          />
+                        </div>
+                        {tpl.variables?.length > 0 && (
+                          <div className="space-y-1.5">
+                            <div className="text-[11px] font-semibold text-white/40 uppercase tracking-widest ml-1">
+                              {t('settings.template_vars')}
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {tpl.variables.map((v: string) => (
+                                <span key={v} className="inline-flex items-center px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[11px] font-mono text-white/50">
+                                  {`{{${v}}}`}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
           {/* ===== DATA EXPORT (admin only) ===== */}

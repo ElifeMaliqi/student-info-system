@@ -718,6 +718,11 @@ const translations = {
     'settings.no_data_found': 'No data found.',
     'settings.exported': 'Exported successfully.',
     'settings.export_failed': 'Export failed.',
+    'settings.messages': 'Message Templates',
+    'settings.messages_desc': 'Customize SMS notifications sent to students and staff.',
+    'settings.sms_templates': 'SMS Templates',
+    'settings.template_vars': 'Available variables:',
+    'settings.template_saved': 'Template saved!',
   },
   AL: {
     // Navigation
@@ -1428,6 +1433,11 @@ const translations = {
     'settings.no_data_found': 'Asnjë të dhënë u gjet.',
     'settings.exported': 'Eksportuar me sukses.',
     'settings.export_failed': 'Eksportimi dështoi.',
+    'settings.messages': 'Shabllonet e Mesazheve',
+    'settings.messages_desc': 'Personalizoni njoftimet SMS dërguar studentëve dhe stafit.',
+    'settings.sms_templates': 'Shabllonet SMS',
+    'settings.template_vars': 'Variablat e disponueshme:',
+    'settings.template_saved': 'Shablloni u ruajt!',
   }
 };
 

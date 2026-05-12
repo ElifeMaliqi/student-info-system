@@ -98,7 +98,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             className="flex items-center gap-3"
           >
             <img 
-              src="/site-logo.png" 
+              src="/logo/site-logo.png" 
               alt="Future Minds Logo" 
               className="h-8 object-contain"
               referrerPolicy="no-referrer"

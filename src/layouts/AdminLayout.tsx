@@ -112,7 +112,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     <>
       <div className="h-20 flex items-center px-6 border-b border-white/5 shrink-0">
         <img 
-          src="/site-logo.png" 
+          src="/logo/site-logo.png" 
           alt="Future Minds Logo" 
           className="h-8 object-contain"
           referrerPolicy="no-referrer"

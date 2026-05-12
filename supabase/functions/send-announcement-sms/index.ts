@@ -168,9 +168,26 @@ Deno.serve(async (req: Request) => {
       uniqueCount: uniquePhones.length,
     });
 
-    // Compose SMS body (160 chars is 1 segment — keep it short)
-    const smsBody =
-      `[Future Minds] ${title}\n\n${content.length > 300 ? content.slice(0, 297) + "..." : content}\n\n— ${senderName}`;
+    // ── Fetch SMS template from DB (falls back to built-in default) ────────────
+    const { data: tplRow } = await supabaseAdmin
+      .from("message_templates")
+      .select("sms_body")
+      .eq("type", "announcement")
+      .single();
+
+    const defaultTemplate =
+      `Future Minds Academy\n\n{{title}}\n\n{{content}}\n\n— {{senderName}}\n\nIf you have any questions, please contact us and our team will assist you.`;
+    const template = tplRow?.sms_body ?? defaultTemplate;
+
+    // Truncate long content to keep the total message reasonable
+    const truncatedContent =
+      content.length > 400 ? content.slice(0, 397) + "…" : content;
+
+    const smsBody = interpolate(template, {
+      title,
+      content: truncatedContent,
+      senderName,
+    });
 
     // ── Send via Twilio Messages API ────────────────────────────────
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
@@ -258,4 +275,9 @@ function normalizePhone(raw: string): string {
   // Already bare international (383...)
   if (digits.startsWith("383")) return "+" + digits;
   return "+" + digits;
+}
+
+/** Replace {{variable}} placeholders with values from a record. */
+function interpolate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
 }
