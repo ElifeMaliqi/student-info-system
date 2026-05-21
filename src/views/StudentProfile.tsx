@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -61,6 +61,8 @@ export default function StudentProfile() {
   const [loading, setLoading] = useState(true);
   const [detailModal, setDetailModal] = useState<{ type: string; title: string; content: Record<string, string> } | null>(null);
   const [gradeModal, setGradeModal] = useState<ProjectGrade | null>(null);
+  const [archiveConfirm, setArchiveConfirm] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -125,6 +127,20 @@ export default function StudentProfile() {
   const passedCount = projectGrades.filter(g => g.passed === true).length;
   const failedCount = projectGrades.filter(g => g.passed === false).length;
 
+  async function handleArchive() {
+    if (!student) return;
+    setArchiving(true);
+    try {
+      await api.finance.archiveStudent(student.id);
+      router.push('/students');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setArchiving(false);
+      setArchiveConfirm(false);
+    }
+  }
+
   const attPresent = attendanceRecords.filter(r => r.status === 'present').length;
   const attLate = attendanceRecords.filter(r => r.status === 'late').length;
   const attAbsent = attendanceRecords.filter(r => r.status === 'absent').length;
@@ -147,10 +163,19 @@ export default function StudentProfile() {
           {t('profile.back')}
         </button>
         {!isTeacher && (
-          <button className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-            <Edit2 className="w-4 h-4" />
-            {t('profile.edit')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
+              <Edit2 className="w-4 h-4" />
+              {t('profile.edit')}
+            </button>
+            <button
+              onClick={() => setArchiveConfirm(true)}
+              className="px-4 py-2 rounded-xl border border-red-500/30 text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
+            >
+              <Archive className="w-4 h-4" />
+              Archive
+            </button>
+          </div>
         )}
       </div>
 
@@ -543,6 +568,64 @@ export default function StudentProfile() {
                       <p className="text-sm text-white/90">{gradeModal.note}</p>
                     </div>
                   )}
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Archive Confirmation Modal */}
+      <AnimatePresence>
+        {archiveConfirm && (
+          <>
+            <motion.div
+              key="archive-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !archiving && setArchiveConfirm(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              key="archive-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            >
+              <div
+                className="w-full max-w-sm bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl pointer-events-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="px-6 py-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="p-2 rounded-xl bg-red-500/10 border border-red-500/20">
+                      <AlertTriangle className="w-5 h-5 text-red-400" />
+                    </div>
+                    <h2 className="text-base font-semibold text-white">Archive Student</h2>
+                  </div>
+                  <p className="text-sm text-white/60 leading-relaxed">
+                    This will archive <span className="text-white font-medium">{student?.name}</span>, remove them from all classes, and hide their account. They can be re-activated later through the Registrations page.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 px-6 pb-5">
+                  <button
+                    onClick={() => setArchiveConfirm(false)}
+                    disabled={archiving}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/5 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleArchive}
+                    disabled={archiving}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-sm font-medium text-red-400 hover:bg-red-500/25 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
+                    {archiving ? 'Archiving…' : 'Archive'}
+                  </button>
                 </div>
               </div>
             </motion.div>

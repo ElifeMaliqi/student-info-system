@@ -20,6 +20,8 @@ export default function RegistrationApplications() {
   const [approveClasses, setApproveClasses] = useState<Class[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [loadingClasses, setLoadingClasses] = useState(false);
+  const [archivedClasses, setArchivedClasses] = useState<{ classId: string; classTitle: string; programId: string | null }[]>([]);
+  const [selectedRestoreClassIds, setSelectedRestoreClassIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadApplications();
@@ -43,6 +45,8 @@ export default function RegistrationApplications() {
     setRejectNotes('');
     setApproveClasses([]);
     setSelectedClassId('');
+    setArchivedClasses([]);
+    setSelectedRestoreClassIds(new Set());
   };
 
   const openApproveConfirm = async (app: RegistrationApplication, e: { stopPropagation: () => void }) => {
@@ -50,13 +54,20 @@ export default function RegistrationApplications() {
     setSelectedApp(app);
     setConfirmAction('approve');
     setSelectedClassId('');
-    if (app.role === 'student' && app.program) {
+    setArchivedClasses([]);
+    setSelectedRestoreClassIds(new Set());
+    if (app.role === 'student') {
       setLoadingClasses(true);
       try {
-        const classes = await api.classes.getByProgram(app.program);
+        const [classes, archived] = await Promise.all([
+          app.program ? api.classes.getByProgram(app.program) : Promise.resolve([]),
+          api.registrations.getArchivedClasses(app.email),
+        ]);
         setApproveClasses(classes);
+        setArchivedClasses(archived);
       } catch {
         setApproveClasses([]);
+        setArchivedClasses([]);
       } finally {
         setLoadingClasses(false);
       }
@@ -74,13 +85,17 @@ export default function RegistrationApplications() {
 
   const doApprove = async () => {
     if (!selectedApp) return;
-    if (selectedApp.role === 'student' && approveClasses.length > 0 && !selectedClassId) {
-      alert('Please select a class for this student.');
+    if (selectedApp.role === 'student' && approveClasses.length > 0 && !selectedClassId && selectedRestoreClassIds.size === 0) {
+      alert('Please select a class for this student, or choose previous classes to restore.');
       return;
     }
     try {
       setProcessingId(selectedApp.id);
-      await api.registrations.approve(selectedApp.id, selectedClassId || undefined);
+      await api.registrations.approve(
+        selectedApp.id,
+        selectedClassId || undefined,
+        Array.from(selectedRestoreClassIds),
+      );
       await loadApplications();
       closeModal();
     } catch (error) {
@@ -589,30 +604,63 @@ export default function RegistrationApplications() {
                   <p className="text-sm text-white/70">{t('registrations.confirm_approve_msg')}</p>
 
                   {selectedApp.role === 'student' && (
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider block">
-                        {t('registrations.assign_class')} {selectedApp.program && <span className="normal-case text-white/60">({selectedApp.program})</span>}
-                      </label>
+                    <div className="space-y-4">
+                      {/* Previously enrolled classes (archived) */}
                       {loadingClasses ? (
                         <div className="flex items-center gap-2 text-white/40 text-sm py-2">
                           <Loader2 className="w-4 h-4 animate-spin" /> {t('registrations.loading_classes')}
                         </div>
-                      ) : approveClasses.length === 0 ? (
-                        <p className="text-xs text-amber-400/80">{t('registrations.no_classes')}</p>
-                      ) : (
-                        <select
-                          value={selectedClassId}
-                          onChange={e => setSelectedClassId(e.target.value)}
-                          className="glass-select w-full px-4 py-3 rounded-xl text-sm"
-                        >
-                          <option value="">{t('registrations.select_class')}</option>
-                          {approveClasses.map(c => (
-                            <option key={c.id} value={c.id}>
-                              {c.title}{c.teacher ? ` — ${c.teacher.firstName} ${c.teacher.lastName}` : ''}{c.enrollmentCount != null ? ` (${c.enrollmentCount} students)` : ''}
-                            </option>
-                          ))}
-                        </select>
+                      ) : archivedClasses.length > 0 && (
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-white/40 uppercase tracking-wider block">
+                            Restore previous classes
+                          </label>
+                          <div className="space-y-1.5">
+                            {archivedClasses.map(cls => (
+                              <label key={cls.classId} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition-colors">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRestoreClassIds.has(cls.classId)}
+                                  onChange={e => {
+                                    setSelectedRestoreClassIds(prev => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.add(cls.classId);
+                                      else next.delete(cls.classId);
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-4 h-4 rounded accent-emerald-500"
+                                />
+                                <span className="text-sm text-white/80">{cls.classTitle}</span>
+                                {cls.programId && <span className="text-xs text-white/40 ml-auto">{cls.programId}</span>}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                       )}
+
+                      {/* Assign to a new class */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-white/40 uppercase tracking-wider block">
+                          {t('registrations.assign_class')} {selectedApp.program && <span className="normal-case text-white/60">({selectedApp.program})</span>}
+                        </label>
+                        {loadingClasses ? null : approveClasses.length === 0 ? (
+                          <p className="text-xs text-amber-400/80">{t('registrations.no_classes')}</p>
+                        ) : (
+                          <select
+                            value={selectedClassId}
+                            onChange={e => setSelectedClassId(e.target.value)}
+                            className="glass-select w-full px-4 py-3 rounded-xl text-sm"
+                          >
+                            <option value="">{t('registrations.select_class')}</option>
+                            {approveClasses.map(c => (
+                              <option key={c.id} value={c.id}>
+                                {c.title}{c.teacher ? ` — ${c.teacher.firstName} ${c.teacher.lastName}` : ''}{c.enrollmentCount != null ? ` (${c.enrollmentCount} students)` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
                     </div>
                   )}
 

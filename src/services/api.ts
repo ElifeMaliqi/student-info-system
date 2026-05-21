@@ -473,6 +473,33 @@ export const api = {
     },
 
     archiveStudent: async (studentId: string): Promise<void> => {
+      // 1. Snapshot current active enrollments so they can be restored on re-approval
+      const { data: enrollments } = await supabase
+        .from('class_enrollments')
+        .select('class_id, class:classes(title, program_id)')
+        .eq('student_id', studentId)
+        .eq('status', 'active');
+
+      if (enrollments && enrollments.length > 0) {
+        const rows = enrollments.map((e: any) => ({
+          student_id: studentId,
+          class_id: e.class_id,
+          class_title: (e.class as any)?.title ?? 'Unknown Class',
+          program_id: (e.class as any)?.program_id ?? null,
+        }));
+        // Save snapshot (upsert so re-archiving the same student doesn't duplicate rows)
+        await supabase
+          .from('student_archived_classes')
+          .upsert(rows, { onConflict: 'student_id,class_id' });
+
+        // 2. Remove from active class rosters
+        await supabase
+          .from('class_enrollments')
+          .delete()
+          .eq('student_id', studentId);
+      }
+
+      // 3. Archive the profile
       const { error } = await supabase
         .from('profiles')
         .update({ is_archived: true })
@@ -1714,13 +1741,29 @@ export const api = {
       attStats: { total: number; present: number; late: number; absent: number } | null;
     }[]> => {
       // 1. All student profiles
-      const { data: profiles, error: profErr } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url')
-        .eq('role', 'student')
-        .order('first_name');
-      if (profErr) throw new Error(profErr.message);
-      if (!profiles || profiles.length === 0) return [];
+      // Fetch profiles and pending-application emails in parallel
+      const [profilesResult, pendingAppsResult] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url')
+          .eq('role', 'student')
+          .eq('is_archived', false)
+          .order('first_name'),
+        supabase
+          .from('registration_applications')
+          .select('email')
+          .eq('status', 'pending'),
+      ]);
+      if (profilesResult.error) throw new Error(profilesResult.error.message);
+
+      // Build a set of emails with a pending re-application and exclude them
+      const pendingEmails = new Set(
+        (pendingAppsResult.data || []).map((a: any) => (a.email as string)?.toLowerCase())
+      );
+      const profiles = (profilesResult.data || []).filter(
+        (p: any) => !pendingEmails.has((p.email as string)?.toLowerCase())
+      );
+      if (profiles.length === 0) return [];
 
       const studentIds = profiles.map((p: any) => p.id);
 
@@ -2034,7 +2077,7 @@ export const api = {
       if (error) throw new Error(error.message);
     },
 
-    approve: async (applicationId: string, classId?: string) => {
+    approve: async (applicationId: string, classId?: string, restoreClassIds?: string[]) => {
       const { data, error } = await supabase.rpc('approve_registration_application', {
         application_id: applicationId,
       });
@@ -2042,13 +2085,51 @@ export const api = {
       if (error) throw new Error(error.message);
       if (!data?.success) throw new Error('Failed to approve application');
 
-      // Enroll the new student into the selected class
-      if (classId && data.user_id) {
+      // Enroll in new class + any previously-archived classes the admin chose to restore.
+      // Deduplicate so the same classId can't appear twice.
+      const allClassIds = Array.from(new Set([
+        ...(classId ? [classId] : []),
+        ...(restoreClassIds ?? []),
+      ]));
+
+      for (const cid of allClassIds) {
         const { error: enrollError } = await supabase
           .from('class_enrollments')
-          .insert([{ class_id: classId, student_id: data.user_id, status: 'active' }]);
-        if (enrollError) throw new Error(`Approved but failed to enroll in class: ${enrollError.message}`);
+          .insert([{ class_id: cid, student_id: data.user_id, status: 'active' }]);
+        // Ignore unique-constraint violations (student already in that class)
+        if (enrollError && !enrollError.message.includes('unique')) {
+          throw new Error(`Approved but failed to enroll in class: ${enrollError.message}`);
+        }
       }
+
+      // Clean up the archived-classes snapshot rows that were restored
+      if (data.user_id && restoreClassIds && restoreClassIds.length > 0) {
+        await supabase
+          .from('student_archived_classes')
+          .delete()
+          .eq('student_id', data.user_id)
+          .in('class_id', restoreClassIds);
+      }
+    },
+
+    getArchivedClasses: async (email: string): Promise<{ classId: string; classTitle: string; programId: string | null }[]> => {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email.toLowerCase())
+        .maybeSingle();
+      if (!profile) return [];
+
+      const { data } = await supabase
+        .from('student_archived_classes')
+        .select('class_id, class_title, program_id')
+        .eq('student_id', profile.id);
+
+      return (data ?? []).map((r: any) => ({
+        classId: r.class_id,
+        classTitle: r.class_title,
+        programId: r.program_id,
+      }));
     },
 
     reject: async (applicationId: string, notes?: string) => {
@@ -2123,7 +2204,9 @@ export const api = {
 
       // Insert as a pending application
       // Use a secure random temp password (will not be exposed in frontend bundle)
-      const tempPassword = crypto.randomUUID().substring(0, 16);
+      const tempPassword = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID().replace(/-/g, '').substring(0, 16)
+        : Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16));
       const fullPayload = {
         email:             enrollData.email,
         first_name:        enrollData.firstName,
@@ -3359,6 +3442,27 @@ export const api = {
     },
 
     enrollStudent: async (classId: string, studentId: string): Promise<ClassEnrollment> => {
+      // Bug 3: block enrollment for archived or pending-re-approval accounts
+      const { data: profileCheck } = await supabase
+        .from('profiles')
+        .select('is_archived, email')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (profileCheck?.is_archived) {
+        throw new Error('Cannot enroll an archived student. Please reactivate their account first.');
+      }
+      if (profileCheck?.email) {
+        const { data: pendingApp } = await supabase
+          .from('registration_applications')
+          .select('id')
+          .eq('email', profileCheck.email)
+          .eq('status', 'pending')
+          .maybeSingle();
+        if (pendingApp) {
+          throw new Error('Cannot enroll a student whose account is pending re-approval. Please approve their application first.');
+        }
+      }
+
       const { data: enrollmentData, error } = await supabase
         .from('class_enrollments')
         .insert([{

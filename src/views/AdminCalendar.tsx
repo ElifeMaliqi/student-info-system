@@ -1167,7 +1167,7 @@ export default function AdminCalendar() {
                                 <div className="p-3 space-y-1.5">
                                   {classes.map(cls => (
                                     <button
-                                      key={cls.classId}
+                                      key={cls.sessionId ?? `${cls.classId}-${cls.originalDate}-${cls.startTime}`}
                                       onClick={() => void openClassDetail(cls)}
                                       className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/5 transition-all text-left group"
                                     >

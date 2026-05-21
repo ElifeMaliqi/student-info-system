@@ -112,6 +112,9 @@ export default function Students() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const docFileRef = useRef<HTMLInputElement | null>(null);
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const [docDragOver, setDocDragOver] = useState(false);
 
   // ── CSV import review modal ────────────────────────────────────────────────
   const [csvPendingRows, setCsvPendingRows] = useState<CsvStudentRow[]>([]);
@@ -622,6 +625,7 @@ export default function Students() {
       });
       setEnrolledName(`${form.firstName.trim()} ${form.lastName.trim()}`);
       setForm(BLANK_FORM);
+      setDocFile(null);
       setView('success');
     } catch (err) {
       setEnrollError(err instanceof Error ? err.message : t('students.enrollment_failed'));
@@ -680,7 +684,7 @@ export default function Students() {
             <p className="text-white/50 text-sm">{t('students.manual_enrollment_desc')}</p>
           </div>
           <button
-            onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); }}
+            onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); setDocFile(null); }}
             className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
           >
             {t('students.cancel')}
@@ -820,10 +824,38 @@ export default function Students() {
             {/* Document upload (optional) */}
             <div className="pt-2 border-t border-white/5">
               <h3 className="text-sm font-medium mb-3">{t('students.doc_upload')} <span className="text-white/30 font-normal text-xs">(optional)</span></h3>
-              <div className="border-2 border-dashed border-white/10 rounded-2xl p-6 text-center hover:bg-white/5 hover:border-[#fc0ce4]/30 transition-colors cursor-pointer">
+              <input
+                ref={docFileRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                className="hidden"
+                onChange={e => setDocFile(e.target.files?.[0] ?? null)}
+              />
+              <div
+                onClick={() => docFileRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setDocDragOver(true); }}
+                onDragLeave={() => setDocDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setDocDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) setDocFile(file);
+                }}
+                className={`border-2 border-dashed rounded-2xl p-6 text-center transition-colors cursor-pointer ${
+                  docDragOver
+                    ? 'border-[#fc0ce4]/60 bg-[#fc0ce4]/5'
+                    : 'border-white/10 hover:bg-white/5 hover:border-[#fc0ce4]/30'
+                }`}
+              >
                 <FileText className="w-7 h-7 text-white/30 mx-auto mb-2" />
-                <p className="text-sm text-white/60">{t('students.drag_drop')}</p>
-                <p className="text-[11px] text-white/35 mt-1">{t('students.doc_types')}</p>
+                {docFile ? (
+                  <p className="text-sm text-white/80 font-medium truncate px-4">{docFile.name}</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-white/60">{t('students.drag_drop')}</p>
+                    <p className="text-[11px] text-white/35 mt-1">{t('students.doc_types')}</p>
+                  </>
+                )}
               </div>
             </div>
 
@@ -831,7 +863,7 @@ export default function Students() {
             <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
               <button
                 type="button"
-                onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); }}
+                onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); setDocFile(null); }}
                 className="px-6 py-3 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
               >
                 {t('students.cancel')}

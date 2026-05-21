@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { flushSync } from 'react-dom';
 import { motion } from 'motion/react';
 import { ArrowRight, Mail, Lock, Fingerprint } from 'lucide-react';
 import { PROGRAMS } from '../constants/programs';
@@ -68,11 +69,15 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       console.log('[Login] handleLogin called, email:', email);
       const result = await api.auth.login(email, password);
       console.log('[Login] api.auth.login returned, user:', result.user.id, result.user.role);
-      setUser({
-        ...result.user,
-        mustChangePassword: !!result.user.mustChangePassword,
+      // flushSync ensures the state update is committed before router.replace fires,
+      // preventing ProtectedLayout from seeing user=null and bouncing back to /auth.
+      flushSync(() => {
+        setUser({
+          ...result.user,
+          mustChangePassword: !!result.user.mustChangePassword,
+        });
       });
-      console.log('[Login] setUser called, calling onLogin()');
+      console.log('[Login] setUser committed, calling onLogin()');
       onLogin();
       console.log('[Login] onLogin() finished');
     } catch (err) {
@@ -145,7 +150,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         {/* Mobile Header */}
         <div className="absolute top-8 left-8 lg:hidden flex items-center gap-3">
           <img 
-            src="/site-logo.png" 
+            src="/logo/site-logo.png" 
             alt="Future Minds Logo" 
             className="h-6 object-contain"
             referrerPolicy="no-referrer"
