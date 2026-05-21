@@ -1,5 +1,7 @@
+'use client';
+
 import { useState, useEffect, ReactNode, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
@@ -33,10 +35,10 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const scrollRef = useRef<HTMLDivElement>(null);
   const { language, setLanguage, t } = useLanguage();
   const { user } = useUser();
-  const location = useLocation();
-  const navigate = useNavigate();
+  const pathname = usePathname();
+  const router = useRouter();
   
-  const activeTab = location.pathname.split('/').filter(Boolean)[0] || 'dashboard';
+  const activeTab = (pathname ?? '').split('/').filter(Boolean)[0] || 'dashboard';
 
   // Close mobile menu and scroll to top when tab changes
   useEffect(() => {
@@ -125,7 +127,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
         {navItems.map((item) => (
           <button
             key={item.id}
-            onClick={() => navigate(`/${item.id}`)}
+            onClick={() => router.push(`/${item.id}`)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
               activeTab === item.id 
                 ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
@@ -141,7 +143,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
           <>
             <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mt-8 mb-4 px-2">{t('nav.system')}</div>
             <button 
-              onClick={() => navigate('/settings')}
+              onClick={() => router.push('/settings')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
                 activeTab === 'settings' 
                   ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
@@ -155,7 +157,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
         )}
         {role !== 'admin' && (
           <button 
-            onClick={() => navigate('/settings')}
+            onClick={() => router.push('/settings')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 mt-4 ${
               activeTab === 'settings' 
                 ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
@@ -363,7 +365,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                           return (
                             <button
                               key={n.id}
-                              onClick={() => { setIsNotifOpen(false); navigate('/announcements'); }}
+                              onClick={() => { setIsNotifOpen(false); router.push('/announcements'); }}
                               className={`w-full text-left px-4 py-3 border-b transition-colors ${theme === 'dark' ? 'border-white/5 hover:bg-white/5' : 'border-gray-50 hover:bg-gray-50'}`}
                             >
                               <div className="flex items-start gap-3">
@@ -380,7 +382,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                       )}
                     </div>
                     <button
-                      onClick={() => { setIsNotifOpen(false); navigate('/announcements'); }}
+                      onClick={() => { setIsNotifOpen(false); router.push('/announcements'); }}
                       className={`w-full py-3 text-xs font-medium text-[#fc0ce4] hover:text-[#fc0ce4]/80 transition-colors border-t ${theme === 'dark' ? 'border-white/10' : 'border-gray-100'}`}
                     >
                       {t('layout.view_all_announcements')}
@@ -392,7 +394,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
             
             {role === 'admin' && (
               <button
-                onClick={() => navigate('/students?enroll=1')}
+                onClick={() => router.push('/students?enroll=1')}
                 className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
               >
                 <Plus className="w-4 h-4 hidden sm:block" />

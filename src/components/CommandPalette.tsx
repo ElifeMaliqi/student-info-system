@@ -1,7 +1,9 @@
+'use client';
+
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Home, Users, CreditCard, Settings, User, BookOpen, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 
 type Props = {
@@ -12,7 +14,7 @@ export function CommandPalette({ role }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
+  const router = useRouter();
   const { t } = useLanguage();
 
   useEffect(() => {
@@ -67,7 +69,7 @@ export function CommandPalette({ role }: Props) {
   );
 
   const handleSelect = (path: string) => {
-    navigate(path);
+    router.push(path);
     setIsOpen(false);
   };
 

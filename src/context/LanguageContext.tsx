@@ -1,4 +1,6 @@
-﻿import { createContext, useContext, useState, ReactNode } from 'react';
+'use client';
+
+import { createContext, useContext, useState, ReactNode } from 'react';
 
 type Language = 'EN' | 'AL';
 
@@ -529,7 +531,7 @@ const translations = {
     'layout.notifications': 'Notifications',
     'layout.loading': 'Loading…',
     'layout.no_announcements': 'No announcements yet',
-    'layout.view_all_announcements': 'View all announcements →',
+    'layout.view_all_announcements': 'View all announcements ?',
     'layout.announcement_count': '{n} announcement(s)',
     'layout.help_faq': 'Help & FAQ',
 
@@ -629,7 +631,7 @@ const translations = {
     'programs.save_class': 'Save Class',
     'programs.select_teacher': 'Select Teacher',
     'programs.no_classes_degree': 'No classes found for this degree...',
-    'programs.back_to_classes': '← Back to Classes',
+    'programs.back_to_classes': '? Back to Classes',
     'programs.day_monday': 'Monday',
     'programs.day_tuesday': 'Tuesday',
     'programs.day_wednesday': 'Wednesday',
@@ -1244,7 +1246,7 @@ const translations = {
     'layout.notifications': 'Njoftimet',
     'layout.loading': 'Duke ngarkuar…',
     'layout.no_announcements': 'Asnjë lajmërim ende',
-    'layout.view_all_announcements': 'Shiko të gjitha lajmërimet →',
+    'layout.view_all_announcements': 'Shiko të gjitha lajmërimet ?',
     'layout.announcement_count': '{n} lajmërim(e)',
     'layout.help_faq': 'Ndihmë & Pyetje',
 
@@ -1344,7 +1346,7 @@ const translations = {
     'programs.save_class': 'Ruaj Klasën',
     'programs.select_teacher': 'Zgjidh Mësuesin',
     'programs.no_classes_degree': 'Asnjë klasë e gjetur për këtë diplomë...',
-    'programs.back_to_classes': '← Kthehu te Klasat',
+    'programs.back_to_classes': '? Kthehu te Klasat',
     'programs.day_monday': 'E Hënë',
     'programs.day_tuesday': 'E Martë',
     'programs.day_wednesday': 'E Mërkurë',

@@ -221,7 +221,7 @@ export const api = {
       if (!session) return;
       const functionName = params.mode === 'updated' ? 'send-invoice-changed-sms' : 'send-invoice-sms';
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${functionName}`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${functionName}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -247,7 +247,7 @@ export const api = {
       if (!session) throw new Error('Not authenticated');
 
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-invoice-email`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-invoice-email`,
         {
           method: 'POST',
           headers: {
@@ -1177,7 +1177,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-grade-sms`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-grade-sms`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -1202,7 +1202,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-grade-email`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-grade-email`,
         {
           method: 'POST',
           headers: {
@@ -1423,7 +1423,7 @@ export const api = {
 
       try {
         const res = await fetch(
-          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-announcement-email`,
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-announcement-email`,
           {
             method: 'POST',
             headers: {
@@ -2776,7 +2776,7 @@ export const api = {
       };
 
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` };
-      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+      const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`;
 
       await Promise.allSettled(
         enrollments.map(async (e: any) => {
@@ -2824,7 +2824,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-attendance-alert-sms`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-attendance-alert-sms`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -2846,7 +2846,7 @@ export const api = {
       if (!session) throw new Error('Not authenticated');
 
       const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-attendance-alert-email`,
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-attendance-alert-email`,
         {
           method: 'POST',
           headers: {

@@ -1,0 +1,38 @@
+[SKIP]   src\components\ClassAttendanceModal.tsx
+[SKIP]   src\components\CommandPalette.tsx
+[SKIP]   src\components\Skeleton.tsx
+[SKIP]   src\components\SlideOver.tsx
+[SKIP]   src\context\LanguageContext.tsx
+[SKIP]   src\context\UserContext.tsx
+[SKIP]   src\layouts\AdminLayout.tsx
+[SKIP]   src\pages\AdminCalendar.tsx
+[SKIP]   src\pages\AdminGrades.tsx
+[SKIP]   src\pages\AdminPrograms.tsx
+[SKIP]   src\pages\Announcements.tsx
+[SKIP]   src\pages\Attendance.tsx
+[SKIP]   src\pages\Dashboard.tsx
+[SKIP]   src\pages\Finance.tsx
+[SKIP]   src\pages\ForcePasswordChange.tsx
+[SKIP]   src\pages\Login.tsx
+[SKIP]   src\pages\PublicRegistration.tsx
+[SKIP]   src\pages\RegistrationApplications.tsx
+[SKIP]   src\pages\ResetPassword.tsx
+[SKIP]   src\pages\Settings.tsx
+[SKIP]   src\pages\StudentAttendance.tsx
+[SKIP]   src\pages\StudentCalendar.tsx
+[SKIP]   src\pages\StudentDashboard.tsx
+[SKIP]   src\pages\StudentGrades.tsx
+[SKIP]   src\pages\StudentInvoices.tsx
+[SKIP]   src\pages\StudentProfile.tsx
+[SKIP]   src\pages\Students.tsx
+[SKIP]   src\pages\StudentWaitingPage.tsx
+[SKIP]   src\pages\TeacherCalendar.tsx
+[SKIP]   src\pages\TeacherClasses.tsx
+[SKIP]   src\pages\TeacherDashboard.tsx
+[SKIP]   src\pages\TeacherGrading.tsx
+[SKIP]   src\pages\TeacherStudents.tsx
+[SKIP]   src\App.tsx
+[SKIP]   src\main.tsx
+
+Total .tsx files processed: 35
+OK: supabase.ts does NOT have 'use client' (correct).
