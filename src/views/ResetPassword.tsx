@@ -9,8 +9,6 @@ type Step = 'verify' | 'choose' | 'newPassword' | 'success';
 
 export default function ResetPassword() {
   const router = useRouter();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-
   // The secret token from the email link (#t=...). 
   // Fragments are never sent to servers, keeping the token private
   const accessToken = typeof window !== 'undefined' ? window.location.hash.slice(1).split('=')[1] ?? '' : '';
@@ -44,7 +42,7 @@ export default function ResetPassword() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/verify-identity-reset-password`, {
+      const res = await fetch('/api/notify/verify-identity-reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, firstName, lastName, parentName, phone, accessToken }),
@@ -71,7 +69,7 @@ export default function ResetPassword() {
 
     setIsLoading(true);
     try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/verify-identity-reset-password`, {
+      const res = await fetch('/api/notify/verify-identity-reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, firstName, lastName, parentName, phone, accessToken, newPassword: password }),

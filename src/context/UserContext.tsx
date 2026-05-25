@@ -1,8 +1,18 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User } from '../types';
+import { User, Role } from '../types';
 import { supabase } from '../lib/supabase';
+
+type ProfileRow = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  role: Role;
+  avatar_url: string | null;
+  email: string | null;
+  must_change_password: boolean | null;
+};
 
 interface UserContextType {
   user: User | null;
@@ -24,12 +34,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     const loadProfile = async (authUser: { id: string; email?: string | null }): Promise<User | null> => {
-      const { data: profile } = await supabase
+      const { data } = await supabase
         .from('profiles')
         .select('id, first_name, last_name, role, avatar_url, email, must_change_password')
         .eq('id', authUser.id)
         .maybeSingle();
 
+      const profile = data as ProfileRow | null;
       if (!profile) return null;
 
       return {
@@ -48,10 +59,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
       try {
         console.log('[UserContext] hydrateUser starting, calling getSession...');
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        console.log('[UserContext] getSession done, error:', sessionError?.message || 'none', 'hasSession:', !!sessionData?.session);
+        console.log('[UserContext] getSession done, error:', sessionError?.message ?? 'none', 'hasSession:', !!sessionData?.session);
 
         if (sessionError) {
-          if (/invalid refresh token|refresh token not found/i.test(sessionError.message || '')) {
+          const errMsg = (sessionError as { message?: string })?.message || '';
+          if (/invalid refresh token|refresh token not found/i.test(errMsg)) {
             console.log('[UserContext] invalid refresh token, signing out locally');
             await supabase.auth.signOut({ scope: 'local' });
           }

@@ -1,6 +1,5 @@
--- Run this SQL in your Supabase dashboard (SQL Editor)
--- Go to: https://supabase.com/dashboard → Your Project → SQL Editor → New Query
--- Then paste this entire script and click "Run"
+-- Classes/enrollments migration (also applied via: npm run db:migrate)
+-- For AWS RDS, use the migration runner instead of running this file alone.
 
 -- Create classes table
 CREATE TABLE IF NOT EXISTS classes (

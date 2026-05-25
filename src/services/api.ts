@@ -26,16 +26,28 @@ export const api = {
         throw new Error(error.message);
       }
 
-      if (!data.user || !data.session) {
+      if (!data?.user || !data?.session) {
         throw new Error('Authentication failed');
       }
 
-      console.log('[api.auth.login] auth OK, fetching profile for:', data.user.id);
-      const { data: profile, error: profileError } = await supabase
+      const authUser = data.user;
+      const session = data.session;
+
+      console.log('[api.auth.login] auth OK, fetching profile for:', authUser.id);
+      const { data: profileRow, error: profileError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', data.user.id)
+        .eq('id', authUser.id)
         .maybeSingle();
+      const profile = profileRow as {
+        id: string;
+        email: string;
+        first_name: string;
+        last_name: string;
+        role: string;
+        avatar_url: string | null;
+        must_change_password: boolean | null;
+      } | null;
       console.log('[api.auth.login] profile fetch done, error:', profileError?.message || 'none', 'profile:', profile?.id || 'null');
 
       if (profileError) {
@@ -50,14 +62,14 @@ export const api = {
       return {
         user: {
           id: profile.id,
-          email: data.user.email!,
+          email: authUser.email || profile.email,
           firstName: profile.first_name,
           lastName: profile.last_name,
           role: profile.role as Role,
           avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email}`,
           mustChangePassword: !!profile.must_change_password,
         },
-        token: data.session.access_token
+        token: session.access_token
       };
     },
 
@@ -221,7 +233,7 @@ export const api = {
       if (!session) return;
       const functionName = params.mode === 'updated' ? 'send-invoice-changed-sms' : 'send-invoice-sms';
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${functionName}`,
+        `/api/notify/${functionName}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -247,7 +259,7 @@ export const api = {
       if (!session) throw new Error('Not authenticated');
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-invoice-email`,
+        `/api/notify/send-invoice-email`,
         {
           method: 'POST',
           headers: {
@@ -1204,7 +1216,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-grade-sms`,
+        `/api/notify/send-grade-sms`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -1229,7 +1241,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-grade-email`,
+        `/api/notify/send-grade-email`,
         {
           method: 'POST',
           headers: {
@@ -1450,7 +1462,7 @@ export const api = {
 
       try {
         const res = await fetch(
-          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-announcement-email`,
+          `/api/notify/send-announcement-email`,
           {
             method: 'POST',
             headers: {
@@ -1818,7 +1830,9 @@ export const api = {
 
         if (!studentRowsErr && studentRows && studentRows.length > 0) {
           const studentTableIds = studentRows.map((s: any) => s.id);
-          const byStudentsId = new Map(studentRows.map((s: any) => [s.id, s.user_id]));
+          const byStudentsId = new Map<string, string>(
+            (studentRows as { id: string; user_id: string }[]).map((s) => [s.id, s.user_id])
+          );
 
           const { data: legacyRows, error: legacyErr } = await supabase
             .from('attendance')
@@ -2859,7 +2873,7 @@ export const api = {
       };
 
       const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` };
-      const baseUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1`;
+      const baseUrl = `/api/notify`;
 
       await Promise.allSettled(
         enrollments.map(async (e: any) => {
@@ -2907,7 +2921,7 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-attendance-alert-sms`,
+        `/api/notify/send-attendance-alert-sms`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -2929,7 +2943,7 @@ export const api = {
       if (!session) throw new Error('Not authenticated');
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-attendance-alert-email`,
+        `/api/notify/send-attendance-alert-email`,
         {
           method: 'POST',
           headers: {

@@ -131,14 +131,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
       const path = `${user.id}/avatar.${ext}`;
 
-      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
+      const { data: upData, error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
         upsert: true,
         contentType: file.type,
       });
       if (upErr) throw upErr;
 
-      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
-      const publicUrl = urlData.publicUrl + '?t=' + Date.now(); // cache-bust
+      const publicUrl = ((upData as { publicUrl?: string })?.publicUrl || path) + '?t=' + Date.now();
 
       // Save to profile
       await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id);

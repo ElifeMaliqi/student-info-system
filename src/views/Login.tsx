@@ -33,7 +33,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
     setIsLoading(true);
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-reset-access-code`, {
+      await fetch('/api/notify/send-reset-access-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
