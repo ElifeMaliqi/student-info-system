@@ -20,8 +20,36 @@ interface EmbedSpec {
   alias: string;
   table: string;
   localKey: string;
+  remoteKey: string;
+  many: boolean;
   columns: string;
   nested?: EmbedSpec[];
+}
+
+const RELATION_OVERRIDES: Record<string, { localKey: string; remoteKey: string; many: boolean }> = {
+  'calendar_event_participants.profiles': { localKey: 'user_id', remoteKey: 'id', many: false },
+  'calendar_events.calendar_event_participants': { localKey: 'id', remoteKey: 'event_id', many: true },
+  'class_enrollments.classes': { localKey: 'class_id', remoteKey: 'id', many: false },
+  'classes.class_enrollments': { localKey: 'id', remoteKey: 'class_id', many: true },
+  'classes.class_sessions': { localKey: 'id', remoteKey: 'class_id', many: true },
+};
+
+function singularTableName(table: string): string {
+  if (table === 'classes') return 'class';
+  if (table.endsWith('ies')) return `${table.slice(0, -3)}y`;
+  if (table.endsWith('s')) return table.slice(0, -1);
+  return table;
+}
+
+function inferRelation(parentTable: string, table: string): { localKey: string; remoteKey: string; many: boolean } {
+  const override = RELATION_OVERRIDES[`${parentTable}.${table}`];
+  if (override) return override;
+
+  return {
+    localKey: `${singularTableName(table)}_id`,
+    remoteKey: 'id',
+    many: false,
+  };
 }
 
 function parseSelectSpec(select: string, parentTable: string): { columns: string[]; embeds: EmbedSpec[] } {
@@ -47,6 +75,8 @@ function parseSelectSpec(select: string, parentTable: string): { columns: string
   for (const part of parts) {
     const embedMatch = part.match(/^(\w+):(\w+)!(\w+)\(([\s\S]*)\)$/);
     const embedMatch2 = part.match(/^(\w+)!(\w+)\(([\s\S]*)\)$/);
+    const embedMatch3 = part.match(/^(\w+):(\w+)\(([\s\S]*)\)$/);
+    const embedMatch4 = part.match(/^(\w+)\(([\s\S]*)\)$/);
     if (embedMatch) {
       const [, alias, table, constraint, inner] = embedMatch;
       const parsed = parseSelectSpec(inner, table);
@@ -54,6 +84,8 @@ function parseSelectSpec(select: string, parentTable: string): { columns: string
         alias,
         table,
         localKey: localKeyFromConstraint(parentTable, constraint),
+        remoteKey: 'id',
+        many: false,
         columns: parsed.columns.join(', ') || '*',
         nested: parsed.embeds,
       });
@@ -64,6 +96,30 @@ function parseSelectSpec(select: string, parentTable: string): { columns: string
         alias: table,
         table,
         localKey: localKeyFromConstraint(parentTable, constraint),
+        remoteKey: 'id',
+        many: false,
+        columns: parsed.columns.join(', ') || '*',
+        nested: parsed.embeds,
+      });
+    } else if (embedMatch3) {
+      const [, alias, table, inner] = embedMatch3;
+      const parsed = parseSelectSpec(inner, table);
+      const relation = inferRelation(parentTable, table);
+      embeds.push({
+        alias,
+        table,
+        ...relation,
+        columns: parsed.columns.join(', ') || '*',
+        nested: parsed.embeds,
+      });
+    } else if (embedMatch4) {
+      const [, table, inner] = embedMatch4;
+      const parsed = parseSelectSpec(inner, table);
+      const relation = inferRelation(parentTable, table);
+      embeds.push({
+        alias: table,
+        table,
+        ...relation,
         columns: parsed.columns.join(', ') || '*',
         nested: parsed.embeds,
       });
@@ -158,19 +214,39 @@ async function attachEmbeds(
       for (const emb of embeds) {
         const fkVal = row[emb.localKey];
         if (fkVal == null) {
-          out[emb.alias] = null;
+          out[emb.alias] = emb.many ? [] : null;
           continue;
         }
-        const cols = emb.columns === '*' ? '*' : emb.columns;
-        const { rows: childRows } = await client.query(
-          `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent('id')} = $1 LIMIT 1`,
-          [fkVal]
-        );
-        let child = childRows[0] as Row | undefined;
-        if (child && emb.nested?.length) {
-          [child] = await attachEmbeds(client, [child], emb.table, emb.nested);
+        if (emb.many) {
+          if (emb.columns === 'count') {
+            const { rows: countRows } = await client.query(
+              `SELECT COUNT(*)::int AS count FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1`,
+              [fkVal]
+            );
+            out[emb.alias] = [{ count: countRows[0]?.count ?? 0 }];
+            continue;
+          }
+
+          const cols = emb.columns === '*' ? '*' : emb.columns;
+          const { rows: childRows } = await client.query(
+            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1`,
+            [fkVal]
+          );
+          out[emb.alias] = emb.nested?.length
+            ? await attachEmbeds(client, childRows as Row[], emb.table, emb.nested)
+            : childRows;
+        } else {
+          const cols = emb.columns === '*' ? '*' : emb.columns;
+          const { rows: childRows } = await client.query(
+            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1 LIMIT 1`,
+            [fkVal]
+          );
+          let child = childRows[0] as Row | undefined;
+          if (child && emb.nested?.length) {
+            [child] = await attachEmbeds(client, [child], emb.table, emb.nested);
+          }
+          out[emb.alias] = child ?? null;
         }
-        out[emb.alias] = child ?? null;
       }
       return out;
     })

@@ -271,6 +271,45 @@ export interface GradeTableEntry {
   previousFailedExams: number;
 }
 
+// Roles and Permissions System
+export interface SystemRole {
+  id: string;
+  name: string;
+  description?: string;
+  isSystemRole: boolean;
+  createdAt: string;
+  updatedAt: string;
+  permissions?: RolePermission[];
+}
+
+export interface RolePermission {
+  id: string;
+  roleId: string;
+  module: string;
+  actions: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoleModule {
+  module: string;
+  actions: string[];
+}
+
+export interface UserWithRole {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: Role;
+  roleId?: string;
+  systemRole?: SystemRole;
+  isArchived: boolean;
+  mustChangePassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A class occurrence on a specific calendar date, used in the admin day modal. */
 export interface AdminDayClass {
   classId: string;

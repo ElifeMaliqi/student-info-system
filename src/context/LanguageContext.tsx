@@ -25,6 +25,8 @@ const translations = {
     'nav.invoices': 'Invoices',
     'nav.main_menu': 'Main Menu',
     'nav.system': 'System',
+    'nav.roles': 'Roles',
+    'nav.users': 'Users',
     'nav.logout': 'Logout',
     
     // Header
@@ -740,6 +742,8 @@ const translations = {
     'nav.invoices': 'Faturat',
     'nav.main_menu': 'Menyja Kryesore',
     'nav.system': 'Sistemi',
+    'nav.roles': 'Rolet',
+    'nav.users': 'Përdoruesit',
     'nav.logout': 'Dil',
     
     // Header

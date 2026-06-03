@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
-  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList
+  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
+  ShieldCheck, UserCog
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -38,7 +39,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const pathname = usePathname();
   const router = useRouter();
   
-  const activeTab = (pathname ?? '').split('/').filter(Boolean)[0] || 'dashboard';
+  const activePath = pathname ?? '';
+  const activeTab = activePath.split('/').filter(Boolean)[0] || 'dashboard';
 
   // Close mobile menu and scroll to top when tab changes
   useEffect(() => {
@@ -109,6 +111,13 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   ];
 
   const navItems = role === 'admin' ? adminNavItems : role === 'teacher' ? teacherNavItems : studentNavItems;
+  const adminSystemItems = [
+    { id: 'roles', label: t('nav.roles'), icon: ShieldCheck, path: '/superadmin/roles' },
+    { id: 'users', label: t('nav.users'), icon: UserCog, path: '/superadmin/users' },
+    { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
+  ];
+  const isNavActive = (item: { id: string; path?: string }) =>
+    item.path ? activePath === item.path || activePath.startsWith(`${item.path}/`) : activeTab === item.id;
 
   const SidebarContent = () => (
     <>
@@ -124,35 +133,44 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
       <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-4 px-2">{t('nav.main_menu')}</div>
         
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => router.push(`/${item.id}`)}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
-              activeTab === item.id 
-                ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
-                : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <item.icon className={`w-4 h-4 ${activeTab === item.id ? 'text-[#fc0ce4]' : 'text-white/40'}`} />
-            {item.label}
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const active = isNavActive(item);
+          return (
+            <button
+              key={item.id}
+              onClick={() => router.push(`/${item.id}`)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
+                active
+                  ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20'
+                  : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              <item.icon className={`w-4 h-4 ${active ? 'text-[#fc0ce4]' : 'text-white/40'}`} />
+              {item.label}
+            </button>
+          );
+        })}
 
         {role === 'admin' && (
           <>
             <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mt-8 mb-4 px-2">{t('nav.system')}</div>
-            <button 
-              onClick={() => router.push('/settings')}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
-                activeTab === 'settings' 
-                  ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
-                  : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <Settings className={`w-4 h-4 ${activeTab === 'settings' ? 'text-[#fc0ce4]' : 'text-white/40'}`} />
-              {t('nav.settings')}
-            </button>
+            {adminSystemItems.map((item) => {
+              const active = isNavActive(item);
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => router.push(item.path)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${
+                    active
+                      ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20'
+                      : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <item.icon className={`w-4 h-4 ${active ? 'text-[#fc0ce4]' : 'text-white/40'}`} />
+                  {item.label}
+                </button>
+              );
+            })}
           </>
         )}
         {role !== 'admin' && (
