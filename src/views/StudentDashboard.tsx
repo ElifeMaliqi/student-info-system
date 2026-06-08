@@ -51,8 +51,7 @@ export default function StudentDashboard() {
         const { data: enrollments } = await supabase
           .from('class_enrollments')
           .select('class:classes(title, program_id)')
-          .eq('student_id', user.id)
-          .eq('status', 'active');
+          .eq('student_id', user.id);
         const courses = enrollments || [];
         if (courses.length > 0) {
           const prog = (courses[0].class as any)?.program_id;

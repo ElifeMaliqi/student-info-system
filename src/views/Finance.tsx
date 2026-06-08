@@ -115,7 +115,11 @@ export default function Finance() {
   async function loadAll() {
     setLoading(true);
     try {
-      await api.finance.syncInvoices();
+      try {
+        await api.finance.syncInvoices();
+      } catch (syncErr) {
+        console.error('Invoice sync error (non-fatal):', syncErr);
+      }
       const [inv, st, sett] = await Promise.all([
         api.finance.getInvoices(),
         api.finance.getStats(),

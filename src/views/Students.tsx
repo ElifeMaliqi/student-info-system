@@ -330,12 +330,12 @@ export default function Students() {
         const row: Record<string, string> = {};
         headers.forEach((header, idx) => { row[header] = (cols[idx] || '').trim(); });
 
-        const firstName = getHeaderValue(row, ['first_name', 'firstName']);
-        const lastName = getHeaderValue(row, ['last_name', 'lastName']);
-        const parentFirstName = getHeaderValue(row, ['parent_first_name', 'parentFirstName']);
+        const firstName = getHeaderValue(row, ['first_name', 'firstName', 'first name', 'firstname']);
+        const lastName = getHeaderValue(row, ['last_name', 'lastName', 'last name', 'lastname']);
+        const parentFirstName = getHeaderValue(row, ['parent_first_name', 'parentFirstName', 'parent first name', 'parent name', 'parent_name']);
         const email = getHeaderValue(row, ['email']);
-        const phone = getHeaderValue(row, ['phone', 'phone_number']);
-        const secondaryPhone = getHeaderValue(row, ['secondary_phone', 'secondaryPhone']);
+        const phone = getHeaderValue(row, ['phone', 'phone_number', 'phone number']);
+        const secondaryPhone = getHeaderValue(row, ['secondary_phone', 'secondaryPhone', 'secondary phone', 'secondary_phone_number']);
         const location = getHeaderValue(row, ['location']);
         const program = getHeaderValue(row, ['degree', 'program']);
 
@@ -977,7 +977,7 @@ export default function Students() {
 
           <div className="flex flex-wrap gap-2 items-center">
             <select value={filterProgram} onChange={e => { setFilterProgram(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">All Programs</option>
+              <option value="">All Degrees</option>
               {studentFilterOptions.programs.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
             <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">

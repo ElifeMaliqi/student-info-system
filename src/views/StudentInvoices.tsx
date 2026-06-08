@@ -66,7 +66,9 @@ export default function StudentInvoices() {
   const totalPaid = useMemo(() => invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0), [invoices]);
   const pendingBalance = useMemo(() => invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + i.amount, 0), [invoices]);
   const nextDue = useMemo(() => {
-    const upcoming = invoices.filter(i => i.status !== 'paid').sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const upcoming = invoices
+      .filter(i => i.status !== 'paid' && i.dueDate)
+      .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!));
     return upcoming.length > 0 ? fmtDate(upcoming[0].dueDate) : '-';
   }, [invoices]);
 

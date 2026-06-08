@@ -125,7 +125,8 @@ export default function StudentAttendance() {
         ) : (
           <div className="space-y-2">
             {filtered.map((r, i) => {
-              const dateObj = new Date(`${r.date}T12:00:00`);
+              const rawDate = r.date ? String(r.date).slice(0, 10) : '';
+              const dateObj = rawDate ? new Date(`${rawDate}T12:00:00`) : null;
               const statusIcon = r.status === 'present'
                 ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 : r.status === 'late'
@@ -138,16 +139,16 @@ export default function StudentAttendance() {
                 <div key={`${r.classId}-${r.date}-${i}`} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-colors">
                   <div className="w-10 text-center shrink-0">
                     <div className="text-xs font-bold text-white/60">
-                      {dateObj.toLocaleDateString('en-US', { month: 'short' })}
+                      {dateObj ? dateObj.toLocaleDateString('en-US', { month: 'short' }) : '—'}
                     </div>
                     <div className="text-lg font-display font-medium leading-none">
-                      {dateObj.getDate()}
+                      {dateObj ? String(dateObj.getDate()) : '—'}
                     </div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-white/80 truncate">{r.className}</div>
                     <div className="text-xs text-white/30 mt-0.5">
-                      {dateObj.toLocaleDateString('en-US', { weekday: 'long' })}
+                      {dateObj ? dateObj.toLocaleDateString('en-US', { weekday: 'long' }) : ''}
                     </div>
                   </div>
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${statusColor}`}>

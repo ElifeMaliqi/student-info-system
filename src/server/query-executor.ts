@@ -32,6 +32,7 @@ const RELATION_OVERRIDES: Record<string, { localKey: string; remoteKey: string; 
   'class_enrollments.classes': { localKey: 'class_id', remoteKey: 'id', many: false },
   'classes.class_enrollments': { localKey: 'id', remoteKey: 'class_id', many: true },
   'classes.class_sessions': { localKey: 'id', remoteKey: 'class_id', many: true },
+  'grade_tables.grade_table_entries': { localKey: 'id', remoteKey: 'grade_table_id', many: true },
 };
 
 function singularTableName(table: string): string {
@@ -125,6 +126,12 @@ function parseSelectSpec(select: string, parentTable: string): { columns: string
       });
     } else {
       columns.push(part);
+    }
+  }
+  // When explicit scalar columns are listed, ensure FK columns needed by embeds are present
+  if (columns.length > 0) {
+    for (const emb of embeds) {
+      if (!columns.includes(emb.localKey)) columns.push(emb.localKey);
     }
   }
   return { columns: columns.length ? columns : ['*'], embeds };

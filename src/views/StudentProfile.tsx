@@ -660,7 +660,6 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
       )
     `)
     .eq('student_id', profileId)
-    .eq('status', 'active')
     .limit(1)
     .maybeSingle();
 
@@ -710,8 +709,7 @@ async function loadClassEnrollments(profileId: string): Promise<ClassEnrollmentI
         program_id
       )
     `)
-    .eq('student_id', profileId)
-    .eq('status', 'active');
+    .eq('student_id', profileId);
 
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) return [];

@@ -564,7 +564,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
                     { table: 'profiles', label: t('settings.export_profiles') },
-                    { table: 'enrollments', label: t('settings.export_enrollments') },
+                    { table: 'registration_applications', label: t('settings.export_enrollments') },
                     { table: 'attendance', label: t('settings.export_attendance') },
                     { table: 'invoices', label: t('settings.export_invoices') },
                     { table: 'grade_table_entries', label: t('settings.export_grades') },

@@ -348,11 +348,10 @@ export const api = {
 
     /* ─── Per-student overrides ─── */
     getStudentsForSettings: async (): Promise<SettingsStudent[]> => {
-      // Active enrollments with student + class info (exclude archived profiles)
+      // All enrollments with student + class info (exclude archived profiles via JS filter below)
       const { data: enrollments, error } = await supabase
         .from('class_enrollments')
-        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, is_archived)')
-        .eq('status', 'active');
+        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, is_archived)');
       if (error || !enrollments) return [];
 
       // Filter out archived students
@@ -435,7 +434,6 @@ export const api = {
             teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
           )
         `)
-        .eq('status', 'active')
         .order('id', { ascending: true });
       if (error) throw new Error(error.message);
 
@@ -617,15 +615,14 @@ export const api = {
       const ovrMap = new Map<string, any>();
       for (const o of (overrides || [])) ovrMap.set(o.student_id, o);
 
-      // 3. Active enrollments with class info
+      // 3. All enrollments with class info (no status filter — same approach as SMS dedup fix)
       const { data: enrollments, error: eErr } = await supabase
         .from('class_enrollments')
-        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)')
-        .eq('status', 'active');
+        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
-      // 4. Existing auto invoices (manual invoices don't block auto-generation for the same month)
-      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year').eq('is_manual', false);
+      // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one
+      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
       const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
 
       // 5. Compute missing invoices
@@ -656,6 +653,7 @@ export const api = {
         mode: 'created' | 'updated';
       }> = [];
       for (const enr of enrollments) {
+        if (!enr.enrolled_at) continue;
         const enrolled = new Date(enr.enrolled_at);
         let y = enrolled.getFullYear();
         let m = enrolled.getMonth() + 1;
@@ -1432,8 +1430,7 @@ export const api = {
         const { data } = await supabase
           .from('class_enrollments')
           .select('class_id, class:classes(program_id)')
-          .eq('student_id', userId)
-          .eq('status', 'active');
+          .eq('student_id', userId);
         studentClassIds = (data || []).map((e: any) => e.class_id).filter(Boolean);
         studentProgramIds = [...new Set((data || []).map((e: any) => e.class?.program_id).filter(Boolean))] as string[];
       }
@@ -1814,8 +1811,7 @@ export const api = {
             program_id
           )
         `)
-        .in('student_id', studentIds)
-        .eq('status', 'active');
+        .in('student_id', studentIds);
       if (enrErr) throw new Error(enrErr.message);
 
       // 3. Attendance stats (non-fatal — table may not exist yet)
@@ -2562,49 +2558,125 @@ export const api = {
         ...(studentClasses || []).map((sc: any) => sc.class)
       ].filter(Boolean);
 
+      const toDateStr = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+      const normDateUser = (d: unknown): string | null => {
+        if (!d) return null;
+        const s = String(d);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const dt = new Date(s);
+        return isNaN(dt.getTime()) ? null : toDateStr(dt);
+      };
+
+      const rangeStart = toDateStr(new Date(year, month - 1, 20));
+      const rangeEnd   = toDateStr(new Date(year, month + 1, 10));
+
+      let reschedules: any[] = [];
+      try {
+        const classIds = allClasses.map((c: any) => c.id);
+        if (classIds.length > 0) {
+          const [orig, moved] = await Promise.all([
+            supabase.from('class_reschedules').select('*').gte('original_date', rangeStart).lte('original_date', rangeEnd),
+            supabase.from('class_reschedules').select('*').gte('new_date', rangeStart).lte('new_date', rangeEnd),
+          ]);
+          const seen = new Set<string>();
+          for (const r of [...(orig.data || []), ...(moved.data || [])]) {
+            if (classIds.includes(r.class_id) && !seen.has(r.id)) {
+              seen.add(r.id);
+              reschedules.push(r);
+            }
+          }
+        }
+      } catch { /* class_reschedules may not exist yet */ }
+
+      const rescheduleByOriginal = new Map<string, any>();
+      for (const r of reschedules) {
+        const k = normDateUser(r.original_date);
+        if (k) rescheduleByOriginal.set(`${r.class_id}::${k}`, r);
+      }
+
       const calendarEvents: CalendarEvent[] = [];
 
-      allClasses.forEach((cls: any) => {
-        if (!cls.class_sessions) return;
+      for (const cls of allClasses) {
+        if (!cls.class_sessions) continue;
 
-        cls.class_sessions.forEach((session: any) => {
-          // Create event for each week in the month
+        for (const session of cls.class_sessions) {
           const current = new Date(year, month, 1);
           while (current <= endDate) {
-            // Convert JS getDay() (0=Sun) to match stored day_of_week (0=Mon from AdminPrograms)
             if ((current.getDay() + 6) % 7 === session.day_of_week) {
-              const [startHour, startMin] = session.start_time.split(':').map(Number);
-              const [endHour, endMin] = session.end_time.split(':').map(Number);
-
-              const eventStart = new Date(current);
-              eventStart.setHours(startHour, startMin, 0);
-              const eventEnd = new Date(current);
-              eventEnd.setHours(endHour, endMin, 0);
-
-              calendarEvents.push({
-                id: `class-${cls.id}-${session.id}-${current.getTime()}`,
-                title: cls.title,
-                description: `${cls.program_id} | Teacher: ${cls.teacher?.first_name} ${cls.teacher?.last_name}`,
-                start_time: eventStart.toISOString(),
-                end_time: eventEnd.toISOString(),
-                all_day: false,
-                color: '#3b82f6',
-                event_type: 'class',
-                class_id: cls.id,
-                created_by: cls.teacher_id,
-                creator_profile: cls.teacher ? {
-                  firstName: cls.teacher.first_name,
-                  lastName: cls.teacher.last_name,
-                  email: cls.teacher.email,
-                  avatar: cls.teacher.avatar_url
-                } : undefined,
-                participants: []
-              });
+              const dateStr = toDateStr(current);
+              const reschedule = rescheduleByOriginal.get(`${cls.id}::${dateStr}`);
+              if (!reschedule) {
+                const [startHour, startMin] = session.start_time.split(':').map(Number);
+                const [endHour, endMin] = session.end_time.split(':').map(Number);
+                const eventStart = new Date(current); eventStart.setHours(startHour, startMin, 0);
+                const eventEnd   = new Date(current); eventEnd.setHours(endHour, endMin, 0);
+                calendarEvents.push({
+                  id: `class-${cls.id}-${session.id}-${current.getTime()}`,
+                  title: cls.title,
+                  description: `${cls.program_id} | Teacher: ${cls.teacher?.first_name} ${cls.teacher?.last_name}`,
+                  start_time: eventStart.toISOString(),
+                  end_time: eventEnd.toISOString(),
+                  all_day: false,
+                  color: '#3b82f6',
+                  event_type: 'class',
+                  class_id: cls.id,
+                  created_by: cls.teacher_id,
+                  creator_profile: cls.teacher ? {
+                    firstName: cls.teacher.first_name,
+                    lastName: cls.teacher.last_name,
+                    email: cls.teacher.email,
+                    avatar: cls.teacher.avatar_url
+                  } : undefined,
+                  participants: []
+                });
+              }
+              // else: cancelled or moved away — skip original slot
             }
             current.setDate(current.getDate() + 1);
           }
+        }
+      }
+
+      // Add rescheduled occurrences landing in this month
+      for (const r of reschedules) {
+        if (!r.new_date) continue;
+        const ndStr = normDateUser(r.new_date);
+        if (!ndStr) continue;
+        const newDate = new Date(ndStr + 'T12:00:00');
+        if (newDate.getFullYear() !== year || newDate.getMonth() !== month) continue;
+        const cls = allClasses.find((c: any) => c.id === r.class_id);
+        if (!cls) continue;
+        const sh = r.new_start_time ? parseInt(r.new_start_time.split(':')[0]) : 9;
+        const sm = r.new_start_time ? parseInt(r.new_start_time.split(':')[1]) : 0;
+        const eh = r.new_end_time   ? parseInt(r.new_end_time.split(':')[0])   : 10;
+        const em = r.new_end_time   ? parseInt(r.new_end_time.split(':')[1])   : 0;
+        const es = new Date(newDate); es.setHours(sh, sm, 0);
+        const ee = new Date(newDate); ee.setHours(eh, em, 0);
+        calendarEvents.push({
+          id: `class-rescheduled-${r.id}`,
+          title: `↪ ${cls.title}`,
+          description: `${cls.program_id} | Teacher: ${cls.teacher?.first_name} ${cls.teacher?.last_name}`,
+          start_time: es.toISOString(),
+          end_time: ee.toISOString(),
+          all_day: false,
+          color: '#f59e0b',
+          event_type: 'class',
+          class_id: cls.id,
+          created_by: cls.teacher_id,
+          creator_profile: cls.teacher ? {
+            firstName: cls.teacher.first_name,
+            lastName: cls.teacher.last_name,
+            email: cls.teacher.email,
+            avatar: cls.teacher.avatar_url
+          } : undefined,
+          participants: []
         });
-      });
+      }
 
       return calendarEvents;
     },
@@ -2763,28 +2835,35 @@ export const api = {
         `);
       if (error) throw new Error(error.message);
 
-      // Reschedules affecting this date
-      let reschedules: any[] = [];
-      try {
-        const [orig, moved] = await Promise.all([
-          supabase.from('class_reschedules').select('*').eq('original_date', date),
-          supabase.from('class_reschedules').select('*').eq('new_date', date),
-        ]);
-        reschedules = [...(orig.data || []), ...(moved.data || [])];
-      } catch { /* class_reschedules may not exist yet */ }
+      // Reschedules affecting this date — normalize DB date strings (may be ISO timestamp or YYYY-MM-DD)
+      const normDate = (d: unknown): string | null => {
+        if (!d) return null;
+        const s = String(d);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const dt = new Date(s);
+        if (isNaN(dt.getTime())) return null;
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      };
 
       const cancelledClassIds = new Set<string>();
       const movedAwayClassIds  = new Set<string>();
       const movedHere: any[]   = [];
 
-      for (const r of reschedules) {
-        if (r.original_date === date) {
-          if (r.new_date === null || r.new_date === date) cancelledClassIds.add(r.class_id);
+      try {
+        const [orig, moved] = await Promise.all([
+          supabase.from('class_reschedules').select('*').eq('original_date', date),
+          supabase.from('class_reschedules').select('*').eq('new_date', date),
+        ]);
+        const origIds = new Set((orig.data || []).map((r: any) => r.id));
+        for (const r of (orig.data || [])) {
+          const normNewDate = normDate(r.new_date);
+          if (normNewDate === null || normNewDate === date) cancelledClassIds.add(r.class_id);
           else movedAwayClassIds.add(r.class_id);
-        } else if (r.new_date === date) {
-          movedHere.push(r);
         }
-      }
+        for (const r of (moved.data || [])) {
+          if (!origIds.has(r.id)) movedHere.push(r);
+        }
+      } catch { /* class_reschedules may not exist yet */ }
 
       const result: AdminDayClass[] = [];
 
@@ -2976,13 +3055,22 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // Fetch enrolled students (email + phone)
+      // Fetch enrolled students (email + phone) — include student_id for deduplication
       const { data: enrollments, error } = await supabase
         .from('class_enrollments')
-        .select('student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)')
+        .select('student_id, student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)')
         .eq('class_id', params.classId);
 
       if (error || !enrollments?.length) return;
+
+      // Deduplicate by student_id so each student receives at most one notification
+      const seenStudentIds = new Set<string>();
+      const uniqueEnrollments = (enrollments as any[]).filter(e => {
+        const sid = e.student_id;
+        if (!sid || seenStudentIds.has(sid)) return false;
+        seenStudentIds.add(sid);
+        return true;
+      });
 
       const notifPayload = {
         className:    params.className,
@@ -2998,7 +3086,7 @@ export const api = {
       const baseUrl = `/api/notify`;
 
       await Promise.allSettled(
-        enrollments.map(async (e: any) => {
+        uniqueEnrollments.map(async (e: any) => {
           const student = e.student;
           if (!student) return;
           const studentName = `${student.first_name} ${student.last_name}`.trim();
@@ -3088,13 +3176,12 @@ export const api = {
       return Math.round((present / rows.length) * 100);
     },
 
-    /** Enrolled (active) students for a class. */
+    /** Enrolled students for a class. */
     getStudentsForClass: async (classId: string): Promise<{ id: string; name: string; avatar: string }[]> => {
       const { data, error } = await supabase
         .from('class_enrollments')
         .select('student_id, student:profiles!class_enrollments_student_id_fkey(id, first_name, last_name, avatar_url)')
-        .eq('class_id', classId)
-        .eq('status', 'active');
+        .eq('class_id', classId);
       if (error) throw new Error(error.message);
       return (data || []).map((e: any) => ({
         id:     e.student.id,
@@ -3201,7 +3288,7 @@ export const api = {
       return (data || []).map((r: any) => ({
         classId:   r.class_id,
         className: r.class?.title || 'Unknown Class',
-        date:      r.date,
+        date:      r.date ? String(r.date).slice(0, 10) : '',
         status:    r.status,
       }));
     },
@@ -3873,7 +3960,7 @@ export const api = {
           query: `
             WITH new_profile AS (
               INSERT INTO profiles (id, email, first_name, last_name, role, must_change_password)
-              VALUES (gen_random_uuid(), lower(trim($1)), $2, $3, $4, false)
+              VALUES (gen_random_uuid(), lower(trim($1)), $2, $3, $4, true)
               RETURNING id, email, first_name, last_name, role, is_archived, must_change_password, created_at, updated_at
             ),
             new_auth AS (

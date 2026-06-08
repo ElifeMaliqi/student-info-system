@@ -543,8 +543,7 @@ async function supabaseFetchClassStudents(classId: string): Promise<{ id: string
       student_id,
       student:profiles!class_enrollments_student_id_fkey(id, first_name, last_name, avatar_url)
     `)
-    .eq('class_id', classId)
-    .eq('status', 'active');
+    .eq('class_id', classId);
 
   if (error) throw new Error(error.message);
 
