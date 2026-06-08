@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import { useEffect } from 'react';
 import { useUser } from '../../../context/UserContext';
 import TeacherGrading from '../../../views/TeacherGrading';
 import { useRouter } from 'next/navigation';
@@ -7,7 +8,13 @@ import { useRouter } from 'next/navigation';
 export default function GradingPage() {
   const { user } = useUser();
   const router = useRouter();
-  if (user?.role === 'teacher') return <TeacherGrading />;
-  router.replace('/dashboard');
-  return null;
+
+  const canView = user?.role === 'teacher';
+
+  useEffect(() => {
+    if (user && !canView) router.replace('/dashboard');
+  }, [user, canView, router]);
+
+  if (!user || !canView) return null;
+  return <TeacherGrading />;
 }

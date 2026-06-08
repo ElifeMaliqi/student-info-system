@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 
 type Props = {
-  role: 'admin' | 'teacher' | 'student';
+  role: 'admin' | 'teacher' | 'student' | 'superadmin';
 };
 
 export function CommandPalette({ role }: Props) {

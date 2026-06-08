@@ -4,11 +4,13 @@ import { useState, useEffect, useMemo, Fragment } from 'react';
 import { motion } from 'motion/react';
 import { Search, Loader2, ClipboardList, CheckCircle, XCircle, Filter, Pencil } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { GradeTable, GradeTableEntry } from '../types';
 
 export default function AdminGrades() {
   const { t } = useLanguage();
+  const { isOverridden: permOverridden, canUpdate } = useModulePermissions('grades');
   const [tables, setTables] = useState<GradeTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -263,7 +265,7 @@ export default function AdminGrades() {
                                 </td>
                                 <td className="py-2.5 text-right text-white/40 text-xs">{entry.gradedAt || '—'}</td>
                                 <td className="py-2.5 text-right">
-                                  {!isEditing ? (
+                                  {(!permOverridden || canUpdate) && (!isEditing ? (
                                     <button
                                       onClick={() => {
                                         setEditingEntryId(entry.id);
@@ -285,7 +287,7 @@ export default function AdminGrades() {
                                     >
                                       {t('common.cancel')}
                                     </button>
-                                  )}
+                                  ))}
                                 </td>
                               </tr>
                               {isEditing && (

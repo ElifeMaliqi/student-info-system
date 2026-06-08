@@ -317,9 +317,13 @@ export async function executeQuery(
       const values = rows.flatMap((r) => keys.map((k) => r[k]));
       let sql = `INSERT INTO ${table} (${cols}) VALUES ${placeholders}`;
       if (req.action === 'upsert' && req.onConflict) {
-        const conflict = quoteIdent(req.onConflict);
-        const updates = keys.filter((k) => k !== req.onConflict).map((k) => `${quoteIdent(k)} = EXCLUDED.${quoteIdent(k)}`).join(', ');
-        sql += ` ON CONFLICT (${conflict}) DO UPDATE SET ${updates}`;
+        const conflictCols = req.onConflict.split(',').map((s) => quoteIdent(s.trim()));
+        const conflictColNames = req.onConflict.split(',').map((s) => s.trim());
+        const updates = keys
+          .filter((k) => !conflictColNames.includes(k))
+          .map((k) => `${quoteIdent(k)} = EXCLUDED.${quoteIdent(k)}`)
+          .join(', ');
+        sql += ` ON CONFLICT (${conflictCols.join(', ')}) DO UPDATE SET ${updates}`;
       }
       sql += ' RETURNING *';
       const { rows: inserted } = await client.query(sql, values);
@@ -358,9 +362,24 @@ export async function executeRpc(
 ): Promise<{ data: unknown; error: { message: string } | null }> {
   try {
     if (fn === 'approve_registration_application') {
+      // Superadmin callers must proxy through an admin because the DB function
+      // checks that the caller has role = 'admin'.
+      let effectiveUserId = userId;
+      if (userId) {
+        const { rows: callerRows } = await client.query(
+          `SELECT role FROM profiles WHERE id = $1`,
+          [userId]
+        );
+        if (callerRows[0]?.role === 'superadmin') {
+          const { rows: adminRows } = await client.query(
+            `SELECT id FROM profiles WHERE role = 'admin' AND (is_archived = false OR is_archived IS NULL) LIMIT 1`
+          );
+          if (adminRows[0]) effectiveUserId = adminRows[0].id;
+        }
+      }
       const { rows } = await client.query(
         `SELECT approve_registration_application($1::uuid, $2::uuid) AS result`,
-        [args.application_id, userId]
+        [args.application_id, effectiveUserId]
       );
       return { data: rows[0]?.result, error: null };
     }

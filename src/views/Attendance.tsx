@@ -8,7 +8,7 @@ import {
   GraduationCap, ArrowUpDown,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent } from '../types';
 import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
@@ -32,6 +32,7 @@ type SortCol = 'date' | 'rate' | 'present' | 'late' | 'absent';
 export default function Attendance() {
   const { t } = useLanguage();
   const { user } = useUser();
+  const { isOverridden: permOverridden, canUpdate } = useModulePermissions('attendance');
 
   const [sessions, setSessions]           = useState<AttendanceSession[]>([]);
   const [loading, setLoading]             = useState(true);
@@ -385,8 +386,8 @@ export default function Attendance() {
                     return (
                       <tr
                         key={`${s.classId}-${s.date}-${i}`}
-                        onClick={() => openModal(s)}
-                        className="border-b border-white/5 hover:bg-white/[0.02] transition-colors group cursor-pointer"
+                        onClick={(!permOverridden || canUpdate) ? () => openModal(s) : undefined}
+                        className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors group ${(!permOverridden || canUpdate) ? 'cursor-pointer' : ''}`}
                       >
                         <td className="py-3.5 pl-4">
                           <div className="font-medium text-white/90 text-sm">

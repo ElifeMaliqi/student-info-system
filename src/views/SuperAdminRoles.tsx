@@ -17,9 +17,14 @@ const AVAILABLE_MODULES = [
   'analytics',
   'settings',
   'grades',
+  'finance',
+  'attendance',
+  'registrations',
+  'calendar',
+  'invoices',
 ];
 
-const AVAILABLE_ACTIONS = ['create', 'read', 'update', 'delete', 'deactivate'];
+const AVAILABLE_ACTIONS = ['read', 'create', 'update', 'delete'];
 
 export const SuperAdminRoles: React.FC = () => {
   const [roles, setRoles] = useState<SystemRole[]>([]);
@@ -29,6 +34,7 @@ export const SuperAdminRoles: React.FC = () => {
   const [editingRole, setEditingRole] = useState<SystemRole | null>(null);
   const [formData, setFormData] = useState<RoleFormData>({ name: '', description: '' });
   const [selectedPermissions, setSelectedPermissions] = useState<Record<string, string[]>>({});
+  const [disabledModules, setDisabledModules] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -53,14 +59,21 @@ export const SuperAdminRoles: React.FC = () => {
       setEditingRole(role);
       setFormData({ name: role.name, description: role.description || '' });
       const permissions: Record<string, string[]> = {};
+      const disabled = new Set<string>();
       (role.permissions || []).forEach((permission: any) => {
-        permissions[permission.module] = permission.actions || [];
+        if ((permission.actions || []).includes('deactivate')) {
+          disabled.add(permission.module);
+        } else {
+          permissions[permission.module] = permission.actions || [];
+        }
       });
       setSelectedPermissions(permissions);
+      setDisabledModules(disabled);
     } else {
       setEditingRole(null);
       setFormData({ name: '', description: '' });
       setSelectedPermissions({});
+      setDisabledModules(new Set());
     }
     setShowModal(true);
   };
@@ -70,6 +83,7 @@ export const SuperAdminRoles: React.FC = () => {
     setEditingRole(null);
     setFormData({ name: '', description: '' });
     setSelectedPermissions({});
+    setDisabledModules(new Set());
   };
 
   const handleSaveRole = async () => {
@@ -92,9 +106,11 @@ export const SuperAdminRoles: React.FC = () => {
         roleId,
         AVAILABLE_MODULES.map(module => ({
           module,
-          actions: selectedPermissions[module] || [],
+          actions: disabledModules.has(module) ? ['deactivate'] : (selectedPermissions[module] || []),
         })),
       );
+
+      try { const bc = new BroadcastChannel('sis_permissions_update'); bc.postMessage({ type: 'role_updated' }); bc.close(); } catch {}
 
       setSuccess(`Role ${editingRole ? 'updated' : 'created'} successfully`);
       handleCloseModal();
@@ -121,11 +137,13 @@ export const SuperAdminRoles: React.FC = () => {
 
   const toggleAction = (module: string, action: string) => {
     setSelectedPermissions(prev => {
-      const current = prev[module] || [];
-      const updated = current.includes(action)
-        ? current.filter(item => item !== action)
-        : [...current, action];
-      return { ...prev, [module]: updated };
+      const current = new Set(prev[module] || []);
+      if (current.has(action)) {
+        current.delete(action);
+      } else {
+        current.add(action);
+      }
+      return { ...prev, [module]: Array.from(current) };
     });
   };
 
@@ -198,11 +216,15 @@ export const SuperAdminRoles: React.FC = () => {
                         <div key={permission.module} className="rounded-xl bg-white/[0.03] border border-white/5 px-3 py-2">
                           <div className="text-xs font-semibold text-white/70 capitalize mb-1">{permission.module}</div>
                           <div className="flex flex-wrap gap-1.5">
-                            {permission.actions.map(action => (
-                              <span key={`${permission.module}-${action}`} className="text-[11px] px-2 py-0.5 rounded-lg bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20 capitalize">
-                                {action}
-                              </span>
-                            ))}
+                            {permission.actions.includes('deactivate') ? (
+                              <span className="text-[11px] px-2 py-0.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">Deactivated</span>
+                            ) : (
+                              permission.actions.map(action => (
+                                <span key={`${permission.module}-${action}`} className="text-[11px] px-2 py-0.5 rounded-lg bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20 capitalize">
+                                  {action}
+                                </span>
+                              ))
+                            )}
                           </div>
                         </div>
                       ))}
@@ -272,30 +294,57 @@ export const SuperAdminRoles: React.FC = () => {
               <div>
                 <label className="block text-xs font-semibold text-white/40 uppercase tracking-widest mb-3">Permissions</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {AVAILABLE_MODULES.map(module => (
-                    <div key={module} className="rounded-2xl bg-white/[0.03] border border-white/5 p-4">
-                      <h4 className="font-medium text-sm capitalize mb-3">{module}</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {AVAILABLE_ACTIONS.map(action => {
-                          const checked = (selectedPermissions[module] || []).includes(action);
-                          return (
-                            <button
-                              key={`${module}-${action}`}
-                              type="button"
-                              onClick={() => toggleAction(module, action)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border capitalize transition-all ${
-                                checked
-                                  ? 'bg-[#fc0ce4]/15 border-[#fc0ce4]/35 text-[#fc0ce4]'
-                                  : 'bg-white/5 border-white/10 text-white/45 hover:text-white hover:border-white/20'
-                              }`}
-                            >
-                              {action}
-                            </button>
-                          );
-                        })}
+                  {AVAILABLE_MODULES.map(module => {
+                    const isDisabled = disabledModules.has(module);
+                    return (
+                      <div key={module} className={`rounded-2xl border p-4 transition-colors ${isDisabled ? 'bg-red-500/[0.03] border-red-500/15' : 'bg-white/[0.03] border-white/5'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-medium text-sm capitalize">{module}</h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDisabledModules(prev => {
+                                const next = new Set(prev);
+                                if (next.has(module)) {
+                                  next.delete(module);
+                                } else {
+                                  next.add(module);
+                                  setSelectedPermissions(p => ({ ...p, [module]: [] }));
+                                }
+                                return next;
+                              });
+                            }}
+                            className={`text-xs px-2 py-1 rounded-lg border font-medium transition-all ${
+                              isDisabled
+                                ? 'bg-red-500/15 border-red-500/35 text-red-400'
+                                : 'bg-white/5 border-white/10 text-white/40 hover:text-white hover:border-white/20'
+                            }`}
+                          >
+                            {isDisabled ? 'Deactivated' : 'Deactivate'}
+                          </button>
+                        </div>
+                        <div className={`flex flex-wrap gap-2 ${isDisabled ? 'opacity-30 pointer-events-none' : ''}`}>
+                          {AVAILABLE_ACTIONS.map(action => {
+                            const checked = (selectedPermissions[module] || []).includes(action);
+                            return (
+                              <button
+                                key={`${module}-${action}`}
+                                type="button"
+                                onClick={() => toggleAction(module, action)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border capitalize transition-all ${
+                                  checked
+                                    ? 'bg-[#fc0ce4]/15 border-[#fc0ce4]/35 text-[#fc0ce4]'
+                                    : 'bg-white/5 border-white/10 text-white/45 hover:text-white hover:border-white/20'
+                                }`}
+                              >
+                                {action}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus, GraduationCap, Edit2, Loader2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { Class, ClassSession, ClassEnrollment, Program } from '../types';
 
@@ -11,6 +12,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 export default function AdminPrograms() {
   const { t } = useLanguage();
+  const { isOverridden: permOverridden, canCreate, canUpdate, canDelete } = useModulePermissions('programs');
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -449,17 +451,19 @@ export default function AdminPrograms() {
             <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('programs.degrees_title')}</h1>
             <p className="text-white/50 text-sm">{t('programs.degrees_desc')}</p>
           </div>
-          <button
-            onClick={() => {
-              setEditingDegree(null);
-              setDegreeForm({ name: '', description: '', duration: 12, price: 0, capacity: 30 });
-              setShowDegreeModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
-          >
-            <Plus size={18} />
-            {t('programs.new_degree')}
-          </button>
+          {(!permOverridden || canCreate) && (
+            <button
+              onClick={() => {
+                setEditingDegree(null);
+                setDegreeForm({ name: '', description: '', duration: 12, price: 0, capacity: 30 });
+                setShowDegreeModal(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
+            >
+              <Plus size={18} />
+              {t('programs.new_degree')}
+            </button>
+          )}
         </div>
 
         {error && (
@@ -484,20 +488,24 @@ export default function AdminPrograms() {
                 className="glass-card rounded-2xl p-6 text-left group relative"
               >
                 <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openEditDegree(program); }}
-                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
-                    title="Edit degree"
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteDegree(program.id, program.name); }}
-                    className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/50 hover:text-red-400 transition-colors"
-                    title="Delete degree"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {(!permOverridden || canUpdate) && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openEditDegree(program); }}
+                      className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                      title="Edit degree"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                  )}
+                  {(!permOverridden || canDelete) && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteDegree(program.id, program.name); }}
+                      className="p-1.5 rounded-lg hover:bg-red-500/10 text-white/50 hover:text-red-400 transition-colors"
+                      title="Delete degree"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
 
                 <button
@@ -663,24 +671,26 @@ export default function AdminPrograms() {
           </div>
           <p className="text-white/50 text-sm ml-14">{t('programs.manage_classes')}</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingClassId(null);
-            setNewClass({
-              title: '',
-              teacherId: '',
-              sessions: [
-                { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
-                { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
-              ]
-            });
-            setShowCreateClass(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
-        >
-          <Plus size={18} />
-          {t('programs.new_class')}
-        </button>
+        {(!permOverridden || canCreate) && (
+          <button
+            onClick={() => {
+              setEditingClassId(null);
+              setNewClass({
+                title: '',
+                teacherId: '',
+                sessions: [
+                  { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
+                  { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
+                ]
+              });
+              setShowCreateClass(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
+          >
+            <Plus size={18} />
+            {t('programs.new_class')}
+          </button>
+        )}
       </div>
 
       {error && (
@@ -782,30 +792,32 @@ export default function AdminPrograms() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  if (isInlineEditing) {
-                    setIsInlineEditing(false);
-                    setInlineClassForm({
-                      title: selectedClass.title,
-                      teacherId: selectedClass.teacher_id || '',
-                      sessions: (selectedClass.sessions || []).map((s) => ({
-                        dayOfWeek: s.day_of_week,
-                        startTime: s.start_time,
-                        endTime: s.end_time,
-                      })),
-                    });
-                  } else {
-                    setIsInlineEditing(true);
-                    void loadTeachers();
-                    void loadAvailableStudents(selectedClass.id);
-                  }
-                }}
-                className="px-3 py-2 rounded-lg border border-white/10 text-sm hover:bg-white/5 transition-colors"
-              >
-                {isInlineEditing ? t('programs.cancel_edit') : t('programs.edit_class')}
-              </button>
-              {isInlineEditing && (
+              {(!permOverridden || canUpdate) && (
+                <button
+                  onClick={() => {
+                    if (isInlineEditing) {
+                      setIsInlineEditing(false);
+                      setInlineClassForm({
+                        title: selectedClass.title,
+                        teacherId: selectedClass.teacher_id || '',
+                        sessions: (selectedClass.sessions || []).map((s) => ({
+                          dayOfWeek: s.day_of_week,
+                          startTime: s.start_time,
+                          endTime: s.end_time,
+                        })),
+                      });
+                    } else {
+                      setIsInlineEditing(true);
+                      void loadTeachers();
+                      void loadAvailableStudents(selectedClass.id);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-lg border border-white/10 text-sm hover:bg-white/5 transition-colors"
+                >
+                  {isInlineEditing ? t('programs.cancel_edit') : t('programs.edit_class')}
+                </button>
+              )}
+              {(!permOverridden || canUpdate) && isInlineEditing && (
                 <button
                   onClick={() => { void handleSaveInlineClass(); }}
                   disabled={loading}
@@ -814,12 +826,14 @@ export default function AdminPrograms() {
                   {t('common.save')}
                 </button>
               )}
-              <button
-                onClick={() => handleDeleteClass(selectedClass.id)}
-                className="p-2 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors"
-              >
-                <Trash2 size={20} />
-              </button>
+              {(!permOverridden || canDelete) && (
+                <button
+                  onClick={() => handleDeleteClass(selectedClass.id)}
+                  className="p-2 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors"
+                >
+                  <Trash2 size={20} />
+                </button>
+              )}
             </div>
           </div>
 

@@ -6,6 +6,7 @@ import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
+import { exportCsv } from '../utils/csv';
 
 interface AppSettings {
   id: string;
@@ -19,7 +20,8 @@ interface AppSettings {
   logo_url: string;
 }
 
-export default function Settings({ role }: { role: 'admin' | 'teacher' | 'student' }) {
+export default function Settings({ role }: { role: 'admin' | 'teacher' | 'student' | 'superadmin' }) {
+  const isAdminRole = role === 'admin' || role === 'superadmin';
   const [activeSection, setActiveSection] = useState('profile');
   const { t } = useLanguage();
   const { user, setUser } = useUser();
@@ -41,9 +43,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
 
-  // Password change
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  // Password reset
+  const [pwResetLoading, setPwResetLoading] = useState(false);
+  const [pwResetSent, setPwResetSent] = useState(false);
 
   // SMS templates
   interface SmsTemplate { type: string; label: string; sms_body: string; variables: string[]; }
@@ -69,11 +71,11 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'profile', label: t('settings.profile'), icon: User },
   ];
 
-  const sections = role === 'admin' ? adminSections : userSections;
+  const sections = isAdminRole ? adminSections : userSections;
 
   // Load data
   useEffect(() => {
-    if (role === 'admin') {
+    if (isAdminRole) {
       supabase.from('message_templates').select('type, label, sms_body, variables').order('type').then(({ data }) => {
         if (data) {
           setSmsTemplates(data as SmsTemplate[]);
@@ -157,6 +159,28 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     setTimeout(() => setToast(null), 3000);
   };
 
+  const handleRequestPasswordReset = async () => {
+    if (!user) return;
+    setPwResetLoading(true);
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('fma_sis_token') : null;
+      const res = await fetch('/api/auth/request-password-reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error?.message || 'Failed to send reset link.');
+      setPwResetSent(true);
+    } catch (err: any) {
+      showToast('error', err.message || 'Failed to send reset link.');
+    } finally {
+      setPwResetLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -171,23 +195,6 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         if (error) throw error;
         setUser({ ...user!, firstName, lastName, avatar: avatarUrl || user!.avatar });
 
-        // Password change (optional — only if fields are filled)
-        if (newPassword || confirmPassword) {
-          if (newPassword.length < 6) {
-            showToast('error', t('settings.pw_too_short'));
-            setSaving(false);
-            return;
-          }
-          if (newPassword !== confirmPassword) {
-            showToast('error', t('settings.pw_mismatch'));
-            setSaving(false);
-            return;
-          }
-          const { error: pwErr } = await supabase.auth.updateUser({ password: newPassword });
-          if (pwErr) throw pwErr;
-          setNewPassword('');
-          setConfirmPassword('');
-        }
         showToast('success', t('settings.profile_saved'));
       } else if (activeSection === 'platform' && appSettings) {
         const { error } = await supabase.from('app_settings').update({
@@ -238,29 +245,11 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         return;
       }
       const headers = Object.keys(data[0]);
-      // BOM + sep hint + comma-separated CSV for Excel compatibility
-      const BOM = '\uFEFF';
-      const escapeCell = (val: unknown) => {
-        if (val === null || val === undefined) return '';
-        const str = String(val);
-        // Always quote fields that contain comma, quote, or newline
-        if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      };
-      const csv = [
-        'sep=,',
-        headers.join(','),
-        ...data.map(row => headers.map(h => escapeCell(row[h])).join(','))
-      ].join('\r\n');
-      const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${table}_export_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      exportCsv({
+        filename: `${table}_export`,
+        headers,
+        rows: data.map(row => headers.map(h => row[h])),
+      });
       showToast('success', t('settings.exported'));
     } catch (err: any) {
       showToast('error', err.message || t('settings.export_failed'));
@@ -294,8 +283,8 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
 
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{role === 'admin' ? t('settings.title') : t('settings.profile')}</h1>
-          <p className="text-white/50 text-sm">{role === 'admin' ? t('settings.desc') : t('settings.profile_desc')}</p>
+          <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{isAdminRole ? t('settings.title') : t('settings.profile')}</h1>
+          <p className="text-white/50 text-sm">{isAdminRole ? t('settings.desc') : t('settings.profile_desc')}</p>
         </div>
         {activeSection !== 'data' && (
           <button
@@ -386,23 +375,33 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                   <Lock className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
                   {t('settings.change_password')}
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.new_password')}</label>
-                    <input type="password" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="••••••••" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                {pwResetSent ? (
+                  <div className="flex items-start gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-emerald-400">Reset link sent</p>
+                      <p className="text-xs text-white/50 mt-1">Check your email for a password reset link. The link expires in 1 hour.</p>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.confirm_password')}</label>
-                    <input type="password" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="••••••••" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-                  </div>
-                </div>
-                <p className="text-[11px] text-white/40">{t('settings.password_hint')}</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-white/50">A password reset link will be sent to your registered email address. The link expires in 1 hour.</p>
+                    <button
+                      onClick={handleRequestPasswordReset}
+                      disabled={pwResetLoading}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50"
+                    >
+                      {pwResetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                      {pwResetLoading ? 'Sending…' : 'Send Password Reset Link'}
+                    </button>
+                  </>
+                )}
               </div>
             </>
           )}
 
           {/* ===== PLATFORM SETTINGS (admin only) ===== */}
-          {activeSection === 'platform' && role === 'admin' && (
+          {activeSection === 'platform' && isAdminRole && (
             <>
               {/* Contact Info */}
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
@@ -488,7 +487,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== MESSAGE TEMPLATES (admin only) ===== */}
-          {activeSection === 'messages' && role === 'admin' && (
+          {activeSection === 'messages' && isAdminRole && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <h2 className="font-display text-xl font-medium mb-1">
@@ -554,7 +553,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== DATA EXPORT (admin only) ===== */}
-          {activeSection === 'data' && role === 'admin' && (
+          {activeSection === 'data' && isAdminRole && (
             <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
               <div>
                 <h2 className="font-display text-xl font-medium mb-2">

@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'teacher' | 'student';
+export type Role = 'admin' | 'teacher' | 'student' | 'superadmin';
 
 export interface User {
   id: string;
@@ -8,6 +8,7 @@ export interface User {
   role: Role;
   avatar?: string;
   mustChangePassword?: boolean;
+  systemRole?: SystemRole;
 }
 
 export interface Student {
@@ -47,6 +48,7 @@ export interface Invoice {
   amount: number;
   discountPercent: number;
   status: 'paid' | 'partial' | 'not_paid' | 'overdue';
+  isManual?: boolean;
 }
 
 export interface InvoiceSettings {

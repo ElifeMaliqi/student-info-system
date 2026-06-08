@@ -1,21 +1,28 @@
 ﻿'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useUser } from '../../context/UserContext';
 import AdminLayout from '../../layouts/AdminLayout';
 import ForcePasswordChange from '../../views/ForcePasswordChange';
 import { supabase } from '../../lib/supabase';
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const { user, ready, setUser } = useUser();
+  const { user, ready, setUser, reloadUser } = useUser();
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (ready && !user) {
       router.replace('/auth');
     }
   }, [user, ready, router]);
+
+  // Refresh permissions on every navigation so role changes take effect without a manual refresh
+  useEffect(() => {
+    if (user) void reloadUser();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   if (!ready) {
     return (

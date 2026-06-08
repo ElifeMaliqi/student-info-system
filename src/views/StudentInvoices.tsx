@@ -20,7 +20,7 @@ const MONTH_NAMES = [
 ];
 const MONTH_KEYS = ['january','february','march','april','may','june','july','august','september','october','november','december'] as const;
 const fmtMoney = (n: number) => `\u20AC${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate  = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const fmtDate  = (d: string | null | undefined) => d ? new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
 
 const STATUS_BADGE: Record<string, string> = {
   paid:     'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',

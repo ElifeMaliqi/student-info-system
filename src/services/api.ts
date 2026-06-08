@@ -467,22 +467,35 @@ export const api = {
       className?: string;
     }): Promise<void> => {
       const invoiceId = api.finance._generateInvoiceId(params.year, params.month);
-      const { error } = await supabase
-        .from('invoices')
-        .insert({
-          invoice_id: invoiceId,
-          enrollment_id: params.enrollmentId,
-          student_id: params.studentId,
-          class_id: params.classId,
-          title: params.title,
-          month: params.month,
-          year: params.year,
-          due_date: params.dueDate,
-          amount: Math.round(params.amount * 100) / 100,
-          discount_percent: params.discountPercent ?? 0,
-          status: 'not_paid',
-        });
-      if (error) throw new Error(error.message);
+      const insResp = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `
+            INSERT INTO invoices
+              (enrollment_id, student_id, class_id, invoice_id, title, month, year, due_date, amount, discount_percent, status, is_manual)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'not_paid', true)
+          `,
+          params: [
+            params.enrollmentId,
+            params.studentId,
+            params.classId,
+            invoiceId,
+            params.title,
+            params.month,
+            params.year,
+            params.dueDate,
+            Math.round(params.amount * 100) / 100,
+            params.discountPercent ?? 0,
+          ],
+        }),
+      });
+      if (!insResp.ok) {
+        const err = await insResp.json();
+        throw new Error(err.error?.message || err.message || 'Failed to create invoice');
+      }
+      const insResult = await insResp.json();
+      if (insResult.error) throw new Error(insResult.error.message);
 
       if (params.studentEmail) {
         try {
@@ -523,31 +536,43 @@ export const api = {
     },
 
     archiveStudent: async (studentId: string): Promise<void> => {
-      // 1. Snapshot current active enrollments so they can be restored on re-approval
+      // 1. Snapshot all current enrollments so they can be restored on re-approval
       const { data: enrollments } = await supabase
         .from('class_enrollments')
         .select('class_id, class:classes(title, program_id)')
-        .eq('student_id', studentId)
-        .eq('status', 'active');
+        .eq('student_id', studentId);
 
       if (enrollments && enrollments.length > 0) {
-        const rows = enrollments.map((e: any) => ({
+        const snapshotRows = enrollments.map((e: any) => ({
           student_id: studentId,
           class_id: e.class_id,
           class_title: (e.class as any)?.title ?? 'Unknown Class',
           program_id: (e.class as any)?.program_id ?? null,
         }));
-        // Save snapshot (upsert so re-archiving the same student doesn't duplicate rows)
-        await supabase
-          .from('student_archived_classes')
-          .upsert(rows, { onConflict: 'student_id,class_id' });
-
-        // 2. Remove from active class rosters
-        await supabase
-          .from('class_enrollments')
-          .delete()
-          .eq('student_id', studentId);
+        // Save snapshot via raw SQL upsert (handles composite conflict key)
+        for (const row of snapshotRows) {
+          await fetch('/api/db', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              query: `
+                INSERT INTO student_archived_classes (student_id, class_id, class_title, program_id)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (student_id, class_id) DO UPDATE SET
+                  class_title = EXCLUDED.class_title,
+                  program_id  = EXCLUDED.program_id
+              `,
+              params: [row.student_id, row.class_id, row.class_title, row.program_id],
+            }),
+          });
+        }
       }
+
+      // 2. Remove from all class rosters (unconditional — don't filter by status)
+      await supabase
+        .from('class_enrollments')
+        .delete()
+        .eq('student_id', studentId);
 
       // 3. Archive the profile
       const { error } = await supabase
@@ -599,8 +624,8 @@ export const api = {
         .eq('status', 'active');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
-      // 4. Existing invoices (enrollment+month+year combos)
-      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
+      // 4. Existing auto invoices (manual invoices don't block auto-generation for the same month)
+      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year').eq('is_manual', false);
       const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
 
       // 5. Compute missing invoices
@@ -670,6 +695,7 @@ export const api = {
               amount: roundedAmount,
               discount_percent: disc,
               status: 'not_paid',
+              is_manual: false,
             });
 
             if (studentEmail) {
@@ -780,6 +806,7 @@ export const api = {
         amount: parseFloat(inv.amount),
         discountPercent: parseFloat(inv.discount_percent || '0'),
         status: inv.status as Invoice['status'],
+        isManual: inv.is_manual === true,
       }));
     },
 
@@ -1546,56 +1573,14 @@ export const api = {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');
 
-      try {
-        const { data, error } = await supabase.functions.invoke('send-announcement-sms', {
-          body: params,
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-
-        if (error) {
-          throw new Error(error.message || 'Failed to invoke SMS function');
-        }
-
-        const result = data as { sent?: number; total?: number; error?: string } | null;
-        if (result?.error) {
-          throw new Error(result.error);
-        }
-
-        return {
-          sent: result?.sent ?? 0,
-          total: result?.total ?? 0,
-        };
-      } catch (error) {
-        // Supabase functions.invoke may throw a generic message for non-2xx responses.
-        // Try to extract the real function error payload for actionable debugging.
-        if (error && typeof error === 'object' && 'context' in error) {
-          const response = (error as { context?: Response }).context;
-          if (response) {
-            try {
-              const payload = await response.clone().json() as { error?: string; message?: string };
-              const detailed = payload?.error || payload?.message;
-              if (detailed) throw new Error(detailed);
-            } catch {
-              try {
-                const text = await response.text();
-                if (text) throw new Error(text);
-              } catch {
-                // Fall through to default handling below.
-              }
-            }
-          }
-        }
-
-        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-          throw new Error(
-            'Network error: Could not connect to SMS service. ' +
-            'Please check that the Supabase Edge Function is deployed and accessible.'
-          );
-        }
-        throw error;
-      }
+      const res = await fetch(`/api/notify/send-announcement-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify(params),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.error) throw new Error(result.error || `Server error: ${res.status}`);
+      return { sent: result.sent ?? 0, total: result.total ?? 0 };
     },
   },
 
@@ -2130,15 +2115,86 @@ export const api = {
     },
 
     approve: async (applicationId: string, classId?: string, restoreClassIds?: string[]) => {
-      const { data, error } = await supabase.rpc('approve_registration_application', {
-        application_id: applicationId,
-      });
+      // Check if this application's email belongs to an existing (possibly archived) profile.
+      // Re-approvals for archived students must bypass the RPC which tries to create a new auth user.
+      const { data: appRow } = await supabase
+        .from('registration_applications')
+        .select('email')
+        .eq('id', applicationId)
+        .maybeSingle();
 
-      if (error) throw new Error(error.message);
-      if (!data?.success) throw new Error('Failed to approve application');
+      let userId: string | null = null;
+
+      if (appRow?.email) {
+        const { data: existingProfile } = await supabase
+          .from('profiles')
+          .select('id, is_archived')
+          .eq('email', appRow.email)
+          .maybeSingle();
+
+        if (existingProfile?.id) {
+          userId = existingProfile.id;
+          if (existingProfile.is_archived) {
+            const { error: unarchiveErr } = await supabase
+              .from('profiles')
+              .update({ is_archived: false })
+              .eq('id', existingProfile.id);
+            if (unarchiveErr) throw new Error(unarchiveErr.message);
+          }
+          const { error: appErr } = await supabase
+            .from('registration_applications')
+            .update({ status: 'approved' })
+            .eq('id', applicationId);
+          if (appErr) throw new Error(appErr.message);
+        }
+      }
+
+      if (!userId) {
+        // New user — create via RPC
+        const { data: appForPass } = await supabase
+          .from('registration_applications')
+          .select('email, password_hash')
+          .eq('id', applicationId)
+          .maybeSingle();
+
+        const { data, error } = await supabase.rpc('approve_registration_application', {
+          application_id: applicationId,
+        });
+        if (error) throw new Error(error.message);
+        const rpcResult = data as { success?: boolean; user_id?: string } | null;
+        if (!rpcResult?.success) throw new Error('Failed to approve application');
+        userId = rpcResult.user_id ?? null;
+
+        // Ensure auth_users (public schema) has the correct password.
+        // The RPC may have written to a different table or double-hashed the password.
+        // If password_hash is already bcrypt (starts with $2a/$2b/$2y$) use it directly;
+        // otherwise hash it now.
+        if (userId && appForPass?.email && appForPass?.password_hash) {
+          await fetch('/api/db', {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              query: `
+                INSERT INTO auth_users (id, email, encrypted_password)
+                VALUES (
+                  $1,
+                  lower(trim($2)),
+                  CASE WHEN $3 ~ '^\\$2[aby]\\$'
+                    THEN $3
+                    ELSE crypt($3, gen_salt('bf'))
+                  END
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                  encrypted_password = EXCLUDED.encrypted_password,
+                  updated_at = NOW()
+              `,
+              params: [userId, appForPass.email, appForPass.password_hash],
+            }),
+          });
+        }
+      }
 
       // Enroll in new class + any previously-archived classes the admin chose to restore.
-      // Deduplicate so the same classId can't appear twice.
       const allClassIds = Array.from(new Set([
         ...(classId ? [classId] : []),
         ...(restoreClassIds ?? []),
@@ -2147,19 +2203,19 @@ export const api = {
       for (const cid of allClassIds) {
         const { error: enrollError } = await supabase
           .from('class_enrollments')
-          .insert([{ class_id: cid, student_id: data.user_id, status: 'active' }]);
+          .insert([{ class_id: cid, student_id: userId, status: 'active' }]);
         // Ignore unique-constraint violations (student already in that class)
         if (enrollError && !enrollError.message.includes('unique')) {
           throw new Error(`Approved but failed to enroll in class: ${enrollError.message}`);
         }
       }
 
-      // Clean up the archived-classes snapshot rows that were restored
-      if (data.user_id && restoreClassIds && restoreClassIds.length > 0) {
+      // Clean up archived-classes snapshot rows that were restored
+      if (userId && restoreClassIds && restoreClassIds.length > 0) {
         await supabase
           .from('student_archived_classes')
           .delete()
-          .eq('student_id', data.user_id)
+          .eq('student_id', userId)
           .in('class_id', restoreClassIds);
       }
     },
@@ -2254,11 +2310,8 @@ export const api = {
         throw new Error('A registration for this email already exists.');
       }
 
-      // Insert as a pending application
-      // Use a secure random temp password (will not be exposed in frontend bundle)
-      const tempPassword = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID().replace(/-/g, '').substring(0, 16)
-        : Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16));
+      // Insert as a pending application — use the displayed temp password so it matches what admin sees
+      const tempPassword = 'FMA#2026';
       const fullPayload = {
         email:             enrollData.email,
         first_name:        enrollData.firstName,
@@ -2311,6 +2364,23 @@ export const api = {
 
       const createdUserId = result.user_id as string | undefined;
       if (!createdUserId) throw new Error('Enrollment succeeded, but user ID was not returned.');
+
+      // Ensure auth_users (public schema) has the correct password regardless of what the RPC did.
+      // The RPC may store the password in a different table or double-hash it if a trigger exists.
+      await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `
+            INSERT INTO auth_users (id, email, encrypted_password)
+            VALUES ($1, lower(trim($2)), crypt($3, gen_salt('bf')))
+            ON CONFLICT (id) DO UPDATE SET
+              encrypted_password = EXCLUDED.encrypted_password,
+              updated_at = NOW()
+          `,
+          params: [createdUserId, enrollData.email, tempPassword],
+        }),
+      });
 
       // Best-effort: mark this account as requiring password change on first login.
       const { error: mustChangeErr } = await supabase
@@ -2551,6 +2621,15 @@ export const api = {
         return `${y}-${m}-${dd}`;
       };
 
+      // Normalize DB date value (may be ISO timestamp or YYYY-MM-DD) to local YYYY-MM-DD
+      const normDate = (d: unknown): string | null => {
+        if (!d) return null;
+        const s = String(d);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        const dt = new Date(s);
+        return isNaN(dt.getTime()) ? null : toDateStr(dt);
+      };
+
       const rangeStart = toDateStr(new Date(year, month - 1, 20));
       const rangeEnd   = toDateStr(new Date(year, month + 1, 10));
 
@@ -2564,12 +2643,12 @@ export const api = {
         `);
       if (error) throw new Error(error.message);
 
-      // Reschedules in range
+      // Reschedules in range — fetch by original_date OR new_date
       let reschedules: any[] = [];
       try {
         const [orig, moved] = await Promise.all([
           supabase.from('class_reschedules').select('*').gte('original_date', rangeStart).lte('original_date', rangeEnd),
-          supabase.from('class_reschedules').select('*').not('new_date', 'is', null).gte('new_date', rangeStart).lte('new_date', rangeEnd),
+          supabase.from('class_reschedules').select('*').gte('new_date', rangeStart).lte('new_date', rangeEnd),
         ]);
         const seen = new Set<string>();
         for (const r of [...(orig.data || []), ...(moved.data || [])]) {
@@ -2579,7 +2658,10 @@ export const api = {
 
       // Build a quick lookup: "classId::originalDate" → reschedule row
       const rescheduleByOriginal = new Map<string, any>();
-      for (const r of reschedules) rescheduleByOriginal.set(`${r.class_id}::${r.original_date}`, r);
+      for (const r of reschedules) {
+        const k = normDate(r.original_date);
+        if (k) rescheduleByOriginal.set(`${r.class_id}::${k}`, r);
+      }
 
       const calendarEvents: CalendarEvent[] = [];
 
@@ -2629,7 +2711,9 @@ export const api = {
       // Add rescheduled occurrences that land in this month
       for (const r of reschedules) {
         if (!r.new_date) continue;
-        const newDate = new Date(r.new_date + 'T12:00:00');
+        const ndStr = normDate(r.new_date);
+        if (!ndStr) continue;
+        const newDate = new Date(ndStr + 'T12:00:00');
         if (newDate.getFullYear() !== year || newDate.getMonth() !== month) continue;
         const cls = (allClasses || []).find((c: any) => c.id === r.class_id);
         if (!cls) continue;
@@ -3738,38 +3822,43 @@ export const api = {
       return result.rows[0];
     },
 
-    // Update permissions for a role
+    // Update permissions for a role atomically: DELETE + INSERT in a single CTE to avoid the
+    // window where permissions are empty between two separate requests.
     updatePermissions: async (roleId: string, permissions: { module: string; actions: string[] }[]) => {
-      if (permissions.length === 0) {
-        const response = await fetch('/api/db', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            query: `DELETE FROM role_permissions WHERE role_id = $1`,
-            params: [roleId],
-          }),
-        });
-        if (!response.ok) throw new Error(`Failed to update permissions`);
-        return [];
-      }
+      const nonEmpty = permissions.filter(p => p.actions.length > 0);
 
-      const response = await fetch('/api/db', {
+      // Step 1: delete all existing permissions for this role
+      const delResp = await fetch('/api/db', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            WITH deleted AS (
-              DELETE FROM role_permissions WHERE role_id = $1
-            )
-            INSERT INTO role_permissions (role_id, module, actions)
-            VALUES ${permissions.map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3}::jsonb)`).join(',')}
-            RETURNING id, module, actions
-          `,
-          params: [roleId, ...permissions.flatMap(p => [p.module, JSON.stringify(p.actions)])],
+          query: `DELETE FROM role_permissions WHERE role_id = $1`,
+          params: [roleId],
         }),
       });
-      if (!response.ok) throw new Error(`Failed to update permissions`);
-      const result = await response.json();
+      if (!delResp.ok) {
+        const e = await delResp.json().catch(() => ({}));
+        throw new Error((e as any)?.error?.message || 'Failed to clear permissions');
+      }
+
+      if (nonEmpty.length === 0) return [];
+
+      // Step 2: insert new permissions (no conflict possible — old rows are gone)
+      const placeholders = nonEmpty.map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3}::jsonb)`).join(', ');
+      const params = [roleId, ...nonEmpty.flatMap(p => [p.module, JSON.stringify(p.actions)])];
+      const insResp = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `INSERT INTO role_permissions (role_id, module, actions) VALUES ${placeholders} RETURNING id, module, actions`,
+          params,
+        }),
+      });
+      if (!insResp.ok) {
+        const e = await insResp.json().catch(() => ({}));
+        throw new Error((e as any)?.error?.message || 'Failed to save permissions');
+      }
+      const result = await insResp.json();
       return result.rows;
     },
   },
@@ -3784,19 +3873,28 @@ export const api = {
           query: `
             WITH new_profile AS (
               INSERT INTO profiles (id, email, first_name, last_name, role, must_change_password)
-              VALUES (gen_random_uuid(), lower(trim($1)), $2, $3, $4, true)
+              VALUES (gen_random_uuid(), lower(trim($1)), $2, $3, $4, false)
               RETURNING id, email, first_name, last_name, role, is_archived, must_change_password, created_at, updated_at
             ),
             new_auth AS (
               INSERT INTO auth_users (id, email, encrypted_password)
               SELECT id, email, crypt($5, gen_salt('bf')) FROM new_profile
-              RETURNING id
+              RETURNING id, encrypted_password
             ),
             student_row AS (
               INSERT INTO students (user_id, status)
               SELECT id, 'active' FROM new_profile WHERE role = 'student'
               ON CONFLICT (user_id) DO NOTHING
               RETURNING user_id
+            ),
+            reg_app AS (
+              INSERT INTO registration_applications
+                (email, first_name, last_name, password_hash, role, status, reviewed_at)
+              SELECT np.email, $2, $3, na.encrypted_password, np.role, 'approved', NOW()
+              FROM new_profile np
+              JOIN new_auth na ON na.id = np.id
+              WHERE np.role IN ('student', 'teacher')
+              ON CONFLICT (email) DO NOTHING
             )
             SELECT * FROM new_profile
           `,
@@ -3809,6 +3907,21 @@ export const api = {
       }
       const result = await response.json();
       return result.rows[0];
+    },
+
+    delete: async (userId: string): Promise<void> => {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `DELETE FROM profiles WHERE id = $1`,
+          params: [userId],
+        }),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || error.message || 'Failed to delete user');
+      }
     },
 
     getAll: async (filters?: { role?: string; isArchived?: boolean }) => {
@@ -3848,6 +3961,9 @@ export const api = {
         role: row.role,
         roleId: row.system_role_id,
         roleName: row.role_name,
+        systemRole: row.system_role_id && row.role_name
+          ? { id: row.system_role_id, name: row.role_name, description: '', isSystemRole: false, permissions: [] }
+          : undefined,
         isArchived: row.is_archived,
         mustChangePassword: row.must_change_password,
         createdAt: row.created_at,
@@ -3888,9 +4004,9 @@ export const api = {
       } : null;
     },
 
-    update: async (userId: string, updates: { firstName?: string; lastName?: string; role?: string; mustChangePassword?: boolean }) => {
-      const setClauses = [];
-      const params = [];
+    update: async (userId: string, updates: { firstName?: string; lastName?: string; role?: string; mustChangePassword?: boolean; systemRoleId?: string | null }) => {
+      const setClauses: string[] = [];
+      const params: (string | boolean | null)[] = [];
 
       if (updates.firstName) {
         setClauses.push(`first_name = $${params.length + 1}`);
@@ -3907,6 +4023,10 @@ export const api = {
       if (updates.mustChangePassword !== undefined) {
         setClauses.push(`must_change_password = $${params.length + 1}`);
         params.push(updates.mustChangePassword);
+      }
+      if ('systemRoleId' in updates) {
+        setClauses.push(`system_role_id = $${params.length + 1}`);
+        params.push(updates.systemRoleId ?? null);
       }
 
       if (setClauses.length === 0) return null;
@@ -3972,43 +4092,90 @@ export const api = {
 
     // CSV template generation for bulk user creation
     generateCSVTemplate: async (role: string) => {
-      const headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password'];
+      const escapeCell = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      const row = (cells: string[]) => cells.map(escapeCell).join(',') + '\r\n';
+
+      let headers: string[];
+      let example: string[];
 
       if (role === 'student') {
-        headers.push('Program', 'Enrollment Date', 'Gender', 'Date of Birth', 'City', 'Country');
+        headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password',
+          'Parent First Name', 'Phone', 'Secondary Phone', 'Location',
+          'Program', 'Gender', 'Date of Birth', 'City', 'Country',
+          'Attendance Rate', 'Grade'];
+        example = ['John', 'Smith', 'john.smith@example.com', 'student', 'FMA#2026',
+          'Jane', '+383441234567', '+383441234568', 'FMA (Rruga Qarkore)',
+          'Computer Science', 'Male', '2000-01-15', 'Pristina', 'Kosovo',
+          '0', '0'];
+      } else if (role === 'teacher') {
+        headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password', 'Phone', 'Specialization'];
+        example = ['Sarah', 'Johnson', 'sarah.j@example.com', 'teacher', 'FMA#2026', '+383441234568', 'Mathematics'];
+      } else {
+        headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password'];
+        example = ['Alex', 'Brown', 'alex.brown@example.com', role, 'FMA#2026'];
       }
 
-      return headers.join(',') + '\n';
+      return '﻿' + 'sep=,\r\n' + row(headers) + row(example);
     },
 
-    // Import users from CSV
+    // Import users from CSV — returns normalized objects ready for api.users.create()
     importFromCSV: async (csvContent: string, role: string) => {
-      const lines = csvContent.trim().split('\n');
-      if (lines.length < 2) throw new Error('CSV must have header and at least one data row');
+      let text = csvContent;
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+      const allLines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+      const lines = allLines[0]?.trim().toLowerCase().startsWith('sep=') ? allLines.slice(1) : allLines;
+      if (lines.length < 2) throw new Error('CSV must contain a header row and at least one data row.');
 
-      const headers = lines[0].split(',').map(h => h.trim());
-      const users = [];
+      const parseCell = (line: string, delim = ','): string[] => {
+        const cells: string[] = [];
+        let cur = '';
+        let inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+            else { inQ = !inQ; }
+          } else if (ch === delim && !inQ) { cells.push(cur.trim()); cur = ''; }
+          else { cur += ch; }
+        }
+        cells.push(cur.trim());
+        return cells;
+      };
+
+      const commas = (lines[0].match(/,/g) || []).length;
+      const semis = (lines[0].match(/;/g) || []).length;
+      const delim = semis > commas ? ';' : ',';
+
+      const headers = parseCell(lines[0], delim).map(h => h.toLowerCase().replace(/\s+/g, '_'));
+      const users: Record<string, string>[] = [];
+      const get = (row: Record<string, string>, ...keys: string[]) => { for (const k of keys) if (row[k]) return row[k]; return ''; };
 
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim());
-        const user: any = {};
+        const cols = parseCell(lines[i], delim);
+        const row: Record<string, string> = {};
+        headers.forEach((h, idx) => { row[h] = (cols[idx] || '').trim(); });
 
-        headers.forEach((header, index) => {
-          user[header.toLowerCase().replace(/\s+/g, '_')] = values[index];
-        });
+        const firstName = get(row, 'first_name', 'firstname');
+        const lastName = get(row, 'last_name', 'lastname');
+        const email = get(row, 'email');
+        if (!firstName && !lastName && !email) continue;
 
         users.push({
-          firstName: user.first_name,
-          lastName: user.last_name,
-          email: user.email,
-          role: user.role || role,
-          password: user.password,
-          ...Object.keys(user).reduce((acc, key) => {
-            if (!['first_name', 'last_name', 'email', 'role', 'password'].includes(key)) {
-              acc[key] = user[key];
-            }
-            return acc;
-          }, {}),
+          firstName,
+          lastName,
+          email,
+          role: get(row, 'role') || role,
+          password: get(row, 'password') || 'FMA#2026',
+          parentFirstName: get(row, 'parent_first_name', 'parentfirstname'),
+          phone: get(row, 'phone'),
+          secondaryPhone: get(row, 'secondary_phone', 'secondaryphone'),
+          location: get(row, 'location'),
+          program: get(row, 'program', 'degree'),
+          gender: get(row, 'gender'),
+          dateOfBirth: get(row, 'date_of_birth', 'dateofbirth'),
+          city: get(row, 'city'),
+          country: get(row, 'country'),
+          specialization: get(row, 'specialization'),
         });
       }
 

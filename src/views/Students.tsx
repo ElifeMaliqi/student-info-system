@@ -15,6 +15,7 @@ import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
+import { useModulePermissions } from '../context/UserContext';
 
 type AdminStudent = {
   id: string;
@@ -74,6 +75,7 @@ const BLANK_FORM: EnrollForm = {
 const LOCATION_OPTIONS = ['FMA Kids (Dardani)', 'FMA (Rruga Qarkore)'];
 
 export default function Students() {
+  const { isOverridden: permOverridden, canCreate: canEnroll, canUpdate: canEdit, canDelete: canRemove } = useModulePermissions('users');
   const [view, setView] = useState<'list' | 'add' | 'success'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -111,6 +113,8 @@ export default function Students() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvTemplateDownloading, setCsvTemplateDownloading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const docFileRef = useRef<HTMLInputElement | null>(null);
   const [docFile, setDocFile] = useState<File | null>(null);
@@ -168,11 +172,13 @@ export default function Students() {
   // Open the enroll form when navigated here with ?enroll=1
   useEffect(() => {
     const params = searchParams;
-    if (params?.get('enroll') === '1') {
+    if (params?.get('enroll') === '1' && (!permOverridden || canEnroll)) {
       setView('add');
       setEnrollError('');
       setForm(BLANK_FORM);
       // Clean the query param without pushing history
+      router.replace('/students');
+    } else if (params?.get('enroll') === '1') {
       router.replace('/students');
     }
   }, [searchParams]);
@@ -278,6 +284,22 @@ export default function Students() {
       if (foundKey && row[foundKey]) return row[foundKey];
     }
     return '';
+  };
+
+  const handleDownloadStudentTemplate = async () => {
+    setCsvTemplateDownloading(true);
+    try {
+      const csv = await api.users.generateCSVTemplate('student');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'student_import_template.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setCsvTemplateDownloading(false);
+    }
   };
 
   const handleCsvImport = async (file: File) => {
@@ -905,21 +927,25 @@ export default function Students() {
               if (file) void handleCsvImport(file);
             }}
           />
-          <button
-            onClick={() => csvInputRef.current?.click()}
-            disabled={importingCsv}
-            className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-50"
-          >
-            {importingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            {importingCsv ? t('students.importing') : t('students.import_csv')}
-          </button>
-          <button
-            onClick={() => setView('add')}
-            className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
-          >
-            <Plus className="w-4 h-4" />
-            {t('students.add_new')}
-          </button>
+          {(!permOverridden || canEnroll) && (
+            <button
+              onClick={() => setShowCsvModal(true)}
+              disabled={importingCsv}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-50"
+            >
+              {importingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {importingCsv ? t('students.importing') : t('students.import_csv')}
+            </button>
+          )}
+          {(!permOverridden || canEnroll) && (
+            <button
+              onClick={() => setView('add')}
+              className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
+            >
+              <Plus className="w-4 h-4" />
+              {t('students.add_new')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1084,22 +1110,26 @@ export default function Students() {
                         </td>
                         <td className="py-4 pr-2" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleEditOpen(student)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors"
-                              title="Edit student"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleRemoveStudent(student)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-red-500/25 text-red-300 hover:bg-red-500/10 transition-colors"
-                              title="Remove student"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              Remove
-                            </button>
+                            {(!permOverridden || canEdit) && (
+                              <button
+                                onClick={() => handleEditOpen(student)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors"
+                                title="Edit student"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                Edit
+                              </button>
+                            )}
+                            {(!permOverridden || canRemove) && (
+                              <button
+                                onClick={() => handleRemoveStudent(student)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-red-500/25 text-red-300 hover:bg-red-500/10 transition-colors"
+                                title="Remove student"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                Remove
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1937,6 +1967,51 @@ export default function Students() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* CSV Import Modal */}
+      {showCsvModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="glass-card rounded-3xl p-6 w-full max-w-sm space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-lg font-medium">CSV Import</h3>
+              <button
+                onClick={() => setShowCsvModal(false)}
+                className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-colors"
+              >
+                <X className="w-4 h-4 text-white/40" />
+              </button>
+            </div>
+            <p className="text-sm text-white/50">Download the template first to ensure your CSV matches the required format.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleDownloadStudentTemplate}
+                disabled={csvTemplateDownloading}
+                className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-colors text-center disabled:opacity-50"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#fc0ce4]/10 border border-[#fc0ce4]/20 flex items-center justify-center">
+                  {csvTemplateDownloading ? <Loader2 className="w-5 h-5 text-[#fc0ce4] animate-spin" /> : <Download className="w-5 h-5 text-[#fc0ce4]" />}
+                </div>
+                <div className="text-xs font-semibold text-white">Download Template</div>
+                <div className="text-[10px] text-white/40">Get the CSV format</div>
+              </button>
+              <button
+                onClick={() => { setShowCsvModal(false); csvInputRef.current?.click(); }}
+                className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-white/10 hover:bg-white/5 transition-colors text-center"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#949ce4]/10 border border-[#949ce4]/20 flex items-center justify-center">
+                  <Upload className="w-5 h-5 text-[#949ce4]" />
+                </div>
+                <div className="text-xs font-semibold text-white">Import CSV</div>
+                <div className="text-[10px] text-white/40">Upload student data</div>
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
   );
 }

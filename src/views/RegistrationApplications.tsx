@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { RegistrationApplication, Class } from '../types';
 import { Skeleton } from '../components/Skeleton';
 
 export default function RegistrationApplications() {
   const { t } = useLanguage();
+  const { isOverridden: permOverridden, canUpdate, canDelete } = useModulePermissions('registrations');
   const [applications, setApplications] = useState<RegistrationApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
@@ -291,33 +293,39 @@ export default function RegistrationApplications() {
 
                 {app.status === 'pending' && !app.isArchived && (
                   <div className="flex gap-2">
-                    <button
-                      onClick={(e) => openApproveConfirm(app, e)}
-                      disabled={!!processingId}
-                      className="p-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50"
-                      title={t('registrations.approve')}
-                    >
-                      <CheckCircle className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={(e) => openRejectConfirm(app, e)}
-                      disabled={!!processingId}
-                      className="p-2 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors disabled:opacity-50"
-                      title={t('registrations.reject')}
-                    >
-                      <XCircle className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={(e) => doArchive(app, e)}
-                      disabled={!!processingId}
-                      className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-                      title={t('registrations.archive')}
-                    >
-                      <Archive className="w-5 h-5" />
-                    </button>
+                    {(!permOverridden || canUpdate) && (
+                      <button
+                        onClick={(e) => openApproveConfirm(app, e)}
+                        disabled={!!processingId}
+                        className="p-2 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                        title={t('registrations.approve')}
+                      >
+                        <CheckCircle className="w-5 h-5" />
+                      </button>
+                    )}
+                    {(!permOverridden || canUpdate) && (
+                      <button
+                        onClick={(e) => openRejectConfirm(app, e)}
+                        disabled={!!processingId}
+                        className="p-2 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors disabled:opacity-50"
+                        title={t('registrations.reject')}
+                      >
+                        <XCircle className="w-5 h-5" />
+                      </button>
+                    )}
+                    {(!permOverridden || canDelete) && (
+                      <button
+                        onClick={(e) => doArchive(app, e)}
+                        disabled={!!processingId}
+                        className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                        title={t('registrations.archive')}
+                      >
+                        <Archive className="w-5 h-5" />
+                      </button>
+                    )}
                   </div>
                 )}
-                {!app.isArchived && app.status !== 'pending' && (
+                {!app.isArchived && app.status !== 'pending' && (!permOverridden || canDelete) && (
                   <button
                     onClick={(e) => doArchive(app, e)}
                     disabled={!!processingId}
@@ -327,7 +335,7 @@ export default function RegistrationApplications() {
                     <Archive className="w-5 h-5" />
                   </button>
                 )}
-                {app.isArchived && (
+                {app.isArchived && (!permOverridden || canDelete) && (
                   <button
                     onClick={(e) => doUnarchive(app, e)}
                     disabled={!!processingId}
@@ -525,52 +533,58 @@ export default function RegistrationApplications() {
                 </div>
               )}
 
-              {selectedApp.status === 'pending' && !confirmAction && !selectedApp.isArchived && (
+              {selectedApp.status === 'pending' && !confirmAction && !selectedApp.isArchived && ((!permOverridden || canUpdate) || (!permOverridden || canDelete)) && (
                 <div className="flex gap-3 pt-4 border-t border-white/10">
-                  <button
-                    onClick={async () => {
-                      setConfirmAction('approve');
-                      setSelectedClassId('');
-                      if (selectedApp.role === 'student' && selectedApp.program) {
-                        setLoadingClasses(true);
-                        try {
-                          const classes = await api.classes.getByProgram(selectedApp.program);
-                          setApproveClasses(classes);
-                        } catch {
+                  {(!permOverridden || canUpdate) && (
+                    <button
+                      onClick={async () => {
+                        setConfirmAction('approve');
+                        setSelectedClassId('');
+                        if (selectedApp.role === 'student' && selectedApp.program) {
+                          setLoadingClasses(true);
+                          try {
+                            const classes = await api.classes.getByProgram(selectedApp.program);
+                            setApproveClasses(classes);
+                          } catch {
+                            setApproveClasses([]);
+                          } finally {
+                            setLoadingClasses(false);
+                          }
+                        } else {
                           setApproveClasses([]);
-                        } finally {
-                          setLoadingClasses(false);
                         }
-                      } else {
-                        setApproveClasses([]);
-                      }
-                    }}
-                    disabled={!!processingId}
-                    className="flex-1 py-3 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <CheckCircle className="w-5 h-5" />
-                    {t('registrations.approve')}
-                  </button>
-                  <button
-                    onClick={() => { setRejectNotes(''); setConfirmAction('reject'); }}
-                    disabled={!!processingId}
-                    className="flex-1 py-3 px-6 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <XCircle className="w-5 h-5" />
-                    {t('registrations.reject')}
-                  </button>
-                  <button
-                    onClick={() => doArchive(selectedApp)}
-                    disabled={!!processingId}
-                    className="py-3 px-4 rounded-xl bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Archive"
-                  >
-                    <Archive className="w-5 h-5" />
-                  </button>
+                      }}
+                      disabled={!!processingId}
+                      className="flex-1 py-3 px-6 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <CheckCircle className="w-5 h-5" />
+                      {t('registrations.approve')}
+                    </button>
+                  )}
+                  {(!permOverridden || canUpdate) && (
+                    <button
+                      onClick={() => { setRejectNotes(''); setConfirmAction('reject'); }}
+                      disabled={!!processingId}
+                      className="flex-1 py-3 px-6 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <XCircle className="w-5 h-5" />
+                      {t('registrations.reject')}
+                    </button>
+                  )}
+                  {(!permOverridden || canDelete) && (
+                    <button
+                      onClick={() => doArchive(selectedApp)}
+                      disabled={!!processingId}
+                      className="py-3 px-4 rounded-xl bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Archive"
+                    >
+                      <Archive className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
               )}
 
-              {!selectedApp.isArchived && selectedApp.status !== 'pending' && !confirmAction && (
+              {!selectedApp.isArchived && selectedApp.status !== 'pending' && !confirmAction && (!permOverridden || canDelete) && (
                 <div className="flex gap-3 pt-4 border-t border-white/10">
                   <button
                     onClick={() => doArchive(selectedApp)}

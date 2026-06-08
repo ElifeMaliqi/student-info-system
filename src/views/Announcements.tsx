@@ -7,7 +7,7 @@ import {
   Users, Shield, Layers, Loader2, AlertCircle, X, Mail, MessageSquare,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { SlideOver } from '../components/SlideOver';
 import type { Announcement, Role } from '../types';
@@ -47,6 +47,7 @@ const PRIORITIES: Priority[] = ['low', 'medium', 'high', 'urgent'];
 export default function Announcements({ role }: { role: Role }) {
   const { t } = useLanguage();
   const { user } = useUser();
+  const { isOverridden: permOverridden, canCreate } = useModulePermissions('announcements');
 
   const [announcements, setAnnouncements]   = useState<Announcement[]>([]);
   const [loading, setLoading]               = useState(true);
@@ -147,7 +148,7 @@ export default function Announcements({ role }: { role: Role }) {
             <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('announcements.title')}</h1>
             <p className="text-white/50 text-sm">{t('announcements.desc')}</p>
           </div>
-          {role !== 'student' && (
+          {role !== 'student' && (!permOverridden || canCreate) && (
             <button
               onClick={() => setShowCreate(true)}
               className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] self-start sm:self-auto"

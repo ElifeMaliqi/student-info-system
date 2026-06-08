@@ -83,6 +83,25 @@ export async function updatePassword(userId: string, newPassword: string): Promi
   );
 }
 
+export async function generateResetToken(userId: string): Promise<string> {
+  return new SignJWT({ sub: userId, purpose: 'password-reset' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setIssuer(JWT_ISSUER)
+    .setExpirationTime('1h')
+    .sign(JWT_SECRET);
+}
+
+export async function verifyResetToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET, { issuer: JWT_ISSUER });
+    if ((payload as { purpose?: string }).purpose !== 'password-reset') return null;
+    return (payload.sub as string) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function getBearerToken(header: string | null): string | null {
   if (!header?.startsWith('Bearer ')) return null;
   return header.slice(7).trim() || null;

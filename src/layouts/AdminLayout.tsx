@@ -6,8 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
-  Globe, Moon, Sun, ChevronDown, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
-  ShieldCheck, UserCog
+  Globe, Moon, Sun, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
+  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -20,7 +20,7 @@ import type { Announcement } from '../types';
 interface AdminLayoutProps {
   children: ReactNode;
   onLogout: () => void;
-  role: 'admin' | 'teacher' | 'student';
+  role: 'admin' | 'teacher' | 'student' | 'superadmin';
 }
 
 export default function AdminLayout({ children, onLogout, role }: AdminLayoutProps) {
@@ -38,6 +38,40 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const { user } = useUser();
   const pathname = usePathname();
   const router = useRouter();
+
+  // New Enrollment modal
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollStep, setEnrollStep] = useState<'pick' | 'teacher' | 'admin'>('pick');
+  const [staffForm, setStaffForm] = useState({ firstName: '', lastName: '', email: '', password: 'FMA#2026' });
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [staffError, setStaffError] = useState('');
+  const [staffSuccess, setStaffSuccess] = useState('');
+
+  const openEnrollModal = () => {
+    setEnrollStep('pick');
+    setStaffForm({ firstName: '', lastName: '', email: '', password: 'FMA#2026' });
+    setStaffError('');
+    setStaffSuccess('');
+    setEnrollOpen(true);
+  };
+
+  const handleStaffCreate = async (accountRole: 'teacher' | 'admin') => {
+    const { firstName, lastName, email, password } = staffForm;
+    if (!firstName.trim() || !lastName.trim() || !email.includes('@') || !password) {
+      setStaffError('All fields are required and email must be valid.');
+      return;
+    }
+    setStaffSaving(true);
+    setStaffError('');
+    try {
+      await api.users.create(email.trim().toLowerCase(), firstName.trim(), lastName.trim(), accountRole, password);
+      setStaffSuccess(`${accountRole === 'teacher' ? 'Teacher' : 'Admin'} account created. Temporary password: ${password}`);
+    } catch (e: any) {
+      setStaffError(e.message || 'Failed to create account.');
+    } finally {
+      setStaffSaving(false);
+    }
+  };
   
   const activePath = pathname ?? '';
   const activeTab = activePath.split('/').filter(Boolean)[0] || 'dashboard';
@@ -110,8 +144,88 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'announcements', label: t('nav.announcements'),  icon: Megaphone       },
   ];
 
-  const navItems = role === 'admin' ? adminNavItems : role === 'teacher' ? teacherNavItems : studentNavItems;
+  // Module → nav item (used to add extra nav items granted by system role)
+  const MODULE_NAV: Record<string, { id: string; label: string; icon: any }> = {
+    programs:      { id: 'programs',      label: t('nav.programs'),      icon: BookOpen },
+    classes:       { id: 'classes',       label: 'Classes',              icon: BookOpen },
+    announcements: { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
+    grades:        { id: 'grades',        label: t('nav.grades'),        icon: ClipboardList },
+    finance:       { id: 'finance',       label: t('nav.finance'),       icon: CreditCard },
+    analytics:     { id: 'analytics',     label: 'Analytics',            icon: LayoutDashboard },
+    users:         { id: 'students',      label: t('nav.students'),      icon: Users },
+    attendance:    { id: 'attendance',    label: t('nav.attendance'),    icon: CalendarCheck },
+    registrations: { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
+    calendar:      { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays },
+    invoices:      { id: 'invoices',      label: t('nav.invoices'),      icon: CreditCard },
+  };
+
+  // Nav item id → system-role module name (for restricting base nav by system role)
+  const NAV_TO_MODULE: Record<string, string> = {
+    programs:      'programs',
+    classes:       'classes',
+    grading:       'grades',
+    grades:        'grades',
+    announcements: 'announcements',
+    students:      'users',
+    analytics:     'analytics',
+    finance:       'finance',
+    attendance:    'attendance',
+    registrations: 'registrations',
+    calendar:      'calendar',
+    invoices:      'invoices',
+    ...(role === 'admin' ? { settings: 'settings' } : {}),
+  };
+
+  const baseNavItems = (role === 'admin' || role === 'superadmin') ? adminNavItems : role === 'teacher' ? teacherNavItems : studentNavItems;
+
+  // Build a permission map from the user's system role (module → actions[])
+  // Only include entries with actual actions — empty arrays mean "no data", not "restricted"
+  const rolePermMap = user?.systemRole?.permissions
+    ? new Map(
+        (user.systemRole.permissions as Array<{ module: string; actions: string[] }>)
+          .filter(p => p.actions.length > 0)
+          .map(p => [p.module, p.actions])
+      )
+    : null;
+
+  // Returns false if the system role explicitly restricts a nav item's module (actions[] has no 'read').
+  // Items whose nav id has no module mapping are always allowed (not managed by system roles).
+  const isNavAllowed = (navId: string): boolean => {
+    if (!rolePermMap) return true;
+    const mod = NAV_TO_MODULE[navId];
+    if (!mod) return true;
+    const actions = rolePermMap.get(mod);
+    if (actions === undefined) return true; // module not in role record → no override
+    if (actions.includes('deactivate')) return false;
+    return true; // any other actions (read/create/update/delete) = access granted
+  };
+
+  // Apply system role restrictions to base nav (all roles except superadmin)
+  const filteredBaseNavItems = rolePermMap && role !== 'superadmin'
+    ? baseNavItems.filter(item => isNavAllowed(item.id))
+    : baseNavItems;
+
+  // Modules already covered by the filtered base nav (e.g. teacher's 'grading' covers the 'grades' module)
+  const coveredModules = new Set(
+    filteredBaseNavItems.map(b => NAV_TO_MODULE[b.id]).filter(Boolean)
+  );
+
+  // For non-superadmin: add extra nav items granted by system role that aren't already in base nav
+  const extraNavItems = role !== 'superadmin' && rolePermMap
+    ? (user!.systemRole!.permissions as Array<{ module: string; actions: string[] }>)
+        .filter(p => !p.actions.includes('deactivate') && p.actions.length > 0 && !coveredModules.has(p.module))
+        .map(p => MODULE_NAV[p.module])
+        .filter((item): item is NonNullable<typeof item> =>
+          !!item && !filteredBaseNavItems.some(b => b.id === item.id)
+        )
+    : [];
+
+  const navItems = [...filteredBaseNavItems, ...extraNavItems];
   const adminSystemItems = [
+    { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
+  ];
+  const superadminSystemItems = [
+    { id: 'analytics', label: 'Analytics', icon: LayoutDashboard, path: '/analytics' },
     { id: 'roles', label: t('nav.roles'), icon: ShieldCheck, path: '/superadmin/roles' },
     { id: 'users', label: t('nav.users'), icon: UserCog, path: '/superadmin/users' },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
@@ -151,10 +265,10 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
           );
         })}
 
-        {role === 'admin' && (
+        {(role === 'admin' || role === 'superadmin') && (
           <>
             <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mt-8 mb-4 px-2">{t('nav.system')}</div>
-            {adminSystemItems.map((item) => {
+            {(role === 'superadmin' ? superadminSystemItems : adminSystemItems.filter(item => isNavAllowed(item.id))).map((item) => {
               const active = isNavActive(item);
               return (
                 <button
@@ -173,12 +287,12 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
             })}
           </>
         )}
-        {role !== 'admin' && (
-          <button 
+        {role !== 'admin' && role !== 'superadmin' && (
+          <button
             onClick={() => router.push('/settings')}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 mt-4 ${
-              activeTab === 'settings' 
-                ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20' 
+              activeTab === 'settings'
+                ? 'bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] border border-[#fc0ce4]/20'
                 : 'text-white/50 hover:text-white hover:bg-white/5 border border-transparent'
             }`}
           >
@@ -410,9 +524,9 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
               </AnimatePresence>
             </div>
             
-            {role === 'admin' && (
+            {(role === 'admin' || role === 'superadmin') && (
               <button
-                onClick={() => router.push('/students?enroll=1')}
+                onClick={openEnrollModal}
                 className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
               >
                 <Plus className="w-4 h-4 hidden sm:block" />
@@ -457,6 +571,184 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
           </div>
         </div>
       </SlideOver>
+
+      {/* New Enrollment Modal */}
+      <AnimatePresence>
+        {enrollOpen && (
+          <motion.div
+            key="enroll-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) { setEnrollOpen(false); } }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ duration: 0.18 }}
+              className="glass-card rounded-3xl w-full max-w-md"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-white/10 flex items-center justify-between">
+                <div>
+                  <h2 className="font-display text-2xl font-medium">New Account</h2>
+                  {enrollStep !== 'pick' && (
+                    <button
+                      onClick={() => { setEnrollStep('pick'); setStaffError(''); setStaffSuccess(''); }}
+                      className="text-xs text-white/40 hover:text-white mt-0.5 flex items-center gap-1 transition-colors"
+                    >
+                      ← Back
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => setEnrollOpen(false)} className="p-2 text-white/40 hover:text-white hover:bg-white/5 rounded-xl transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6">
+                {/* Step 1: Pick type */}
+                {enrollStep === 'pick' && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-white/50 mb-5">Select the type of account to create.</p>
+                    {/* Student */}
+                    <button
+                      onClick={() => { setEnrollOpen(false); router.push('/students?enroll=1'); }}
+                      className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 hover:border-[#fc0ce4]/30 hover:bg-[#fc0ce4]/5 transition-all group text-left"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-[#fc0ce4]/10 border border-[#fc0ce4]/20 flex items-center justify-center shrink-0 group-hover:bg-[#fc0ce4]/20 transition-colors">
+                        <GraduationCap className="w-5 h-5 text-[#fc0ce4]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-white">Student</div>
+                        <div className="text-xs text-white/40 mt-0.5">Enroll a student with program & class</div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-white/30 group-hover:text-white/60 transition-colors" />
+                    </button>
+                    {/* Teacher */}
+                    <button
+                      onClick={() => setEnrollStep('teacher')}
+                      className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 hover:border-[#949ce4]/30 hover:bg-[#949ce4]/5 transition-all group text-left"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-[#949ce4]/10 border border-[#949ce4]/20 flex items-center justify-center shrink-0 group-hover:bg-[#949ce4]/20 transition-colors">
+                        <Users className="w-5 h-5 text-[#949ce4]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-white">Teacher</div>
+                        <div className="text-xs text-white/40 mt-0.5">Create a teacher account</div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-white/30 group-hover:text-white/60 transition-colors" />
+                    </button>
+                    {/* Admin */}
+                    <button
+                      onClick={() => setEnrollStep('admin')}
+                      className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all group text-left"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0 group-hover:bg-white/10 transition-colors">
+                        <ShieldCheck className="w-5 h-5 text-white/60" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-white">Admin</div>
+                        <div className="text-xs text-white/40 mt-0.5">Create an admin account</div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-white/30 group-hover:text-white/60 transition-colors" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Step 2: Teacher / Admin form */}
+                {(enrollStep === 'teacher' || enrollStep === 'admin') && (
+                  <div className="space-y-4">
+                    {staffSuccess ? (
+                      <div className="flex flex-col items-center py-6 text-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                          <UserPlus className="w-6 h-6 text-emerald-400" />
+                        </div>
+                        <p className="text-sm text-emerald-300 font-medium">{staffSuccess}</p>
+                        <div className="flex gap-3 mt-2">
+                          <button
+                            onClick={() => { setStaffSuccess(''); setStaffForm({ firstName: '', lastName: '', email: '', password: 'FMA#2026' }); }}
+                            className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors"
+                          >
+                            Create Another
+                          </button>
+                          <button
+                            onClick={() => setEnrollOpen(false)}
+                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all"
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {staffError && (
+                          <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>{staffError}</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">First Name *</label>
+                            <input
+                              type="text"
+                              value={staffForm.firstName}
+                              onChange={e => setStaffForm(f => ({ ...f, firstName: e.target.value }))}
+                              className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white"
+                              placeholder="Jane"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Last Name *</label>
+                            <input
+                              type="text"
+                              value={staffForm.lastName}
+                              onChange={e => setStaffForm(f => ({ ...f, lastName: e.target.value }))}
+                              className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white"
+                              placeholder="Doe"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Email *</label>
+                          <input
+                            type="email"
+                            value={staffForm.email}
+                            onChange={e => setStaffForm(f => ({ ...f, email: e.target.value }))}
+                            className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white"
+                            placeholder="jane@example.com"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Temporary Password *</label>
+                          <input
+                            type="text"
+                            value={staffForm.password}
+                            onChange={e => setStaffForm(f => ({ ...f, password: e.target.value }))}
+                            className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white font-mono"
+                          />
+                          <p className="text-[11px] text-white/35">User will be prompted to change on first login.</p>
+                        </div>
+                        <button
+                          onClick={() => handleStaffCreate(enrollStep)}
+                          disabled={staffSaving}
+                          className="w-full mt-2 flex items-center justify-center gap-2 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
+                        >
+                          {staffSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                          {staffSaving ? 'Creating...' : `Create ${enrollStep === 'teacher' ? 'Teacher' : 'Admin'}`}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

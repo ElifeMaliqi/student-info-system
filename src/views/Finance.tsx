@@ -7,6 +7,7 @@ import {
   AlertCircle, X, Loader2, Trash2, DollarSign, Settings2, Pencil, Users, RotateCcw, Download, Archive,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { Invoice, InvoiceSettings, SettingsStudent } from '../types';
 import { playPopSound } from '../utils/sound';
@@ -24,8 +25,11 @@ const MONTH_KEYS = [
 ] as const;
 const fmtMoney = (n: number) =>
   `\u20AC${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d: string) =>
-  new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const fmtDate = (d: string | null | undefined) => {
+  if (!d) return '—';
+  const dateStr = d.slice(0, 10);
+  return new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const STATUS_BADGE: Record<string, string> = {
   paid:     'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
@@ -42,6 +46,7 @@ const STATUS_ICON: Record<string, typeof CheckCircle> = {
 
 export default function Finance() {
   const { t } = useLanguage();
+  const { isOverridden: permOverridden, canCreate, canUpdate, canDelete } = useModulePermissions('finance');
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -79,6 +84,7 @@ export default function Finance() {
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [loadingCreateOptions, setLoadingCreateOptions] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [createInvoiceError, setCreateInvoiceError] = useState('');
   const [enrollmentOptions, setEnrollmentOptions] = useState<Array<{
     enrollmentId: string;
     studentId: string;
@@ -296,6 +302,7 @@ export default function Finance() {
 
   async function openGenerateNewInvoice() {
     setShowCreateInvoice(true);
+    setCreateInvoiceError('');
     setLoadingCreateOptions(true);
     try {
       const options = await api.finance.getActiveEnrollmentOptions();
@@ -320,6 +327,7 @@ export default function Finance() {
     if (!selected) return;
 
     setCreatingInvoice(true);
+    setCreateInvoiceError('');
     try {
       await api.finance.createManualInvoice({
         enrollmentId: selected.enrollmentId,
@@ -340,7 +348,7 @@ export default function Finance() {
       setShowCreateInvoice(false);
       await loadAll();
     } catch (err) {
-      console.error(err);
+      setCreateInvoiceError(err instanceof Error ? err.message : 'Failed to create invoice');
     } finally {
       setCreatingInvoice(false);
     }
@@ -590,17 +598,21 @@ export default function Finance() {
           <p className="text-white/50 text-sm">{t('finance.desc')}</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            onClick={openGenerateNewInvoice}
-            className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-40"
-          >
-            <CreditCard className="w-4 h-4" />
-            Generate New Invoice
-          </button>
-          <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-            <Settings2 className="w-4 h-4" />
-            Invoice Settings
-          </button>
+          {(!permOverridden || canCreate) && (
+            <button
+              onClick={openGenerateNewInvoice}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-40"
+            >
+              <CreditCard className="w-4 h-4" />
+              Generate New Invoice
+            </button>
+          )}
+          {(!permOverridden || canCreate) && (
+            <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
+              <Settings2 className="w-4 h-4" />
+              Invoice Settings
+            </button>
+          )}
         </div>
       </div>
 
@@ -699,13 +711,18 @@ export default function Finance() {
                 </tr>
               </thead>
               <tbody className="text-sm">
-                {filtered.map(inv => {
+                {filtered.map((inv, idx) => {
                   const Icon = STATUS_ICON[inv.status] || Clock;
                   return (
-                    <tr key={inv.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                    <tr key={inv.id || inv.invoiceId || idx} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                       <td className="py-4 text-white/60 text-xs font-mono">{inv.invoiceId || inv.id.slice(0, 8).toUpperCase()}</td>
                       <td className="py-4 font-medium text-white/90">{inv.studentName}</td>
-                      <td className="py-4 text-white/70 max-w-[200px] truncate">{inv.title}</td>
+                      <td className="py-4 text-white/70 max-w-[200px]">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="truncate">{inv.title}</span>
+                          {inv.isManual && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-md bg-[#949ce4]/10 border border-[#949ce4]/25 text-[#949ce4]/70 font-medium">Manual</span>}
+                        </div>
+                      </td>
                       <td className="py-4 text-white/50 text-xs">{inv.teacherName || '-'}</td>
                       <td className="py-4 text-white/60 text-xs">{t(`months.${MONTH_KEYS[inv.month - 1]}`)}</td>
                       <td className="py-4 text-white/60 text-xs">{inv.year}</td>
@@ -719,12 +736,16 @@ export default function Finance() {
                       </td>
                       <td className="py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => { setEditInvoice(inv); setEditAmount(String(inv.amount)); setEditTitle(inv.title); setEditDueDate(inv.dueDate ? (() => { const d = inv.dueDate.split('-'); return `${d[2]}/${d[1]}/${d[0].slice(2)}`; })() : ''); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => setDeleteTarget(inv)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {(!permOverridden || canUpdate) && (
+                            <button onClick={() => { setEditInvoice(inv); setEditAmount(String(inv.amount)); setEditTitle(inv.title); setEditDueDate(inv.dueDate ? (() => { const d = inv.dueDate.slice(0, 10).split('-'); return `${d[2]}/${d[1]}/${d[0].slice(2)}`; })() : ''); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
+                          {(!permOverridden || canDelete) && (
+                            <button onClick={() => setDeleteTarget(inv)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -751,6 +772,12 @@ export default function Finance() {
                 </div>
 
                 <div className="px-5 py-4 space-y-4">
+                  {createInvoiceError && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{createInvoiceError}</span>
+                    </div>
+                  )}
                   {loadingCreateOptions ? (
                     <div className="flex items-center justify-center py-10 text-white/30 gap-2"><Loader2 className="w-5 h-5 animate-spin" /></div>
                   ) : (

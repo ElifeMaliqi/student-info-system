@@ -9,7 +9,7 @@ import {
   CalendarX, CalendarCheck,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent, AdminDayClass } from '../types';
 
@@ -297,6 +297,7 @@ interface StudentRow { id: string; name: string; avatar: string; }
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function AdminCalendar() {
+  const { isOverridden: permOverridden, canCreate } = useModulePermissions('calendar');
   const today = useMemo(() => new Date(), []);
 
   // ── View state ────────────────────────────────────────────────────────────
@@ -530,7 +531,7 @@ export default function AdminCalendar() {
       setDetailClass(null);
       setRescheduleMode(false);
       setRescheduleReason('');
-      void loadEvents();
+      await loadEvents();
     } catch (e) { console.error(e); }
     finally { setRescheduleSaving(false); }
   }
@@ -559,7 +560,7 @@ export default function AdminCalendar() {
       setAdminDayClasses(classes);
       setDetailClass(null);
       setCancelReason('');
-      void loadEvents();
+      await loadEvents();
     } catch (e) { console.error(e); }
     finally { setCancelSaving(false); setConfirmCancel(false); }
   }
@@ -591,7 +592,7 @@ export default function AdminCalendar() {
       setAdminDayClasses(classes);
       setBulkClearProgramId(null);
       setBulkClearReason('');
-      void loadEvents();
+      await loadEvents();
     } catch (e) { console.error(e); }
     finally { setBulkClearing(false); }
   }
@@ -643,7 +644,7 @@ export default function AdminCalendar() {
       setAdminDayClasses(classes);
       setBulkOpen(false);
       setBulkReason('');
-      void loadEvents();
+      await loadEvents();
     } catch (e) { console.error(e); }
     finally { setBulkSaving(false); }
   }
@@ -750,13 +751,15 @@ export default function AdminCalendar() {
           <h1 className="text-2xl font-bold text-white">{t('cal.title')}</h1>
           <p className="text-white/40 text-sm mt-0.5">{t('cal.desc')}</p>
         </div>
-        <button
-          onClick={() => openCreate()}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold shadow-lg hover:shadow-[#fc0ce4]/25 hover:scale-105 active:scale-100 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          {t('cal.new_event')}
-        </button>
+        {(!permOverridden || canCreate) && (
+          <button
+            onClick={() => openCreate()}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold shadow-lg hover:shadow-[#fc0ce4]/25 hover:scale-105 active:scale-100 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            {t('cal.new_event')}
+          </button>
+        )}
       </div>
 
       {/* Calendar card */}
