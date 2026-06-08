@@ -224,7 +224,7 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between mb-6 shrink-0">
             <h2 className="font-display text-lg font-medium">{t('dash.recent_enrollments')}</h2>
-            <button className="text-xs font-medium text-white/50 hover:text-[#fc0ce4] flex items-center gap-1 transition-colors">
+            <button onClick={() => router.push('/registrations')} className="text-xs font-medium text-white/50 hover:text-[#fc0ce4] flex items-center gap-1 transition-colors">
               {t('dash.view_all')} <ArrowUpRight className="w-3 h-3" />
             </button>
           </div>
