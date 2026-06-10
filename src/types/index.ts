@@ -219,7 +219,9 @@ export interface Class {
   id: string;
   program_id: string;
   title: string;
+  code?: string;
   teacher_id: string;
+  meetLink?: string;
   teacher?: {
     firstName: string;
     lastName: string;

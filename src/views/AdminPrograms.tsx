@@ -2,13 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus, GraduationCap, Edit2, Loader2 } from 'lucide-react';
+import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus, GraduationCap, Edit2, Loader2, RefreshCw, Link2, Search, Check } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { Class, ClassSession, ClassEnrollment, Program } from '../types';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function generateCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
 
 export default function AdminPrograms() {
   const { t } = useLanguage();
@@ -49,11 +54,19 @@ export default function AdminPrograms() {
   const [newClass, setNewClass] = useState({
     title: '',
     teacherId: '',
+    code: generateCode(),
+    meetLink: '',
     sessions: [
       { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
       { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
     ]
   });
+
+  // Student pre-selection for the create form
+  const [createAllStudents, setCreateAllStudents] = useState<{ id: string; firstName: string; lastName: string; email: string }[]>([]);
+  const [createSelectedIds, setCreateSelectedIds] = useState<Set<string>>(new Set());
+  const [createStudentSearch, setCreateStudentSearch] = useState('');
+  const [createStudentsLoading, setCreateStudentsLoading] = useState(false);
 
   useEffect(() => {
     loadPrograms();
@@ -256,25 +269,37 @@ export default function AdminPrograms() {
           editingClassId,
           newClass.title,
           newClass.teacherId,
-          sessionPayload
+          sessionPayload,
+          newClass.meetLink || null,
         );
       } else {
-        await api.classes.create(
+        const created = await api.classes.create(
           selectedProgram,
           newClass.title,
           newClass.teacherId,
-          sessionPayload
+          sessionPayload,
+          newClass.code,
+          newClass.meetLink || null,
         );
+        if (createSelectedIds.size > 0) {
+          await Promise.allSettled(
+            [...createSelectedIds].map(id => api.classes.enrollStudent(created.id, id))
+          );
+        }
       }
 
       setNewClass({
         title: '',
         teacherId: '',
+        code: generateCode(),
+        meetLink: '',
         sessions: [
           { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
           { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
         ]
       });
+      setCreateSelectedIds(new Set());
+      setCreateStudentSearch('');
       if (editingClassId) {
         setShowClassEditModal(false);
       } else {
@@ -378,6 +403,8 @@ export default function AdminPrograms() {
     setNewClass({
       title: cls.title,
       teacherId: cls.teacher_id || '',
+      code: cls.code || '',
+      meetLink: cls.meetLink || '',
       sessions: (cls.sessions && cls.sessions.length > 0)
         ? cls.sessions.map((s) => ({
             dayOfWeek: s.day_of_week,
@@ -386,6 +413,7 @@ export default function AdminPrograms() {
           }))
         : [{ dayOfWeek: 0, startTime: '09:00', endTime: '10:30' }],
     });
+    setCreateSelectedIds(new Set());
     setShowCreateClass(true);
   };
 
@@ -395,6 +423,8 @@ export default function AdminPrograms() {
     setNewClass({
       title: cls.title,
       teacherId: cls.teacher_id || '',
+      code: cls.code || '',
+      meetLink: cls.meetLink || '',
       sessions: (cls.sessions && cls.sessions.length > 0)
         ? cls.sessions.map((s) => ({
             dayOfWeek: s.day_of_week,
@@ -522,7 +552,6 @@ export default function AdminPrograms() {
                   <div className="space-y-1 text-xs text-white/60">
                     <p>{t('programs.duration_label').replace('{n}', String(program.duration))}</p>
                     <p>{t('programs.price_label').replace('{n}', program.price.toLocaleString())}</p>
-                    <p>{t('programs.capacity_label').replace('{n}', String(program.capacity))}</p>
                   </div>
                 </button>
               </motion.div>
@@ -613,19 +642,6 @@ export default function AdminPrograms() {
                         required
                       />
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                        {t('programs.capacity')}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        value={degreeForm.capacity}
-                        onChange={(e) => setDegreeForm({ ...degreeForm, capacity: parseInt(e.target.value) || 1 })}
-                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
-                        required
-                      />
-                    </div>
                   </div>
 
                   <button
@@ -673,17 +689,27 @@ export default function AdminPrograms() {
         </div>
         {(!permOverridden || canCreate) && (
           <button
-            onClick={() => {
+            onClick={async () => {
               setEditingClassId(null);
               setNewClass({
                 title: '',
                 teacherId: '',
+                code: generateCode(),
+                meetLink: '',
                 sessions: [
                   { dayOfWeek: 0, startTime: '09:00', endTime: '10:30' },
                   { dayOfWeek: 2, startTime: '14:00', endTime: '15:30' }
                 ]
               });
+              setCreateSelectedIds(new Set());
+              setCreateStudentSearch('');
               setShowCreateClass(true);
+              setCreateStudentsLoading(true);
+              try {
+                const students = await api.classes.getAllStudents();
+                setCreateAllStudents(students);
+              } catch {}
+              finally { setCreateStudentsLoading(false); }
             }}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition-colors font-medium text-sm"
           >
@@ -1009,126 +1035,263 @@ export default function AdminPrograms() {
         </motion.div>
       )}
 
-      {/* Create Class Modal */}
+      {/* Create / Edit Class Modal */}
       <AnimatePresence>
         {showCreateClass && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => {
-              setShowCreateClass(false);
-              setEditingClassId(null);
-            }}
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => { setShowCreateClass(false); setEditingClassId(null); setCreateSelectedIds(new Set()); }}
           >
             <motion.div
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}
               exit={{ scale: 0.95 }}
               onClick={(e) => e.stopPropagation()}
-              className="glass-card rounded-3xl p-8 max-w-md w-full space-y-6"
+              className="glass-card rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col"
             >
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-medium">{editingClassId ? t('programs.edit_class') : t('programs.create_class')}</h2>
+              {/* Header */}
+              <div className="p-6 border-b border-white/10 flex items-center justify-between shrink-0">
+                <h2 className="font-display text-2xl font-medium">
+                  {editingClassId ? t('programs.edit_class') : t('programs.create_class')}
+                </h2>
                 <button
-                  onClick={() => {
-                    setShowCreateClass(false);
-                    setEditingClassId(null);
-                  }}
-                  className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                  onClick={() => { setShowCreateClass(false); setEditingClassId(null); setCreateSelectedIds(new Set()); }}
+                  className="p-2 rounded-xl text-white/40 hover:text-white hover:bg-white/5 transition-colors"
                 >
                   <X size={20} />
                 </button>
               </div>
 
-              <form onSubmit={handleCreateClass} className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                    {t('programs.class_title')}
-                  </label>
-                  <input
-                    type="text"
-                    value={newClass.title}
-                    onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
-                    placeholder={t('programs.class_title_ph')}
-                    className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
-                    required
-                  />
-                </div>
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+                <form onSubmit={handleCreateClass} className="space-y-4">
+                  {error && (
+                    <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">{error}</div>
+                  )}
 
-                <div>
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
-                    {t('programs.assign_teacher')}
-                  </label>
-                  <select
-                    value={newClass.teacherId}
-                    onChange={(e) => setNewClass({ ...newClass, teacherId: e.target.value })}
-                    className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
-                    required
-                  >
-                    <option value="">{t('programs.select_teacher_ph')}</option>
-                    {teachers.map((teacher) => (
-                      <option key={teacher.id} value={teacher.id}>
-                        {teacher.firstName} {teacher.lastName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-3">
-                  <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block">
-                    {t('programs.weekly_sessions')}
-                  </label>
-                  {newClass.sessions.map((session, idx) => (
-                    <div key={idx} className="space-y-2 p-3 rounded-lg bg-white/5">
-                      <select
-                        value={session.dayOfWeek}
-                        onChange={(e) => {
-                          const updated = [...newClass.sessions];
-                          updated[idx].dayOfWeek = parseInt(e.target.value);
-                          setNewClass({ ...newClass, sessions: updated });
-                        }}
-                        className="glass-select w-full px-3 py-2 rounded-lg text-xs text-white"
-                      >
-                        {DAYS.map((day, i) => (
-                          <option key={i} value={i}>{t(`programs.day_${day.toLowerCase()}`)}</option>
-                        ))}
-                      </select>
-                      <div className="flex gap-2">
-                        <input
-                          type="time"
-                          value={session.startTime}
-                          onChange={(e) => {
-                            const updated = [...newClass.sessions];
-                            updated[idx].startTime = e.target.value;
-                            setNewClass({ ...newClass, sessions: updated });
-                          }}
-                          className="glass-input flex-1 px-3 py-2 rounded-lg text-xs text-white"
-                        />
-                        <input
-                          type="time"
-                          value={session.endTime}
-                          onChange={(e) => {
-                            const updated = [...newClass.sessions];
-                            updated[idx].endTime = e.target.value;
-                            setNewClass({ ...newClass, sessions: updated });
-                          }}
-                          className="glass-input flex-1 px-3 py-2 rounded-lg text-xs text-white"
-                        />
+                  {/* Name + Code */}
+                  <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">
+                        {t('programs.class_title')} *
+                      </label>
+                      <input
+                        type="text"
+                        value={newClass.title}
+                        onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
+                        placeholder={t('programs.class_title_ph')}
+                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">
+                        Code
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <div className="glass-input px-3 py-3 rounded-xl text-sm font-mono text-[#949ce4] tracking-widest select-all whitespace-nowrap">
+                          {newClass.code || '—'}
+                        </div>
+                        {!editingClassId && (
+                          <button
+                            type="button"
+                            onClick={() => setNewClass(c => ({ ...c, code: generateCode() }))}
+                            className="p-3 rounded-xl border border-white/10 text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+                            title="Regenerate code"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium"
-                >
-                  {loading ? (editingClassId ? t('programs.saving') : t('programs.creating')) : (editingClassId ? t('programs.save_class') : t('programs.create_class'))}
-                </button>
-              </form>
+                  {/* Teacher */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">
+                      {t('programs.assign_teacher')} *
+                    </label>
+                    <select
+                      value={newClass.teacherId}
+                      onChange={(e) => setNewClass({ ...newClass, teacherId: e.target.value })}
+                      className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
+                      required
+                    >
+                      <option value="">{t('programs.select_teacher_ph')}</option>
+                      {teachers.map((teacher) => (
+                        <option key={teacher.id} value={teacher.id}>
+                          {teacher.firstName} {teacher.lastName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Google Meet Link */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">
+                      Google Meet Link
+                    </label>
+                    <div className="relative">
+                      <Link2 size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                      <input
+                        type="url"
+                        value={newClass.meetLink}
+                        onChange={(e) => setNewClass({ ...newClass, meetLink: e.target.value })}
+                        className="glass-input w-full pl-9 pr-4 py-3 rounded-xl text-sm text-white"
+                        placeholder="https://meet.google.com/abc-defg-hij"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Sessions */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-2">
+                      {t('programs.weekly_sessions')}
+                    </label>
+                    <div className="space-y-2">
+                      {newClass.sessions.map((session, idx) => (
+                        <div key={idx} className="flex items-center gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                          <select
+                            value={session.dayOfWeek}
+                            onChange={(e) => {
+                              const updated = [...newClass.sessions];
+                              updated[idx] = { ...updated[idx], dayOfWeek: parseInt(e.target.value) };
+                              setNewClass({ ...newClass, sessions: updated });
+                            }}
+                            className="glass-select flex-1 min-w-0 px-3 py-2 rounded-lg text-xs text-white"
+                          >
+                            {DAYS.map((day, i) => (
+                              <option key={i} value={i}>{t(`programs.day_${day.toLowerCase()}`)}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="time"
+                            value={session.startTime}
+                            onChange={(e) => {
+                              const updated = [...newClass.sessions];
+                              updated[idx] = { ...updated[idx], startTime: e.target.value };
+                              setNewClass({ ...newClass, sessions: updated });
+                            }}
+                            className="glass-input px-2.5 py-2 rounded-lg text-xs text-white w-[88px] shrink-0"
+                          />
+                          <span className="text-white/25 text-xs shrink-0">→</span>
+                          <input
+                            type="time"
+                            value={session.endTime}
+                            onChange={(e) => {
+                              const updated = [...newClass.sessions];
+                              updated[idx] = { ...updated[idx], endTime: e.target.value };
+                              setNewClass({ ...newClass, sessions: updated });
+                            }}
+                            className="glass-input px-2.5 py-2 rounded-lg text-xs text-white w-[88px] shrink-0"
+                          />
+                          {newClass.sessions.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setNewClass(c => ({ ...c, sessions: c.sessions.filter((_, i) => i !== idx) }))}
+                              className="p-1.5 rounded-lg text-white/25 hover:text-red-300 hover:bg-red-500/10 transition-colors shrink-0"
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setNewClass(c => ({ ...c, sessions: [...c.sessions, { dayOfWeek: 0, startTime: '09:00', endTime: '10:00' }] }))}
+                        className="flex items-center gap-1.5 text-xs text-[#949ce4] hover:text-white transition-colors px-1 pt-1"
+                      >
+                        <Plus size={13} /> Add Session
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Student pre-selection (create only) */}
+                  {!editingClassId && (
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-[11px] font-semibold text-white/40 uppercase tracking-widest">
+                          Enroll Students
+                        </label>
+                        {createSelectedIds.size > 0 && (
+                          <span className="text-xs text-[#949ce4] font-medium">{createSelectedIds.size} selected</span>
+                        )}
+                      </div>
+                      <div className="relative mb-2">
+                        <Search size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                        <input
+                          type="text"
+                          value={createStudentSearch}
+                          onChange={e => setCreateStudentSearch(e.target.value)}
+                          className="glass-input w-full pl-9 pr-4 py-2.5 rounded-xl text-sm text-white"
+                          placeholder="Search students..."
+                        />
+                      </div>
+                      {createStudentsLoading ? (
+                        <div className="flex items-center gap-2 text-white/30 text-xs py-3">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading students...
+                        </div>
+                      ) : (
+                        <div className="space-y-1 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                          {(createStudentSearch
+                            ? createAllStudents.filter(s =>
+                                `${s.firstName} ${s.lastName} ${s.email}`.toLowerCase().includes(createStudentSearch.toLowerCase())
+                              )
+                            : createAllStudents
+                          ).map(s => {
+                            const selected = createSelectedIds.has(s.id);
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => setCreateSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+                                  return next;
+                                })}
+                                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border transition-all text-left ${
+                                  selected
+                                    ? 'bg-[#949ce4]/10 border-[#949ce4]/30'
+                                    : 'bg-white/[0.02] border-white/5 hover:border-white/10'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-white truncate">{s.firstName} {s.lastName}</p>
+                                  <p className="text-[11px] text-white/35 truncate">{s.email}</p>
+                                </div>
+                                <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ml-2 transition-colors ${
+                                  selected ? 'bg-[#949ce4] border-[#949ce4]' : 'border-white/20'
+                                }`}>
+                                  {selected && <Check size={11} className="text-white" />}
+                                </div>
+                              </button>
+                            );
+                          })}
+                          {createAllStudents.length === 0 && !createStudentsLoading && (
+                            <p className="text-white/30 text-xs py-2">No active students found.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white font-semibold text-sm hover:opacity-90 transition-all disabled:opacity-50"
+                  >
+                    {loading
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> {editingClassId ? t('programs.saving') : t('programs.creating')}</>
+                      : editingClassId
+                        ? t('programs.save_class')
+                        : (createSelectedIds.size > 0 ? `Create & Enroll ${createSelectedIds.size}` : t('programs.create_class'))
+                    }
+                  </button>
+                </form>
+              </div>
             </motion.div>
           </motion.div>
         )}

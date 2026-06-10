@@ -355,6 +355,7 @@ export default function AdminCalendar() {
   const [bulkClearProgramId, setBulkClearProgramId] = useState<string | null>(null);
   const [bulkClearing,       setBulkClearing       ] = useState(false);
   const [bulkClearReason,    setBulkClearReason    ] = useState('');
+  const [bulkClearError,     setBulkClearError     ] = useState<string | null>(null);
 
   // Bulk reschedule flow
   const [bulkOpen,           setBulkOpen           ] = useState(false);
@@ -514,7 +515,8 @@ export default function AdminCalendar() {
         newDate:      rescheduleForm.date,
         newStartTime,
         newEndTime,
-        reason:       rescheduleReason || undefined,
+        reason:            rescheduleReason || undefined,
+        existingRescheduleId: snapshot.isRescheduled ? snapshot.rescheduleId : undefined,
       });
       void api.calendar.sendClassUpdateNotifications({
         classId:      snapshot.classId,
@@ -526,7 +528,7 @@ export default function AdminCalendar() {
         newEndTime,
         reason:       rescheduleReason || undefined,
       });
-      const classes = await api.calendar.getClassesForDay(snapshot.originalDate);
+      const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen!));
       setAdminDayClasses(classes);
       setDetailClass(null);
       setRescheduleMode(false);
@@ -547,7 +549,8 @@ export default function AdminCalendar() {
         sessionId:    snapshot.sessionId,
         originalDate: snapshot.originalDate,
         newDate:      null,
-        reason:       cancelReason || undefined,
+        reason:            cancelReason || undefined,
+        existingRescheduleId: snapshot.isRescheduled ? snapshot.rescheduleId : undefined,
       });
       void api.calendar.sendClassUpdateNotifications({
         classId:      snapshot.classId,
@@ -556,7 +559,7 @@ export default function AdminCalendar() {
         updateType:   'cancelled',
         reason:       cancelReason || undefined,
       });
-      const classes = await api.calendar.getClassesForDay(snapshot.originalDate);
+      const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen!));
       setAdminDayClasses(classes);
       setDetailClass(null);
       setCancelReason('');
@@ -570,6 +573,7 @@ export default function AdminCalendar() {
     const cls = adminDayClasses.filter(c => c.programId === programId);
     if (!adminDayOpen || !cls.length) return;
     setBulkClearing(true);
+    setBulkClearError(null);
     const reason = bulkClearReason || undefined;
     try {
       await Promise.all(cls.map(c =>
@@ -577,6 +581,7 @@ export default function AdminCalendar() {
           classId: c.classId, sessionId: c.sessionId,
           originalDate: c.originalDate, newDate: null,
           reason,
+          existingRescheduleId: c.isRescheduled ? c.rescheduleId : undefined,
         })
       ));
       cls.forEach(c => {
@@ -592,8 +597,12 @@ export default function AdminCalendar() {
       setAdminDayClasses(classes);
       setBulkClearProgramId(null);
       setBulkClearReason('');
+      setBulkClearError(null);
       await loadEvents();
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setBulkClearError(e instanceof Error ? e.message : 'Failed to clear day');
+    }
     finally { setBulkClearing(false); }
   }
 
@@ -625,6 +634,7 @@ export default function AdminCalendar() {
           newStartTime: form?.startTime,
           newEndTime:   form?.endTime,
           reason,
+          existingRescheduleId: cls.isRescheduled ? cls.rescheduleId : undefined,
         });
       }));
       bulkSelectedList.forEach(cls => {
@@ -1202,8 +1212,11 @@ export default function AdminCalendar() {
                                         rows={2}
                                         className={inputCls('resize-none text-xs')}
                                       />
+                                      {bulkClearError && (
+                                        <p className="text-xs text-red-400">{bulkClearError}</p>
+                                      )}
                                       <div className="flex gap-2">
-                                        <button onClick={() => { setBulkClearProgramId(null); setBulkClearReason(''); }} className="text-xs text-white/40 hover:text-white px-2 py-1 rounded-lg border border-white/10 hover:border-white/20 transition-all">
+                                        <button onClick={() => { setBulkClearProgramId(null); setBulkClearReason(''); setBulkClearError(null); }} className="text-xs text-white/40 hover:text-white px-2 py-1 rounded-lg border border-white/10 hover:border-white/20 transition-all">
                                           No
                                         </button>
                                         <button

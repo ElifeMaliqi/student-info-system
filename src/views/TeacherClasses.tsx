@@ -440,7 +440,9 @@ export default function TeacherClasses() {
                       const pct = total > 0 ? Math.round(((s.present + s.late) / total) * 100) : 0;
                       const barColor = pct >= 75 ? 'bg-emerald-400' : pct >= 50 ? 'bg-amber-400' : 'bg-red-400';
                       const txtColor = pct >= 75 ? 'text-emerald-400' : pct >= 50 ? 'text-amber-400' : 'text-red-400';
-                      const dateObj  = new Date(`${s.date}T12:00:00`);
+                      const rawDate = typeof s.date === 'string' ? s.date.slice(0, 10) : String(s.date ?? '').slice(0, 10);
+                      const dateObj  = new Date(`${rawDate}T12:00:00`);
+                      const validDate = !isNaN(dateObj.getTime());
                       return (
                         <button
                           key={`${s.classId}-${s.date}-${i}`}
@@ -449,10 +451,10 @@ export default function TeacherClasses() {
                         >
                           <div className="w-10 text-center shrink-0">
                             <div className="text-xs font-bold text-white/60">
-                              {dateObj.toLocaleDateString('en-US', { month: 'short' })}
+                              {validDate ? dateObj.toLocaleDateString('en-US', { month: 'short' }) : '—'}
                             </div>
                             <div className="text-lg font-display font-medium leading-none">
-                              {dateObj.getDate()}
+                              {validDate ? dateObj.getDate() : '—'}
                             </div>
                           </div>
                           <div className="flex-1 min-w-0">

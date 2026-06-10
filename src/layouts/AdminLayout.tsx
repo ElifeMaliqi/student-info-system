@@ -118,6 +118,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
     { id: 'students', label: t('nav.students'), icon: Users },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
+    { id: 'classes', label: 'Classes', icon: GraduationCap },
     { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
     { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
@@ -226,7 +227,6 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   ];
   const superadminSystemItems = [
     { id: 'analytics', label: 'Analytics', icon: LayoutDashboard, path: '/analytics' },
-    { id: 'roles', label: t('nav.roles'), icon: ShieldCheck, path: '/superadmin/roles' },
     { id: 'users', label: t('nav.users'), icon: UserCog, path: '/superadmin/users' },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
   ];

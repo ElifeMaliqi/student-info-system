@@ -2854,14 +2854,13 @@ export const api = {
           supabase.from('class_reschedules').select('*').eq('original_date', date),
           supabase.from('class_reschedules').select('*').eq('new_date', date),
         ]);
-        const origIds = new Set((orig.data || []).map((r: any) => r.id));
         for (const r of (orig.data || [])) {
           const normNewDate = normDate(r.new_date);
-          if (normNewDate === null || normNewDate === date) cancelledClassIds.add(r.class_id);
-          else movedAwayClassIds.add(r.class_id);
+          if (normNewDate === null) cancelledClassIds.add(r.class_id);
+          else movedAwayClassIds.add(r.class_id); // includes same-day time changes
         }
         for (const r of (moved.data || [])) {
-          if (!origIds.has(r.id)) movedHere.push(r);
+          movedHere.push(r); // includes same-day reschedules (original_date = new_date)
         }
       } catch { /* class_reschedules may not exist yet */ }
 
@@ -2907,6 +2906,7 @@ export const api = {
         for (const r of movedHere) {
           const cls     = classMap.get(r.class_id) as any;
           if (!cls) continue;
+          const trueOriginalDate = normDate(r.original_date) || date;
           const teacher = (cls.teacher as any) || {};
           result.push({
             classId:      cls.id,
@@ -2920,7 +2920,7 @@ export const api = {
             teacherId:    cls.teacher_id,
             startTime:    r.new_start_time || '09:00',
             endTime:      r.new_end_time   || '10:00',
-            originalDate: date,
+            originalDate: trueOriginalDate,
             isRescheduled: true,
             rescheduleId: r.id,
           });
@@ -2939,8 +2939,26 @@ export const api = {
       newStartTime?: string;
       newEndTime?: string;
       reason?: string;
+      existingRescheduleId?: string;
     }): Promise<void> => {
       const { data: { user } } = await supabase.auth.getUser();
+
+      if (params.existingRescheduleId) {
+        // Class was already rescheduled — update that specific row by ID to avoid creating a duplicate
+        const updatePayload: any = {
+          new_date:       params.newDate,
+          new_start_time: params.newDate ? (params.newStartTime || null) : null,
+          new_end_time:   params.newDate ? (params.newEndTime   || null) : null,
+          reason:         params.reason || null,
+        };
+        const { error } = await supabase
+          .from('class_reschedules')
+          .update(updatePayload)
+          .eq('id', params.existingRescheduleId);
+        if (error) throw new Error(error.message);
+        return;
+      }
+
       const payload: any = {
         class_id:      params.classId,
         session_id:    params.sessionId || null,
@@ -3099,7 +3117,9 @@ export const api = {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ ...notifPayload, studentEmail: student.email, studentName }),
-              }).catch(err => console.warn('send-class-update-email failed:', err))
+              }).then(async res => {
+                if (!res.ok) console.warn('[send-class-update-email] failed:', res.status, await res.text().catch(() => ''));
+              }).catch(err => console.warn('[send-class-update-email] network error:', err))
             );
           }
 
@@ -3109,7 +3129,9 @@ export const api = {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({ ...notifPayload, studentPhone: student.phone, studentName }),
-              }).catch(err => console.warn('send-class-update-sms failed:', err))
+              }).then(async res => {
+                if (!res.ok) console.warn('[send-class-update-sms] failed:', res.status, await res.text().catch(() => ''));
+              }).catch(err => console.warn('[send-class-update-sms] network error:', err))
             );
           }
 
@@ -3393,33 +3415,34 @@ export const api = {
       if (studErr) throw new Error(studErr.message);
 
       // Build lookup maps
-      const classMap = new Map((classes || []).map((c: any) => [
+      const classMap = new Map<string, { title: string; teacherName: string }>((classes || []).map((c: any) => [
         c.id,
         {
-          title: c.title,
+          title: c.title as string,
           teacherName: c.teacher ? `${c.teacher.first_name} ${c.teacher.last_name}` : 'Unknown',
         },
       ]));
 
-      const studentMap = new Map((students || []).map((s: any) => [
+      const studentMap = new Map<string, { name: string; avatar: string }>((students || []).map((s: any) => [
         s.id,
         {
-          name: `${s.first_name} ${s.last_name}`,
-          avatar: s.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.id}`,
+          name: `${s.first_name} ${s.last_name}` as string,
+          avatar: (s.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${s.id}`) as string,
         },
       ]));
 
       // Group by class + date
       const grouped: Record<string, { classId: string; className: string; teacherName: string; date: string; records: { studentId: string; studentName: string; avatar: string; status: 'present' | 'absent' | 'late' }[] }> = {};
       (attData || []).forEach((r: any) => {
-        const key = `${r.class_id}::${r.date}`;
+        const dateKey = r.date ? String(r.date).slice(0, 10) : '';
+        const key = `${r.class_id}::${dateKey}`;
         if (!grouped[key]) {
           const classInfo = classMap.get(r.class_id) || { title: 'Unknown', teacherName: 'Unknown' };
           grouped[key] = {
             classId:     r.class_id,
             className:   classInfo.title,
             teacherName: classInfo.teacherName,
-            date:        r.date,
+            date:        dateKey,
             records:     [],
           };
         }
@@ -3467,12 +3490,21 @@ export const api = {
       if (error) throw new Error(error.message);
 
       const className = classRow?.title || 'Unknown';
+      const toDateKey = (d: any): string | null => {
+        if (!d) return null;
+        if (d instanceof Date) return d.toISOString().slice(0, 10);
+        const s = String(d);
+        const m = s.match(/^\d{4}-\d{2}-\d{2}/);
+        return m ? m[0] : null;
+      };
       const grouped: Record<string, { present: number; absent: number; late: number }> = {};
       (data || []).forEach((r: any) => {
-        if (!grouped[r.date]) grouped[r.date] = { present: 0, absent: 0, late: 0 };
-        if (r.status === 'present') grouped[r.date].present++;
-        else if (r.status === 'absent') grouped[r.date].absent++;
-        else if (r.status === 'late') grouped[r.date].late++;
+        const key = toDateKey(r.date);
+        if (!key) return;
+        if (!grouped[key]) grouped[key] = { present: 0, absent: 0, late: 0 };
+        if (r.status === 'present') grouped[key].present++;
+        else if (r.status === 'absent') grouped[key].absent++;
+        else if (r.status === 'late') grouped[key].late++;
       });
 
       const rows = Object.entries(grouped)
@@ -3549,7 +3581,9 @@ export const api = {
         id: c.id,
         program_id: c.program_id,
         title: c.title,
+        code: c.code || undefined,
         teacher_id: c.teacher_id,
+        meetLink: c.meet_link || undefined,
         teacher: c.teacher ? {
           firstName: c.teacher.first_name,
           lastName: c.teacher.last_name,
@@ -3569,13 +3603,55 @@ export const api = {
       }));
     },
 
-    create: async (programId: string, title: string, teacherId: string, sessions: { dayOfWeek: number; startTime: string; endTime: string }[]): Promise<Class> => {
+    getAll: async (): Promise<(Class & { programName: string })[]> => {
+      const { data, error } = await supabase
+        .from('classes')
+        .select(`
+          *,
+          teacher:profiles!classes_teacher_id_fkey(id, first_name, last_name, email, avatar_url),
+          class_sessions(id, day_of_week, start_time, end_time),
+          enrollments:class_enrollments(count)
+        `)
+        .order('title');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(c => ({
+        id: c.id,
+        program_id: c.program_id,
+        programName: c.program_id || '',
+        title: c.title,
+        code: c.code || undefined,
+        teacher_id: c.teacher_id,
+        meetLink: c.meet_link || undefined,
+        teacher: c.teacher ? {
+          firstName: c.teacher.first_name,
+          lastName: c.teacher.last_name,
+          email: c.teacher.email,
+          avatar: c.teacher.avatar_url
+        } : undefined,
+        sessions: (c.class_sessions || []).map((s: any) => ({
+          id: s.id,
+          class_id: c.id,
+          day_of_week: s.day_of_week,
+          start_time: s.start_time,
+          end_time: s.end_time
+        })),
+        enrollmentCount: c.enrollments?.[0]?.count || 0,
+        created_at: c.created_at,
+        updated_at: c.updated_at
+      }));
+    },
+
+    create: async (programId: string, title: string, teacherId: string, sessions: { dayOfWeek: number; startTime: string; endTime: string }[], code?: string, meetLink?: string | null): Promise<Class> => {
       const { data: classData, error: classError } = await supabase
         .from('classes')
         .insert([{
           program_id: programId,
           title,
-          teacher_id: teacherId
+          teacher_id: teacherId,
+          code: code || null,
+          meet_link: meetLink || null,
         }])
         .select()
         .single();
@@ -3599,7 +3675,9 @@ export const api = {
         id: classData.id,
         program_id: classData.program_id,
         title: classData.title,
+        code: classData.code || undefined,
         teacher_id: classData.teacher_id,
+        meetLink: classData.meet_link || undefined,
         sessions: sessions.map((s, i) => ({
           id: `temp-${i}`,
           class_id: classData.id,
@@ -3611,12 +3689,13 @@ export const api = {
       };
     },
 
-    update: async (classId: string, title: string, teacherId: string, sessions: { dayOfWeek: number; startTime: string; endTime: string }[]): Promise<void> => {
+    update: async (classId: string, title: string, teacherId: string, sessions: { dayOfWeek: number; startTime: string; endTime: string }[], meetLink?: string | null): Promise<void> => {
       const { error: classError } = await supabase
         .from('classes')
         .update({
           title,
           teacher_id: teacherId,
+          meet_link: meetLink !== undefined ? (meetLink || null) : undefined,
           updated_at: new Date().toISOString(),
         })
         .eq('id', classId);
@@ -3662,6 +3741,15 @@ export const api = {
         .eq('id', classId);
 
       if (error) throw new Error(error.message);
+    },
+
+    getIdByCode: async (code: string): Promise<string | null> => {
+      const { data } = await supabase
+        .from('classes')
+        .select('id')
+        .eq('code', code.trim().toUpperCase())
+        .maybeSingle();
+      return data?.id ?? null;
     },
 
     enrollStudent: async (classId: string, studentId: string): Promise<ClassEnrollment> => {
@@ -3762,6 +3850,24 @@ export const api = {
         firstName: t.first_name,
         lastName: t.last_name,
         email: t.email
+      }));
+    },
+
+    getAllStudents: async (): Promise<{ id: string; firstName: string; lastName: string; email: string }[]> => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email')
+        .eq('role', 'student')
+        .eq('is_archived', false)
+        .order('first_name');
+
+      if (error) throw new Error(error.message);
+
+      return (data || []).map(s => ({
+        id: s.id,
+        firstName: s.first_name,
+        lastName: s.last_name,
+        email: s.email
       }));
     },
 
@@ -4189,11 +4295,11 @@ export const api = {
         headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password',
           'Parent First Name', 'Phone', 'Secondary Phone', 'Location',
           'Program', 'Gender', 'Date of Birth', 'City', 'Country',
-          'Attendance Rate', 'Grade'];
+          'Attendance Rate', 'Grade', 'Class Code'];
         example = ['John', 'Smith', 'john.smith@example.com', 'student', 'FMA#2026',
           'Jane', '+383441234567', '+383441234568', 'FMA (Rruga Qarkore)',
           'Computer Science', 'Male', '2000-01-15', 'Pristina', 'Kosovo',
-          '0', '0'];
+          '0', '0', ''];
       } else if (role === 'teacher') {
         headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password', 'Phone', 'Specialization'];
         example = ['Sarah', 'Johnson', 'sarah.j@example.com', 'teacher', 'FMA#2026', '+383441234568', 'Mathematics'];
@@ -4263,6 +4369,7 @@ export const api = {
           city: get(row, 'city'),
           country: get(row, 'country'),
           specialization: get(row, 'specialization'),
+          classCode: get(row, 'class_code', 'classcode', 'class code'),
         });
       }
 
