@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, generateResetToken, loginWithPassword, updatePassword, verifyResetToken, verifyToken } from '../../../../server/auth';
+import { rateLimit, clientIp } from '../../../../server/rate-limit';
 import { Resend } from 'resend';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -69,6 +70,21 @@ export async function POST(
   if (action === 'login') {
     try {
       const { email, password } = body as { email: string; password: string };
+
+      // Brute-force speed bump: cap attempts per IP and per email in a 15-min window.
+      // Thresholds are generous so a classroom behind one NAT IP isn't locked out.
+      const ip = clientIp(req);
+      const normEmail = (email ?? '').toLowerCase().trim();
+      const ipLimit = rateLimit(`login:ip:${ip}`, 50, 15 * 60_000);
+      const emailLimit = rateLimit(`login:email:${normEmail}`, 10, 15 * 60_000);
+      if (!ipLimit.ok || !emailLimit.ok) {
+        const retryAfter = Math.max(ipLimit.retryAfterSec, emailLimit.retryAfterSec);
+        return NextResponse.json(
+          { data: null, error: { message: 'Too many login attempts. Please try again later.' } },
+          { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+        );
+      }
+
       const { session, profile } = await loginWithPassword(email, password);
       return NextResponse.json({
         data: {

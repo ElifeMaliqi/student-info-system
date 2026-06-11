@@ -47,13 +47,14 @@ interface EditStudentForm {
 type CsvStudentRow = {
   firstName: string;
   lastName: string;
-  parentFirstName: string;
   email: string;
-  phone: string;
+  phone?: string;
+  parentFirstName?: string;
   secondaryPhone?: string;
-  location: string;
-  program: string;
+  location?: string;
+  program?: string;
   classCode?: string;
+  status?: string;
 };
 
 interface EnrollForm {
@@ -70,6 +71,16 @@ interface EnrollForm {
 }
 
 type ImportedStudent = { id: string; firstName: string; lastName: string; email: string };
+type NeedsInfoRow = CsvStudentRow & { _missingFields: string[] };
+
+function getMissingFields(row: CsvStudentRow): string[] {
+  const m: string[] = [];
+  if (!row.firstName?.trim()) m.push('First Name');
+  if (!row.lastName?.trim())  m.push('Last Name');
+  if (!row.email?.trim())     m.push('Email');
+  return m;
+}
+
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function generateCode(): string {
   return Array.from({ length: 7 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
@@ -133,6 +144,13 @@ export default function Students() {
   const [remainingIds, setRemainingIds] = useState<Set<string>>(new Set());
   const [csvSelectedIds, setCsvSelectedIds] = useState<Set<string>>(new Set());
   const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [csvNeedsInfo, setCsvNeedsInfo] = useState<NeedsInfoRow[]>([]);
+  const [csvView, setCsvView] = useState<'list' | 'needs-info'>('list');
+  const [csvIgnoreMode, setCsvIgnoreMode] = useState(false);
+  const [csvIgnoreSelected, setCsvIgnoreSelected] = useState<Set<number>>(new Set());
+  const [csvEditingIdx, setCsvEditingIdx] = useState<number | null>(null);
+  const [csvEditRow, setCsvEditRow] = useState<CsvStudentRow | null>(null);
+  const [csvEditSaving, setCsvEditSaving] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assignMode, setAssignMode] = useState<'existing' | 'create'>('existing');
   const [assignClassId, setAssignClassId] = useState('');
@@ -330,7 +348,7 @@ export default function Students() {
       const semiCount = (lines[0].match(/;/g) || []).length;
       const delimiter = semiCount > commaCount ? ';' : ',';
 
-      const headers = parseCsvLine(lines[0], delimiter).map(h => h.trim().replace(/^["']+|["']+$/g, ''));
+      const headers = parseCsvLine(lines[0], delimiter).map(h => h.trim().replace(/^["']+|["']+$/g, '').replace(/\s*\*\s*$/, ''));
       const parsedRows: CsvStudentRow[] = [];
 
       for (let i = 1; i < lines.length; i++) {
@@ -338,31 +356,37 @@ export default function Students() {
         const row: Record<string, string> = {};
         headers.forEach((header, idx) => { row[header] = (cols[idx] || '').trim(); });
 
-        const firstName = getHeaderValue(row, ['first_name', 'firstName', 'first name', 'firstname']);
-        const lastName = getHeaderValue(row, ['last_name', 'lastName', 'last name', 'lastname']);
-        const parentFirstName = getHeaderValue(row, ['parent_first_name', 'parentFirstName', 'parent first name', 'parent name', 'parent_name']);
+        const firstName = getHeaderValue(row, ['first_name', 'firstName', 'first name', 'firstname', 'name']);
+        const lastName = getHeaderValue(row, ['last_name', 'lastName', 'last name', 'lastname', 'surname']);
         const email = getHeaderValue(row, ['email']);
-        const phone = getHeaderValue(row, ['phone', 'phone_number', 'phone number']);
+        const phone = getHeaderValue(row, ['phone', 'phone_number', 'phone number', 'phone number']);
+        const parentFirstName = getHeaderValue(row, ['parent_first_name', 'parentFirstName', 'parent first name', 'parent name', 'parent_name']);
         const secondaryPhone = getHeaderValue(row, ['secondary_phone', 'secondaryPhone', 'secondary phone', 'secondary_phone_number']);
         const location = getHeaderValue(row, ['location']);
         const program = getHeaderValue(row, ['degree', 'program']);
         const classCode = getHeaderValue(row, ['class_code', 'classcode', 'class code', 'code']);
+        const status = getHeaderValue(row, ['status']);
 
         if (!firstName && !lastName && !email) continue;
-        parsedRows.push({ firstName, lastName, parentFirstName, email, phone, secondaryPhone, location, program, classCode: classCode || undefined });
+        parsedRows.push({ firstName, lastName, email, phone: phone || undefined, parentFirstName: parentFirstName || undefined, secondaryPhone: secondaryPhone || undefined, location: location || undefined, program: program || undefined, classCode: classCode || undefined, status: status || undefined });
       }
 
       if (parsedRows.length === 0) throw new Error('No valid student rows found in the CSV file.');
+
+      // Split: complete rows vs rows missing required fields
+      const completeRows: CsvStudentRow[] = [];
+      const needsInfoRows: NeedsInfoRow[] = [];
+      for (const row of parsedRows) {
+        const missing = getMissingFields(row);
+        if (missing.length > 0) needsInfoRows.push({ ...row, _missingFields: missing });
+        else completeRows.push(row);
+      }
 
       const created: ImportedStudent[] = [];
       const autoEnrolledIds = new Set<string>();
       const errors: string[] = [];
 
-      for (const row of parsedRows) {
-        if (!row.email || !row.firstName || !row.lastName) {
-          errors.push(`Skipped (missing required fields): ${row.email || `${row.firstName} ${row.lastName}` || 'unknown'}`);
-          continue;
-        }
+      for (const row of completeRows) {
         try {
           const result = await api.users.create(row.email.trim().toLowerCase(), row.firstName.trim(), row.lastName.trim(), 'student', 'FMA#2026');
           if (result?.id) {
@@ -378,21 +402,22 @@ export default function Students() {
               });
             } catch { /* non-critical */ }
 
-            // Auto-enroll if class code provided and matches
+            const isInactive = /not.?active|inactive|jo.?aktiv/i.test(row.status || '');
+            if (isInactive) {
+              try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
+            }
+
             if (row.classCode) {
               try {
                 const classId = await api.classes.getIdByCode(row.classCode);
-                if (classId) {
-                  await api.classes.enrollStudent(classId, result.id);
-                  autoEnrolledIds.add(result.id);
-                }
+                if (classId) { await api.classes.enrollStudent(classId, result.id); autoEnrolledIds.add(result.id); }
               } catch { /* non-critical */ }
             }
 
             created.push({ id: result.id, firstName: row.firstName.trim(), lastName: row.lastName.trim(), email: row.email.trim().toLowerCase() });
           }
         } catch (e: any) {
-          errors.push(`${row.email}: ${e.message}`);
+          errors.push(`${row.email || `${row.firstName} ${row.lastName}`}: ${e.message}`);
         }
       }
 
@@ -401,6 +426,12 @@ export default function Students() {
       setRemainingIds(needsAssignment);
       setCsvSelectedIds(new Set(needsAssignment));
       setImportErrors(errors);
+      setCsvNeedsInfo(needsInfoRows);
+      setCsvView('list');
+      setCsvIgnoreMode(false);
+      setCsvIgnoreSelected(new Set());
+      setCsvEditingIdx(null);
+      setCsvEditRow(null);
       if (created.length > 0) await loadStudents();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'CSV import failed.');
@@ -450,6 +481,63 @@ export default function Students() {
       alert(e.message || 'Failed to assign students');
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const handleIgnoreAll = () => {
+    if (!window.confirm(`${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} will not be created and will not appear in the system. Are you sure?`)) return;
+    setCsvNeedsInfo([]);
+    setCsvIgnoreMode(false);
+    setCsvIgnoreSelected(new Set());
+    setCsvView('list');
+  };
+
+  const handleIgnoreSelected = () => {
+    const count = csvIgnoreSelected.size;
+    if (count === 0) return;
+    if (!window.confirm(`${count} student${count !== 1 ? 's' : ''} will not be created and will not appear in the system. Are you sure?`)) return;
+    const next = csvNeedsInfo.filter((_, i) => !csvIgnoreSelected.has(i));
+    setCsvNeedsInfo(next);
+    setCsvIgnoreSelected(new Set());
+    if (next.length === 0) { setCsvView('list'); setCsvIgnoreMode(false); }
+  };
+
+  const handleSaveNeedsInfo = async () => {
+    if (csvEditingIdx === null || !csvEditRow) return;
+    setCsvEditSaving(true);
+    try {
+      const result = await api.users.create(csvEditRow.email.trim().toLowerCase(), csvEditRow.firstName.trim(), csvEditRow.lastName.trim(), 'student', 'FMA#2026');
+      if (result?.id) {
+        try {
+          await api.teacher.updateStudentProfile(result.id, {
+            firstName: csvEditRow.firstName.trim(),
+            lastName: csvEditRow.lastName.trim(),
+            email: csvEditRow.email.trim().toLowerCase(),
+            parentFirstName: csvEditRow.parentFirstName?.trim() || undefined,
+            phone: csvEditRow.phone?.trim() || undefined,
+            secondaryPhone: csvEditRow.secondaryPhone?.trim() || undefined,
+            location: csvEditRow.location?.trim() || undefined,
+          });
+        } catch { /* non-critical */ }
+        const isInactive = /not.?active|inactive|jo.?aktiv/i.test(csvEditRow.status || '');
+        if (isInactive) {
+          try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
+        }
+        setImportedStudents(prev => [...prev, { id: result.id, firstName: csvEditRow.firstName.trim(), lastName: csvEditRow.lastName.trim(), email: csvEditRow.email.trim().toLowerCase() }]);
+        setRemainingIds(prev => new Set([...prev, result.id]));
+        setCsvSelectedIds(prev => new Set([...prev, result.id]));
+        setCsvNeedsInfo(prev => {
+          const next = prev.filter((_, i) => i !== csvEditingIdx);
+          if (next.length === 0) setCsvView('list');
+          return next;
+        });
+        setCsvEditingIdx(null);
+        setCsvEditRow(null);
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to create student');
+    } finally {
+      setCsvEditSaving(false);
     }
   };
 
@@ -1505,7 +1593,7 @@ export default function Students() {
 
       {/* CSV Import Results Modal */}
       <AnimatePresence>
-        {importedStudents.length > 0 && (
+        {(importedStudents.length > 0 || csvNeedsInfo.length > 0) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1517,101 +1605,237 @@ export default function Students() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              className="glass-card rounded-2xl p-6 w-full max-w-lg border border-white/10 max-h-[85vh] flex flex-col"
+              className="glass-card rounded-2xl w-full max-w-lg border border-white/10 max-h-[88vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-4 shrink-0">
-                <h3 className="font-display text-xl font-medium text-white">Import Complete</h3>
-                <button
-                  onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); }}
-                  className="p-2 rounded-lg hover:bg-white/5"
-                >
-                  <X className="w-5 h-5 text-white/50" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4">
-                {/* Success banner */}
-                <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
-                  {importedStudents.length} student{importedStudents.length !== 1 ? 's' : ''} imported successfully
-                </div>
-
-                {/* Errors */}
-                {importErrors.length > 0 && (
-                  <div className="rounded-xl bg-red-500/[0.07] border border-red-500/15 p-3 max-h-28 overflow-y-auto custom-scrollbar">
-                    <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Errors</p>
-                    {importErrors.map((e, i) => <p key={i} className="text-xs text-red-300/70">{e}</p>)}
-                  </div>
-                )}
-
-                {/* Checklist */}
-                {remainingIds.size > 0 ? (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs text-white/40">{remainingIds.size} remaining — select to assign to a class</p>
-                      <button
-                        type="button"
-                        onClick={() => setCsvSelectedIds(prev => prev.size === remainingIds.size ? new Set() : new Set(remainingIds))}
-                        className="text-xs text-[#949ce4] hover:text-white transition-colors"
-                      >
-                        {csvSelectedIds.size === remainingIds.size ? 'Deselect all' : 'Select all'}
-                      </button>
-                    </div>
-
-                    <div className="space-y-1 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                      {importedStudents.filter(u => remainingIds.has(u.id)).map(u => {
-                        const checked = csvSelectedIds.has(u.id);
-                        return (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onClick={() => setCsvSelectedIds(prev => {
-                              const next = new Set(prev);
-                              if (next.has(u.id)) next.delete(u.id); else next.add(u.id);
-                              return next;
-                            })}
-                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${
-                              checked ? 'bg-[#949ce4]/10 border-[#949ce4]/30' : 'bg-white/[0.02] border-white/5 hover:border-white/10'
-                            }`}
-                          >
-                            <div className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-colors ${
-                              checked ? 'bg-[#949ce4] border-[#949ce4]' : 'border-white/20'
-                            }`}>
-                              {checked && <Check size={10} className="text-white" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-white truncate">{u.firstName} {u.lastName}</p>
-                              <p className="text-[11px] text-white/35 truncate">{u.email}</p>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  {csvView === 'needs-info' && (
                     <button
-                      onClick={() => void handleOpenAssignModal()}
-                      disabled={csvSelectedIds.size === 0}
-                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
+                      onClick={() => { setCsvView('list'); setCsvIgnoreMode(false); setCsvIgnoreSelected(new Set()); setCsvEditingIdx(null); setCsvEditRow(null); }}
+                      className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors mr-1"
                     >
-                      <GraduationCap size={15} />
-                      Assign {csvSelectedIds.size > 0 ? `${csvSelectedIds.size} selected` : 'selected'} to class
+                      <ChevronLeft size={16} />
                     </button>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-center gap-2 py-4 text-center">
-                    <CheckCircle2 className="w-8 h-8 text-emerald-400/60" />
-                    <p className="text-sm text-white/50">All students have been assigned.</p>
-                  </div>
-                )}
-
+                  )}
+                  <h3 className="font-display text-xl font-medium text-white">
+                    {csvView === 'needs-info' ? 'Students with Missing Info' : 'Import Complete'}
+                  </h3>
+                </div>
                 <button
-                  onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); }}
-                  className="w-full text-sm text-white/35 hover:text-white transition-colors py-1"
+                  onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); setCsvNeedsInfo([]); setCsvView('list'); setCsvIgnoreMode(false); setCsvEditingIdx(null); setCsvEditRow(null); }}
+                  className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors"
                 >
-                  Done
+                  <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* ── LIST VIEW ── */}
+              {csvView === 'list' && (
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+                  {/* Banners */}
+                  {importedStudents.length > 0 && (
+                    <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      {importedStudents.length} student{importedStudents.length !== 1 ? 's' : ''} imported successfully
+                    </div>
+                  )}
+                  {importErrors.length > 0 && (
+                    <div className="rounded-xl bg-red-500/[0.07] border border-red-500/15 p-3 max-h-24 overflow-y-auto custom-scrollbar">
+                      <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Errors</p>
+                      {importErrors.map((e, i) => <p key={i} className="text-xs text-red-300/70">{e}</p>)}
+                    </div>
+                  )}
+
+                  {/* Checklist */}
+                  {remainingIds.size > 0 ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-white/40">{remainingIds.size} remaining — select to assign to a class</p>
+                        <button
+                          type="button"
+                          onClick={() => setCsvSelectedIds(prev => prev.size === remainingIds.size ? new Set() : new Set(remainingIds))}
+                          className="text-xs text-[#949ce4] hover:text-white transition-colors"
+                        >
+                          {csvSelectedIds.size === remainingIds.size ? 'Deselect all' : 'Select all'}
+                        </button>
+                      </div>
+                      <div className="space-y-1 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                        {importedStudents.filter(u => remainingIds.has(u.id)).map(u => {
+                          const checked = csvSelectedIds.has(u.id);
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => setCsvSelectedIds(prev => { const next = new Set(prev); if (next.has(u.id)) next.delete(u.id); else next.add(u.id); return next; })}
+                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${checked ? 'bg-[#949ce4]/10 border-[#949ce4]/30' : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
+                            >
+                              <div className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-[#949ce4] border-[#949ce4]' : 'border-white/20'}`}>
+                                {checked && <Check size={10} className="text-white" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-white truncate">{u.firstName} {u.lastName}</p>
+                                <p className="text-[11px] text-white/35 truncate">{u.email}</p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        onClick={() => void handleOpenAssignModal()}
+                        disabled={csvSelectedIds.size === 0}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
+                      >
+                        <GraduationCap size={15} />
+                        Assign {csvSelectedIds.size > 0 ? `${csvSelectedIds.size} selected` : 'selected'} to class
+                      </button>
+                    </>
+                  ) : importedStudents.length > 0 ? (
+                    <div className="flex flex-col items-center gap-2 py-2 text-center">
+                      <CheckCircle2 className="w-7 h-7 text-emerald-400/60" />
+                      <p className="text-sm text-white/50">All students have been assigned.</p>
+                    </div>
+                  ) : null}
+
+                  {/* Missing info callout */}
+                  {csvNeedsInfo.length > 0 && (
+                    <button
+                      onClick={() => { setCsvView('needs-info'); setCsvIgnoreMode(false); setCsvIgnoreSelected(new Set()); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] text-amber-300 text-sm hover:bg-amber-500/10 transition-colors text-left"
+                    >
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span className="flex-1">View {csvNeedsInfo.length} student{csvNeedsInfo.length !== 1 ? 's' : ''} with missing information</span>
+                      <ChevronRight size={14} className="text-amber-400/50" />
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); setCsvNeedsInfo([]); setCsvView('list'); }}
+                    className="w-full text-sm text-white/35 hover:text-white transition-colors py-1"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {/* ── NEEDS INFO VIEW ── */}
+              {csvView === 'needs-info' && (
+                <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
+                  {/* Action bar */}
+                  <div className="px-6 py-3 border-b border-white/5 flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={handleIgnoreAll}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      Ignore all
+                    </button>
+                    <button
+                      onClick={() => { setCsvIgnoreMode(m => !m); setCsvIgnoreSelected(new Set()); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${csvIgnoreMode ? 'bg-white/10 border-white/20 text-white' : 'border-white/10 text-white/50 hover:text-white hover:bg-white/5'}`}
+                    >
+                      {csvIgnoreMode ? 'Cancel' : 'Select ignore'}
+                    </button>
+                    {csvIgnoreMode && csvIgnoreSelected.size > 0 && (
+                      <button
+                        onClick={handleIgnoreSelected}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border border-red-500/20 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors ml-auto"
+                      >
+                        Ignore {csvIgnoreSelected.size} selected
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Student list */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+                    {csvNeedsInfo.map((row, idx) => {
+                      const isEditing = csvEditingIdx === idx;
+                      const isSelected = csvIgnoreSelected.has(idx);
+
+                      return (
+                        <div key={idx} className={`rounded-xl border transition-all ${isEditing ? 'border-[#949ce4]/40 bg-[#949ce4]/5' : isSelected ? 'border-red-500/25 bg-red-500/[0.05]' : 'border-white/8 bg-white/[0.02]'}`}>
+                          {/* Row header */}
+                          <div
+                            className="flex items-center gap-3 px-3 py-2.5 cursor-pointer"
+                            onClick={() => {
+                              if (csvIgnoreMode) {
+                                setCsvIgnoreSelected(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
+                              } else {
+                                if (isEditing) { setCsvEditingIdx(null); setCsvEditRow(null); }
+                                else { setCsvEditingIdx(idx); setCsvEditRow({ ...row }); }
+                              }
+                            }}
+                          >
+                            {csvIgnoreMode && (
+                              <div className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-colors ${isSelected ? 'bg-red-500 border-red-500' : 'border-white/20'}`}>
+                                {isSelected && <Check size={10} className="text-white" />}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-white truncate">
+                                {row.firstName || row.lastName ? `${row.firstName} ${row.lastName}`.trim() : <span className="text-white/30 italic">No name</span>}
+                              </p>
+                              <p className="text-[11px] text-white/35 truncate">{row.email || <span className="italic">No email</span>}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-1 justify-end max-w-[160px]">
+                              {row._missingFields.map(f => (
+                                <span key={f} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/20 text-amber-300/80 whitespace-nowrap">{f}</span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Inline edit form */}
+                          {isEditing && csvEditRow && (
+                            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-white/8">
+                              <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest pt-1">Fill in missing fields</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {(['firstName', 'lastName'] as const).map(field => {
+                                  const label = field === 'firstName' ? 'First Name' : 'Last Name';
+                                  return (
+                                    <div key={field}>
+                                      <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1 text-amber-400/70">{label} *</label>
+                                      <input
+                                        type="text"
+                                        value={csvEditRow[field]}
+                                        onChange={e => setCsvEditRow(r => r ? { ...r, [field]: e.target.value } : r)}
+                                        className="glass-input w-full px-3 py-2 rounded-lg text-sm text-white"
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1 text-amber-400/70">Email *</label>
+                                <input
+                                  type="email"
+                                  value={csvEditRow.email}
+                                  onChange={e => setCsvEditRow(r => r ? { ...r, email: e.target.value } : r)}
+                                  className="glass-input w-full px-3 py-2 rounded-lg text-sm text-white"
+                                />
+                              </div>
+                              <div className="flex gap-2 pt-1">
+                                <button
+                                  onClick={() => { setCsvEditingIdx(null); setCsvEditRow(null); }}
+                                  className="flex-1 py-2 rounded-lg border border-white/10 text-sm text-white/50 hover:text-white hover:bg-white/5 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => void handleSaveNeedsInfo()}
+                                  disabled={csvEditSaving || !!(csvEditRow && getMissingFields(csvEditRow).length > 0)}
+                                  className="flex-1 py-2 rounded-lg bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                >
+                                  {csvEditSaving ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...</> : 'Save & Add'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}

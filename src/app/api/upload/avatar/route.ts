@@ -13,8 +13,25 @@ export async function POST(req: NextRequest) {
   const file = form.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
+  // Only accept real images, and derive the extension from the validated content
+  // type rather than the user-supplied filename (which could carry a script
+  // extension or path-traversal segments).
+  const ALLOWED: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+  };
+  const ext = ALLOWED[file.type];
+  if (!ext) {
+    return NextResponse.json({ error: 'Unsupported image type' }, { status: 400 });
+  }
+  const MAX_BYTES = 5 * 1024 * 1024;
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json({ error: 'Image too large (max 5MB)' }, { status: 400 });
+  }
+
   const bytes = Buffer.from(await file.arrayBuffer());
-  const ext = file.name.split('.').pop() || 'jpg';
   const filename = `${user.id}-${Date.now()}.${ext}`;
   const dir = join(process.cwd(), 'public', 'uploads', 'avatars');
   await mkdir(dir, { recursive: true });

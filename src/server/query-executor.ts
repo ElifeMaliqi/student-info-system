@@ -142,6 +142,22 @@ function quoteIdent(name: string): string {
   return `"${name}"`;
 }
 
+/**
+ * Validate a comma-separated column list before it is interpolated into an
+ * embedded SELECT. Embedded columns (unlike top-level ones) are concatenated
+ * raw, so without this an attacker-supplied `select` could inject SQL.
+ */
+function assertSafeColumnList(cols: string): void {
+  if (cols === '*' || cols === 'count') return;
+  for (const part of cols.split(',')) {
+    const c = part.trim();
+    if (c === '*') continue;
+    if (!/^[a-z_][a-z0-9_]*$/i.test(c)) {
+      throw new Error(`Invalid column: ${c}`);
+    }
+  }
+}
+
 function buildWhere(filters: DbQueryRequest['filters'], orClause: string | undefined, params: unknown[], startIdx: number): { sql: string; nextIdx: number } {
   const clauses: string[] = [];
   let idx = startIdx;
@@ -235,6 +251,7 @@ async function attachEmbeds(
           }
 
           const cols = emb.columns === '*' ? '*' : emb.columns;
+          assertSafeColumnList(cols);
           const { rows: childRows } = await client.query(
             `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1`,
             [fkVal]
@@ -244,6 +261,7 @@ async function attachEmbeds(
             : childRows;
         } else {
           const cols = emb.columns === '*' ? '*' : emb.columns;
+          assertSafeColumnList(cols);
           const { rows: childRows } = await client.query(
             `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1 LIMIT 1`,
             [fkVal]
@@ -396,6 +414,34 @@ export async function executeRpc(
         [args.p_student_id, userId]
       );
       return { data: rows[0]?.result, error: null };
+    }
+    if (fn === 'get_user_context') {
+      // Returns the caller's own profile + system role + permissions. The user id
+      // is taken from the authenticated session, never from client input, so this
+      // cannot be used to read another user's record.
+      if (!userId) return { data: null, error: { message: 'Not authenticated' } };
+      const { rows } = await client.query(
+        `SELECT
+            p.id, p.email, p.first_name, p.last_name, p.role,
+            p.avatar_url, p.must_change_password, p.system_role_id,
+            sr.id          AS sr_id,
+            sr.name        AS sr_name,
+            sr.description AS sr_description,
+            sr.is_system_role AS sr_is_system_role,
+            COALESCE(
+              json_agg(
+                json_build_object('id', rp.id, 'module', rp.module, 'actions', rp.actions)
+              ) FILTER (WHERE rp.id IS NOT NULL),
+              '[]'::json
+            ) AS sr_permissions
+          FROM profiles p
+          LEFT JOIN system_roles sr ON sr.id = p.system_role_id
+          LEFT JOIN role_permissions rp ON rp.role_id = p.system_role_id
+          WHERE p.id = $1
+          GROUP BY p.id, sr.id`,
+        [userId]
+      );
+      return { data: rows[0] ?? null, error: null };
     }
     return { data: null, error: { message: `Unknown function: ${fn}` } };
   } catch (e) {

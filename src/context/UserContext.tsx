@@ -22,45 +22,20 @@ function authHeaders(): Record<string, string> {
   };
 }
 
-async function fetchUserData(userId: string): Promise<User | null> {
+async function fetchUserData(_userId: string): Promise<User | null> {
   const headers = authHeaders();
 
-  // Single query: profile + system role + permissions in one round-trip
-  const resp = await fetch('/api/db', {
+  // Profile + system role + permissions for the *authenticated* user. The server
+  // derives the user id from the session token, so no id is sent from the client.
+  const resp = await fetch('/api/rpc', {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      query: `
-        SELECT
-          p.id, p.email, p.first_name, p.last_name, p.role,
-          p.avatar_url, p.must_change_password, p.system_role_id,
-          sr.id        AS sr_id,
-          sr.name      AS sr_name,
-          sr.description AS sr_description,
-          sr.is_system_role AS sr_is_system_role,
-          COALESCE(
-            json_agg(
-              json_build_object(
-                'id',      rp.id,
-                'module',  rp.module,
-                'actions', rp.actions
-              )
-            ) FILTER (WHERE rp.id IS NOT NULL),
-            '[]'::json
-          ) AS sr_permissions
-        FROM profiles p
-        LEFT JOIN system_roles sr ON sr.id = p.system_role_id
-        LEFT JOIN role_permissions rp ON rp.role_id = p.system_role_id
-        WHERE p.id = $1
-        GROUP BY p.id, sr.id
-      `,
-      params: [userId],
-    }),
+    body: JSON.stringify({ fn: 'get_user_context', args: {} }),
   });
 
   if (!resp.ok) return null;
   const result = await resp.json();
-  const row = result.rows?.[0];
+  const row = result.data;
   if (!row) return null;
 
   const parseActions = (a: unknown): string[] => {
@@ -98,7 +73,7 @@ async function fetchUserData(userId: string): Promise<User | null> {
     firstName: row.first_name,
     lastName: row.last_name,
     role: row.role as Role,
-    avatar: row.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.email || userId}`,
+    avatar: row.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.email || row.id}`,
     mustChangePassword: !!row.must_change_password,
     systemRole,
   };

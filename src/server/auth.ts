@@ -1,9 +1,33 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { query } from './db';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'change-me-in-production-fma-sis'
-);
+// Known insecure placeholder values that must never be used to sign tokens.
+const WEAK_SECRETS = new Set([
+  'change-me-in-production-fma-sis',
+  'change-this-to-a-long-random-string-in-production',
+]);
+
+let cachedSecret: Uint8Array | null = null;
+
+/**
+ * Resolve the JWT signing secret lazily and fail closed.
+ *
+ * Resolving at call time (rather than module load) keeps `next build` from
+ * crashing in environments where the secret isn't present, while still
+ * refusing to sign/verify tokens with a missing or placeholder secret.
+ */
+function getSecret(): Uint8Array {
+  if (cachedSecret) return cachedSecret;
+  const value = process.env.JWT_SECRET;
+  if (!value || WEAK_SECRETS.has(value) || value.length < 32) {
+    throw new Error(
+      'JWT_SECRET is not configured with a strong value. Set a random 32+ character secret.'
+    );
+  }
+  cachedSecret = new TextEncoder().encode(value);
+  return cachedSecret;
+}
+
 const JWT_ISSUER = 'fma-sis';
 const JWT_EXPIRY = '7d';
 
@@ -46,7 +70,7 @@ export async function loginWithPassword(
     .setIssuedAt()
     .setIssuer(JWT_ISSUER)
     .setExpirationTime(JWT_EXPIRY)
-    .sign(JWT_SECRET);
+    .sign(getSecret());
 
   return {
     session: {
@@ -59,7 +83,7 @@ export async function loginWithPassword(
 
 export async function verifyToken(token: string): Promise<AuthUser | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, { issuer: JWT_ISSUER });
+    const { payload } = await jwtVerify(token, getSecret(), { issuer: JWT_ISSUER });
     const id = payload.sub as string;
     if (!id) return null;
     const { rows } = await query<{ id: string; email: string; role: string }>(
@@ -89,12 +113,12 @@ export async function generateResetToken(userId: string): Promise<string> {
     .setIssuedAt()
     .setIssuer(JWT_ISSUER)
     .setExpirationTime('1h')
-    .sign(JWT_SECRET);
+    .sign(getSecret());
 }
 
 export async function verifyResetToken(token: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, { issuer: JWT_ISSUER });
+    const { payload } = await jwtVerify(token, getSecret(), { issuer: JWT_ISSUER });
     if ((payload as { purpose?: string }).purpose !== 'password-reset') return null;
     return (payload.sub as string) || null;
   } catch {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken, updatePassword } from '../../../../server/auth';
 import { query } from '../../../../server/db';
+import { rateLimit, clientIp } from '../../../../server/rate-limit';
 import { Resend } from 'resend';
 import crypto from 'crypto';
 
@@ -68,6 +69,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
 
   if (!user && !publicFns.includes(name)) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  // Abuse cap on the messaging endpoints (email/SMS cost money). Generous enough
+  // for legitimate bulk sends, which loop server-side under a single call, but it
+  // throttles a client firing thousands of individual sends. Keyed per user when
+  // authenticated, otherwise per IP for the public password-reset functions.
+  const limitKey = user ? `notify:user:${user.id}` : `notify:ip:${clientIp(req)}`;
+  const limit = user
+    ? rateLimit(limitKey, 300, 10 * 60_000)
+    : rateLimit(limitKey, 10, 10 * 60_000);
+  if (!limit.ok) {
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please slow down and try again shortly.' },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } }
+    );
   }
 
   try {

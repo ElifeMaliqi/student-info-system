@@ -4292,14 +4292,8 @@ export const api = {
       let example: string[];
 
       if (role === 'student') {
-        headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password',
-          'Parent First Name', 'Phone', 'Secondary Phone', 'Location',
-          'Program', 'Gender', 'Date of Birth', 'City', 'Country',
-          'Attendance Rate', 'Grade', 'Class Code'];
-        example = ['John', 'Smith', 'john.smith@example.com', 'student', 'FMA#2026',
-          'Jane', '+383441234567', '+383441234568', 'FMA (Rruga Qarkore)',
-          'Computer Science', 'Male', '2000-01-15', 'Pristina', 'Kosovo',
-          '0', '0', ''];
+        headers = ['Name *', 'Surname *', 'Email *', 'Phone Number', 'Status', 'Program', 'Parent First Name', 'Secondary Phone', 'Location', 'Password', 'Class Code'];
+        example = ['John', 'Smith', 'john.smith@example.com', '+383441234567', 'active', 'Computer Science', '', '', '', '', ''];
       } else if (role === 'teacher') {
         headers = ['First Name', 'Last Name', 'Email', 'Role', 'Password', 'Phone', 'Specialization'];
         example = ['Sarah', 'Johnson', 'sarah.j@example.com', 'teacher', 'FMA#2026', '+383441234568', 'Mathematics'];
