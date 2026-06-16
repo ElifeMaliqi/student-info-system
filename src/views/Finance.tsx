@@ -4,14 +4,15 @@ import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CreditCard, Search, CheckCircle, Clock,
-  AlertCircle, X, Loader2, Trash2, DollarSign, Settings2, Pencil, Users, RotateCcw, Download, Archive,
+  AlertCircle, X, Loader2, Trash2, DollarSign, Settings2, Pencil, Users, RotateCcw, Download, Archive, Upload, FileText,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useModulePermissions } from '../context/UserContext';
+import { useModulePermissions, useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import { Invoice, InvoiceSettings, SettingsStudent } from '../types';
 import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
+import { UnmatchedStudentsModal, type UnmatchedStudent } from '../components/UnmatchedStudentsModal';
 
 type StatusFilter = 'all' | 'paid' | 'partial' | 'not_paid' | 'overdue';
 
@@ -46,7 +47,18 @@ const STATUS_ICON: Record<string, typeof CheckCircle> = {
 
 export default function Finance() {
   const { t } = useLanguage();
+  const { user } = useUser();
   const { isOverridden: permOverridden, canCreate, canUpdate, canDelete } = useModulePermissions('finance');
+
+  // Only admins/superadmins may import payment documents.
+  const canImportDocs = user?.role === 'admin' || user?.role === 'superadmin';
+  const [showImport, setShowImport]     = useState(false);
+  const [impFiles, setImpFiles]         = useState<File[]>([]);
+  const [importing, setImporting]       = useState(false);
+  const [importError, setImportError]   = useState('');
+  const [importSummary, setImportSummary] = useState<{ created: number; items: { studentName: string; amount: number; month: number; year: number }[] } | null>(null);
+  const [unmatched, setUnmatched]       = useState<UnmatchedStudent[] | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<{ file: File; names: string[] }[]>([]); // files whose student wasn't found
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -358,6 +370,63 @@ export default function Finance() {
     }
   }
 
+  function openImport() {
+    setImportError('');
+    setImportSummary(null);
+    setImpFiles([]);
+    setUnmatched(null);
+    setPendingFiles([]);
+    setShowImport(true);
+  }
+
+  // Import one or more .docx files. Only the given files are processed, so a
+  // re-import (after adding missing students) re-runs just the unmatched ones —
+  // already-created invoices are never duplicated.
+  async function runImport(filesToRun: File[] = impFiles) {
+    if (filesToRun.length === 0) return;
+    setImporting(true);
+    setImportError('');
+
+    const created: { studentName: string; amount: number; month: number; year: number }[] = [];
+    const stillUnmatched: UnmatchedStudent[] = [];
+    const stillPending: { file: File; names: string[] }[] = [];
+    let lastError = '';
+
+    for (const file of filesToRun) {
+      try {
+        const res = await api.finance.importInvoiceDoc(file);
+        if (res.imported) {
+          created.push({ studentName: res.studentName, amount: res.amount, month: res.month, year: res.year });
+        } else {
+          stillUnmatched.push(...res.unmatched);
+          stillPending.push({ file, names: res.unmatched.map(u => u.name) });
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : 'Import failed';
+        stillPending.push({ file, names: [] });
+      }
+    }
+
+    if (created.length) { playPopSound(); await loadAll(); }
+    setImportSummary(prev => ({
+      created: (prev?.created || 0) + created.length,
+      items: [...(prev?.items || []), ...created],
+    }));
+    setPendingFiles(stillPending);
+    const dedup = Array.from(new Map(stillUnmatched.map(u => [u.name.toLowerCase(), u])).values());
+    setUnmatched(dedup.length ? dedup : null);
+    if (lastError && created.length === 0 && dedup.length === 0) setImportError(lastError);
+    setImporting(false);
+  }
+
+  function handleUnmatchedReimport(dismissedNames: string[] = []) {
+    setUnmatched(null);
+    const dismissed = new Set(dismissedNames.map(n => n.toLowerCase()));
+    // Re-run only files whose student wasn't dismissed.
+    const files = pendingFiles.filter(p => !p.names.some(n => dismissed.has(n.toLowerCase()))).map(p => p.file);
+    void runImport(files);
+  }
+
   async function changeStatus(newStatus: string) {
     if (!statusInvoice) return;
     setChangingStatus(true);
@@ -611,6 +680,15 @@ export default function Finance() {
               Generate New Invoice
             </button>
           )}
+          {canImportDocs && (!permOverridden || canCreate) && (
+            <button
+              onClick={openImport}
+              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              Import Document
+            </button>
+          )}
           {(!permOverridden || canCreate) && (
             <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
               <Settings2 className="w-4 h-4" />
@@ -760,6 +838,86 @@ export default function Finance() {
           )}
         </div>
       </div>
+
+      {/* Import payment document modal */}
+      <AnimatePresence>
+        {showImport && (
+          <>
+            <motion.div key="imp-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !importing && setShowImport(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
+            <motion.div key="imp-modal" initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }} transition={{ type: 'spring', damping: 28, stiffness: 340 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+              <div className="w-full max-w-md bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-bold text-white">Import Payment Documents</h2>
+                      <p className="text-[11px] text-white/40 mt-0.5">Upload one or more payment-confirmation .docx files to record paid invoices.</p>
+                    </div>
+                  </div>
+                  <button onClick={() => !importing && setShowImport(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"><X className="w-4 h-4" /></button>
+                </div>
+
+                <div className="px-5 py-4 space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Documents (.docx)</label>
+                    <input
+                      type="file"
+                      accept=".docx"
+                      multiple
+                      onChange={e => setImpFiles(Array.from(e.target.files ?? []))}
+                      className="w-full text-sm text-white/70 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-medium file:bg-white/10 file:text-white hover:file:bg-white/15 file:cursor-pointer"
+                    />
+                    <p className="text-[11px] text-white/30">
+                      {impFiles.length > 0 ? `${impFiles.length} file${impFiles.length !== 1 ? 's' : ''} selected. ` : ''}
+                      Reads Student Name, Payment Amount and Date/Month of Payment. Creates paid invoices shown as “Imported Doc”.
+                    </p>
+                  </div>
+
+                  {importError && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{importError}</span>
+                    </div>
+                  )}
+
+                  {importSummary && importSummary.created > 0 && (
+                    <div className="px-3 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
+                      <p className="font-semibold text-emerald-400">{importSummary.created} invoice{importSummary.created !== 1 ? 's' : ''} imported</p>
+                      {importSummary.items.map((it, i) => (
+                        <p key={i}>{it.studentName} · {fmtMoney(it.amount)} · {MONTH_NAMES[it.month - 1]} {it.year}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-4 border-t border-white/8 flex justify-end gap-2">
+                  <button onClick={() => setShowImport(false)} disabled={importing} className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-40">
+                    {importSummary ? 'Close' : 'Cancel'}
+                  </button>
+                  <button onClick={() => runImport()} disabled={importing || impFiles.length === 0} className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm font-medium hover:bg-emerald-500/30 transition-colors flex items-center gap-2 disabled:opacity-40">
+                    {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {importing ? 'Importing…' : `Import${impFiles.length ? ` ${impFiles.length}` : ''}`}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Students-not-found modal (invoice import) */}
+      <AnimatePresence>
+        {unmatched && (
+          <UnmatchedStudentsModal
+            students={unmatched}
+            context="invoice"
+            onClose={() => setUnmatched(null)}
+            onReimport={handleUnmatchedReimport}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showCreateInvoice && (

@@ -15,3 +15,5 @@ next-env.d.ts
 
 # Internal testing/dev notes
 TESTING_GUIDE.md
+
+templates/

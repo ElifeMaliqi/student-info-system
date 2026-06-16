@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Calendar as CalendarIcon, CheckCircle2, XCircle, Clock, AlertTriangle,
-  Search, Download, X, Loader2,
+  Search, Download, X, Loader2, Upload, FileSpreadsheet,
   GraduationCap, ArrowUpDown,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -12,6 +12,7 @@ import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent } from '../types';
 import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
+import { UnmatchedStudentsModal, type UnmatchedStudent } from '../components/UnmatchedStudentsModal';
 import { exportCsv } from '../utils/csv';
 
 const MONTH_KEYS = ['jan','feb','mar','apr','may_s','jun','jul','aug','sep','oct','nov','dec'] as const;
@@ -50,14 +51,72 @@ export default function Attendance() {
   const [sortBy, setSortBy]   = useState<SortCol>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  useEffect(() => {
+  // Excel import
+  const canImport = ['admin', 'superadmin', 'teacher'].includes(user?.role ?? '');
+  const [showImport, setShowImport]       = useState(false);
+  const [impClasses, setImpClasses]       = useState<{ id: string; title: string; teacher_id: string | null }[]>([]);
+  const [impClassId, setImpClassId]       = useState('');
+  const [impYear, setImpYear]             = useState(new Date().getFullYear());
+  const [impFile, setImpFile]             = useState<File | null>(null);
+  const [importing, setImporting]         = useState(false);
+  const [importError, setImportError]     = useState('');
+  const [importResult, setImportResult]   = useState<Awaited<ReturnType<typeof api.classAttendance.importFromExcel>> | null>(null);
+  const [unmatched, setUnmatched]         = useState<UnmatchedStudent[] | null>(null);
+  const [importIgnore, setImportIgnore]   = useState<Set<string>>(new Set());
+
+  function reloadSessions() {
     setLoading(true);
     api.classAttendance.getAllAttendanceSessions()
       .then(setSessions)
       .catch(() => {})
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    reloadSessions();
     api.classAttendance.getTodayCounts().then(setTodayCounts).catch(() => {});
   }, []);
+
+  function openImport() {
+    setImportError('');
+    setImportResult(null);
+    setImpFile(null);
+    setImpClassId('');
+    setUnmatched(null);
+    setImportIgnore(new Set());
+    setShowImport(true);
+    api.classes.getAll()
+      .then(list => {
+        const mapped = list.map(c => ({ id: c.id, title: c.title, teacher_id: c.teacher_id }));
+        setImpClasses(user?.role === 'teacher' ? mapped.filter(c => c.teacher_id === user.id) : mapped);
+      })
+      .catch(() => setImpClasses([]));
+  }
+
+  async function runImport(ignore: Set<string> = importIgnore) {
+    if (!impFile) return;
+    setImporting(true);
+    setImportError('');
+    setImportResult(null);
+    try {
+      const res = await api.classAttendance.importFromExcel(impClassId, impYear, impFile);
+      setImportResult(res);
+      reloadSessions();
+      const pending = res.studentsUnmatched.filter(u => !ignore.has(u.name.toLowerCase()));
+      setUnmatched(pending.length > 0 ? pending : null);
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  function handleUnmatchedReimport(dismissed: string[]) {
+    const nextIgnore = new Set([...importIgnore, ...dismissed.map(n => n.toLowerCase())]);
+    setImportIgnore(nextIgnore);
+    setUnmatched(null);
+    void runImport(nextIgnore);
+  }
 
   const overallTotal = sessions.reduce((sum, s) => sum + s.present + s.absent + s.late, 0);
   const overallAttended = sessions.reduce((sum, s) => sum + s.present + s.late, 0);
@@ -227,6 +286,16 @@ export default function Attendance() {
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
         <div className="flex items-center justify-between mb-5 shrink-0">
           <h2 className="font-display text-lg font-medium">{t('attendance.overview')}</h2>
+          <div className="flex items-center gap-2">
+          {canImport && (
+            <button
+              onClick={openImport}
+              className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              Import Excel
+            </button>
+          )}
           <button
             onClick={() => {
               if (filtered.length === 0) return;
@@ -246,6 +315,7 @@ export default function Attendance() {
             <Download className="w-4 h-4" />
             {t('attendance.export')}
           </button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -463,6 +533,138 @@ export default function Attendance() {
             viewerRole="admin"
             viewerUserId={user.id}
             onClose={() => setClassAttEvent(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Excel Import Modal */}
+      <AnimatePresence>
+        {showImport && (
+          <>
+            <motion.div
+              key="imp-backdrop"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => !importing && setShowImport(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              key="imp-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                className="w-full max-w-md bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto"
+              >
+                <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-white/5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-white leading-tight">Import Attendance</h2>
+                      <p className="text-[11px] text-white/40">Green cell = present · blank = absent</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => !importing && setShowImport(false)}
+                    className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="px-6 py-5 space-y-4">
+                  {/* Class */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Class <span className="text-white/25 normal-case tracking-normal">(optional)</span></label>
+                    <select
+                      value={impClassId}
+                      onChange={e => setImpClassId(e.target.value)}
+                      className="glass-select w-full pl-3 py-2.5 rounded-xl text-sm"
+                    >
+                      <option value="">No class (shows as N/A)</option>
+                      {impClasses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                    </select>
+                  </div>
+
+                  {/* Year */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Start year</label>
+                    <input
+                      type="number"
+                      value={impYear}
+                      onChange={e => setImpYear(parseInt(e.target.value, 10))}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white focus:outline-none focus:border-[#fc0ce4]/40"
+                    />
+                    <p className="text-[11px] text-white/30 mt-1">The calendar year the sheet starts in; rolls to the next year when months wrap (Dec → Jan).</p>
+                  </div>
+
+                  {/* File */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Spreadsheet (.xlsx)</label>
+                    <input
+                      type="file"
+                      accept=".xlsx"
+                      onChange={e => setImpFile(e.target.files?.[0] ?? null)}
+                      className="w-full text-sm text-white/70 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-medium file:bg-white/10 file:text-white hover:file:bg-white/15 file:cursor-pointer"
+                    />
+                  </div>
+
+                  {importError && (
+                    <div className="flex items-start gap-2 text-red-400 text-xs px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>{importError}</span>
+                    </div>
+                  )}
+
+                  {importResult && (
+                    <div className="text-xs px-3 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 space-y-1">
+                      <p className="font-semibold text-emerald-400">Import complete</p>
+                      <p>{importResult.recordsWritten} record{importResult.recordsWritten !== 1 ? 's' : ''} written across {importResult.monthsDetected.length} month{importResult.monthsDetected.length !== 1 ? 's' : ''} · {importResult.studentsMatched} student{importResult.studentsMatched !== 1 ? 's' : ''} matched{importResult.studentsEnrolled > 0 ? ` · ${importResult.studentsEnrolled} enrolled` : ''}.</p>
+                      {importResult.studentsUnmatched.length > 0 && (
+                        <p className="text-amber-400">{importResult.studentsUnmatched.length} not found in the platform.</p>
+                      )}
+                      {importResult.warnings.map((w, i) => <p key={i} className="text-amber-400">{w}</p>)}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-6 py-4 border-t border-white/5 flex justify-end gap-2">
+                  <button
+                    onClick={() => setShowImport(false)}
+                    disabled={importing}
+                    className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-40"
+                  >
+                    {importResult ? 'Close' : 'Cancel'}
+                  </button>
+                  <button
+                    onClick={() => runImport()}
+                    disabled={importing || !impFile}
+                    className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-sm font-medium hover:bg-emerald-500/30 transition-colors flex items-center gap-2 disabled:opacity-40"
+                  >
+                    {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                    {importing ? 'Importing…' : 'Import'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Students-not-found modal */}
+      <AnimatePresence>
+        {unmatched && (
+          <UnmatchedStudentsModal
+            students={unmatched}
+            context="attendance"
+            classId={impClassId}
+            onClose={() => setUnmatched(null)}
+            onReimport={handleUnmatchedReimport}
           />
         )}
       </AnimatePresence>

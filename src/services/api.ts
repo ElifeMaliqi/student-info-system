@@ -525,6 +525,26 @@ export const api = {
       }
     },
 
+    /** Import a payment-confirmation .docx → a new paid (class-less) invoice.
+     *  Returns `{ imported: false, unmatched }` when the student isn't on the platform. */
+    importInvoiceDoc: async (file: File): Promise<
+      | { imported: true; studentName: string; invoiceId: string; amount: number; month: number; year: number; title: string; paymentMethod: string | null }
+      | { imported: false; unmatched: { name: string; reason?: 'archived' | 'not_found'; studentId?: string }[] }
+    > => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/invoices/import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: fd,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Import failed');
+      return json;
+    },
+
     deleteOverrides: async (studentIds: string[]): Promise<void> => {
       const { error } = await supabase
         .from('student_invoice_overrides')
@@ -2110,6 +2130,55 @@ export const api = {
       if (error) throw new Error(error.message);
     },
 
+    // Push imported CSV details onto the student's (auto-approved) application so
+    // the registration record carries the same data — degree, location, contact —
+    // and mirrors the archived state for students imported as inactive.
+    applyImportedInfo: async (
+      email: string,
+      info: { program?: string; location?: string; phone?: string; secondaryPhone?: string; parentFirstName?: string; isArchived?: boolean },
+    ): Promise<void> => {
+      const payload: Record<string, unknown> = { is_archived: info.isArchived ?? false };
+      if (info.program?.trim()) payload.program = info.program.trim();
+      if (info.location?.trim()) payload.location = info.location.trim();
+      if (info.phone?.trim()) payload.phone = info.phone.trim();
+      if (info.secondaryPhone?.trim()) payload.secondary_phone = info.secondaryPhone.trim();
+      if (info.parentFirstName?.trim()) payload.parent_first_name = info.parentFirstName.trim();
+      const { error } = await supabase
+        .from('registration_applications')
+        .update(payload)
+        .eq('email', email.trim().toLowerCase());
+      if (error) throw new Error(error.message);
+    },
+
+    // Update just the degree/program on a student's registration record (used by
+    // the admin student-edit form). Does not touch archive state.
+    updateRegistrationProgram: async (email: string, program: string): Promise<void> => {
+      const { error } = await supabase
+        .from('registration_applications')
+        .update({ program: program.trim() || null })
+        .eq('email', email.trim().toLowerCase());
+      if (error) throw new Error(error.message);
+    },
+
+    // Lowercased emails of students enrolled in at least one class — used to flag
+    // registrations that still have no class assigned in the "missing info" view.
+    getEnrolledStudentEmails: async (): Promise<string[]> => {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `SELECT DISTINCT lower(p.email) AS email
+                  FROM class_enrollments ce
+                  JOIN profiles p ON p.id = ce.student_id
+                  WHERE p.email IS NOT NULL`,
+          params: [],
+        }),
+      });
+      if (!response.ok) return [];
+      const result = await response.json();
+      return (result.rows || []).map((r: { email: string }) => r.email);
+    },
+
     approve: async (applicationId: string, classId?: string, restoreClassIds?: string[]) => {
       // Check if this application's email belongs to an existing (possibly archived) profile.
       // Re-approvals for archived students must bypass the RPC which tries to create a new auth user.
@@ -3309,7 +3378,7 @@ export const api = {
       if (error) throw new Error(error.message);
       return (data || []).map((r: any) => ({
         classId:   r.class_id,
-        className: r.class?.title || 'Unknown Class',
+        className: r.class?.title || 'N/A',
         date:      r.date ? String(r.date).slice(0, 10) : '',
         status:    r.status,
       }));
@@ -3437,7 +3506,7 @@ export const api = {
         const dateKey = r.date ? String(r.date).slice(0, 10) : '';
         const key = `${r.class_id}::${dateKey}`;
         if (!grouped[key]) {
-          const classInfo = classMap.get(r.class_id) || { title: 'Unknown', teacherName: 'Unknown' };
+          const classInfo = classMap.get(r.class_id) || { title: 'N/A', teacherName: '—' };
           grouped[key] = {
             classId:     r.class_id,
             className:   classInfo.title,
@@ -3463,6 +3532,32 @@ export const api = {
           late:    g.records.filter(r => r.status === 'late').length,
         }))
         .sort((a, b) => b.date.localeCompare(a.date));
+    },
+
+    /** Import an attendance-template .xlsx for one class. Marks present (green cell)
+     *  / absent (blank cell) into class_attendance; returns an import summary. */
+    importFromExcel: async (classId: string, year: number, file: File): Promise<{
+      monthsDetected: string[];
+      studentsMatched: number;
+      studentsUnmatched: { name: string; email: string; phone: string }[];
+      studentsEnrolled: number;
+      recordsWritten: number;
+      warnings: string[];
+    }> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('classId', classId);
+      fd.append('year', String(year));
+      const res = await fetch('/api/attendance/import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+        body: fd,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Import failed');
+      return json;
     },
 
     /** Attendance sessions for a specific class, newest first. */
@@ -3800,6 +3895,15 @@ export const api = {
       };
     },
 
+    unenrollStudent: async (classId: string, studentId: string): Promise<void> => {
+      const { error } = await supabase
+        .from('class_enrollments')
+        .delete()
+        .eq('class_id', classId)
+        .eq('student_id', studentId);
+      if (error) throw new Error(error.message);
+    },
+
     getEnrollments: async (classId: string): Promise<ClassEnrollment[]> => {
       const { data, error } = await supabase
         .from('class_enrollments')
@@ -4107,7 +4211,13 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `DELETE FROM profiles WHERE id = $1`,
+          // Also remove the registration record (keyed by email) so a deleted
+          // user no longer appears in the Registrations tabs.
+          query: `
+            WITH target AS (SELECT email FROM profiles WHERE id = $1),
+                 del_reg AS (DELETE FROM registration_applications WHERE email IN (SELECT email FROM target))
+            DELETE FROM profiles WHERE id = $1
+          `,
           params: [userId],
         }),
       });

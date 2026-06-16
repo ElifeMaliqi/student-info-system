@@ -15,7 +15,8 @@ export default function RegistrationApplications() {
   const [applications, setApplications] = useState<RegistrationApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived'>('pending');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived' | 'missing'>('pending');
+  const [enrolledEmails, setEnrolledEmails] = useState<Set<string>>(new Set());
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'archive' | null>(null);
   const [rejectNotes, setRejectNotes] = useState('');
@@ -32,8 +33,12 @@ export default function RegistrationApplications() {
   const loadApplications = async () => {
     try {
       setIsLoading(true);
-      const data = await api.registrations.getAll();
+      const [data, emails] = await Promise.all([
+        api.registrations.getAll(),
+        api.registrations.getEnrolledStudentEmails(),
+      ]);
       setApplications(data);
+      setEnrolledEmails(new Set(emails.map(e => e.toLowerCase())));
     } catch (error) {
       console.error('Failed to load applications:', error);
     } finally {
@@ -153,8 +158,23 @@ export default function RegistrationApplications() {
   const activeApps = applications.filter(a => !a.isArchived);
   const archivedApps = applications.filter(a => a.isArchived);
 
+  // For approved students, surface the records still missing a degree, a
+  // location, or a class enrollment so admins can complete them.
+  const getMissingInfo = (app: RegistrationApplication): string[] => {
+    const missing: string[] = [];
+    if (!app.program?.trim()) missing.push(t('registrations.missing_degree'));
+    if (!app.location?.trim()) missing.push(t('registrations.missing_location'));
+    if (!enrolledEmails.has((app.email || '').toLowerCase())) missing.push(t('registrations.missing_class'));
+    return missing;
+  };
+  const isMissingInfo = (app: RegistrationApplication): boolean =>
+    app.role === 'student' && app.status === 'approved' && getMissingInfo(app).length > 0;
+  const missingInfoApps = activeApps.filter(isMissingInfo);
+
   const filteredApps = filter === 'archived'
     ? archivedApps
+    : filter === 'missing'
+    ? missingInfoApps
     : activeApps.filter(app => filter === 'all' || app.status === filter);
 
   const getStatusColor = (status: string) => {
@@ -192,6 +212,17 @@ export default function RegistrationApplications() {
               {f === 'all' ? t('registrations.all') : f === 'pending' ? t('registrations.pending_filter') : f === 'approved' ? t('registrations.approved_filter') : t('registrations.rejected_filter')} ({activeApps.filter(a => f === 'all' || a.status === f).length})
             </button>
           ))}
+          <button
+            onClick={() => setFilter('missing')}
+            className={`px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 ${
+              filter === 'missing'
+                ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white'
+                : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            <AlertCircle className="w-3.5 h-3.5" />
+            {t('registrations.missing_info')} ({missingInfoApps.length})
+          </button>
           <button
             onClick={() => setFilter('archived')}
             className={`px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl transition-all flex items-center gap-1.5 ${
@@ -250,6 +281,11 @@ export default function RegistrationApplications() {
                       <span className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full border border-white/10 bg-white/5 text-white/70">
                         {app.role}
                       </span>
+                      {filter === 'missing' && getMissingInfo(app).map(label => (
+                        <span key={label} className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full border border-amber-400/20 bg-amber-400/10 text-amber-400">
+                          {label}
+                        </span>
+                      ))}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">

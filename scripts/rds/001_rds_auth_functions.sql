@@ -105,21 +105,26 @@ AS $$
 DECLARE
   v_caller uuid;
   v_role   text;
+  v_email  text;
 BEGIN
   v_caller := COALESCE(caller_id, current_app_user_id());
   SELECT role INTO v_role FROM profiles WHERE id = v_caller;
-  IF v_role IS DISTINCT FROM 'admin' THEN
+  IF v_role NOT IN ('admin', 'superadmin') THEN
     RAISE EXCEPTION 'Only admins can delete student accounts';
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_student_id AND role = 'student') THEN
     RETURN json_build_object('success', false, 'message', 'Student account not found');
   END IF;
+  SELECT email INTO v_email FROM profiles WHERE id = p_student_id;
 
   DELETE FROM teacher_student_notes WHERE student_id = p_student_id;
   DELETE FROM class_attendance WHERE student_id = p_student_id;
   DELETE FROM class_enrollments WHERE student_id = p_student_id;
   DELETE FROM students WHERE user_id = p_student_id;
+  -- Remove the registration record so the student disappears from the
+  -- Registrations tabs once their account is deleted.
+  DELETE FROM registration_applications WHERE email = v_email;
   DELETE FROM auth_users WHERE id = p_student_id;
   DELETE FROM profiles WHERE id = p_student_id AND role = 'student';
 

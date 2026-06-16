@@ -16,7 +16,7 @@ import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
 import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
-import { useModulePermissions } from '../context/UserContext';
+import { useModulePermissions, useUser } from '../context/UserContext';
 
 type AdminStudent = {
   id: string;
@@ -77,7 +77,7 @@ function getMissingFields(row: CsvStudentRow): string[] {
   const m: string[] = [];
   if (!row.firstName?.trim()) m.push('First Name');
   if (!row.lastName?.trim())  m.push('Last Name');
-  if (!row.email?.trim())     m.push('Email');
+  if (!row.email?.trim() || !row.email.includes('@')) m.push('Email');
   return m;
 }
 
@@ -95,6 +95,9 @@ const LOCATION_OPTIONS = ['FMA Kids (Dardani)', 'FMA (Rruga Qarkore)'];
 
 export default function Students() {
   const { isOverridden: permOverridden, canCreate: canEnroll, canUpdate: canEdit, canDelete: canRemove } = useModulePermissions('users');
+  const { user } = useUser();
+  // Only admins/superadmins may edit or delete student records.
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
   const [view, setView] = useState<'list' | 'add' | 'success'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -131,6 +134,12 @@ export default function Students() {
     location: '',
   });
   const [savingEdit, setSavingEdit] = useState(false);
+  // Edit form: degree + class enrollment
+  const [editProgram, setEditProgram] = useState('');
+  const [editClasses, setEditClasses] = useState<{ classId: string; className: string }[]>([]); // desired enrollment
+  const [editClassSelect, setEditClassSelect] = useState('');
+  const [editDegreeClasses, setEditDegreeClasses] = useState<{ id: string; title: string }[]>([]);
+  const [loadingEditClasses, setLoadingEditClasses] = useState(false);
   const [importingCsv, setImportingCsv] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [csvTemplateDownloading, setCsvTemplateDownloading] = useState(false);
@@ -139,29 +148,20 @@ export default function Students() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docDragOver, setDocDragOver] = useState(false);
 
-  // ── CSV import results ────────────────────────────────────────────────────
-  const [importedStudents, setImportedStudents] = useState<ImportedStudent[]>([]);
-  const [remainingIds, setRemainingIds] = useState<Set<string>>(new Set());
-  const [csvSelectedIds, setCsvSelectedIds] = useState<Set<string>>(new Set());
-  const [importErrors, setImportErrors] = useState<string[]>([]);
+  // ── CSV import (staged: nothing is created until the admin clicks Import) ────
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvReady, setCsvReady] = useState<CsvStudentRow[]>([]);     // complete rows, created on Import
   const [csvNeedsInfo, setCsvNeedsInfo] = useState<NeedsInfoRow[]>([]);
   const [csvView, setCsvView] = useState<'list' | 'needs-info'>('list');
+  const [csvCreating, setCsvCreating] = useState(false);
+  const [csvResult, setCsvResult] = useState<{ created: number; errors: string[] } | null>(null);
   const [csvIgnoreMode, setCsvIgnoreMode] = useState(false);
   const [csvIgnoreSelected, setCsvIgnoreSelected] = useState<Set<number>>(new Set());
   const [csvEditingIdx, setCsvEditingIdx] = useState<number | null>(null);
   const [csvEditRow, setCsvEditRow] = useState<CsvStudentRow | null>(null);
-  const [csvEditSaving, setCsvEditSaving] = useState(false);
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [assignMode, setAssignMode] = useState<'existing' | 'create'>('existing');
-  const [assignClassId, setAssignClassId] = useState('');
-  const [assigning, setAssigning] = useState(false);
-  const [assignClasses, setAssignClasses] = useState<{ id: string; title: string }[]>([]);
-  const [assignTeachers, setAssignTeachers] = useState<{ id: string; firstName: string; lastName: string }[]>([]);
-  const [assignPrograms, setAssignPrograms] = useState<{ id: string; name: string }[]>([]);
-  const [newClassName, setNewClassName] = useState('');
-  const [newClassTeacherId, setNewClassTeacherId] = useState('');
-  const [newClassProgram, setNewClassProgram] = useState('');
-  const [newClassCode, setNewClassCode] = useState('');
+
+  // ── Bulk delete ─────────────────────────────────────────────────────────────
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [insightPanel, setInsightPanel] = useState<{
     type: 'grades' | 'attendance' | 'payments';
     student: AdminStudent;
@@ -359,7 +359,7 @@ export default function Students() {
         const firstName = getHeaderValue(row, ['first_name', 'firstName', 'first name', 'firstname', 'name']);
         const lastName = getHeaderValue(row, ['last_name', 'lastName', 'last name', 'lastname', 'surname']);
         const email = getHeaderValue(row, ['email']);
-        const phone = getHeaderValue(row, ['phone', 'phone_number', 'phone number', 'phone number']);
+        const phone = getHeaderValue(row, ['phone', 'phone_number', 'phone number']);
         const parentFirstName = getHeaderValue(row, ['parent_first_name', 'parentFirstName', 'parent first name', 'parent name', 'parent_name']);
         const secondaryPhone = getHeaderValue(row, ['secondary_phone', 'secondaryPhone', 'secondary phone', 'secondary_phone_number']);
         const location = getHeaderValue(row, ['location']);
@@ -373,66 +373,25 @@ export default function Students() {
 
       if (parsedRows.length === 0) throw new Error('No valid student rows found in the CSV file.');
 
-      // Split: complete rows vs rows missing required fields
-      const completeRows: CsvStudentRow[] = [];
+      // Split into ready-to-import vs missing-required-fields. NOTHING is created
+      // here — creation only happens when the admin clicks Import in the modal.
+      const ready: CsvStudentRow[] = [];
       const needsInfoRows: NeedsInfoRow[] = [];
       for (const row of parsedRows) {
         const missing = getMissingFields(row);
         if (missing.length > 0) needsInfoRows.push({ ...row, _missingFields: missing });
-        else completeRows.push(row);
+        else ready.push(row);
       }
 
-      const created: ImportedStudent[] = [];
-      const autoEnrolledIds = new Set<string>();
-      const errors: string[] = [];
-
-      for (const row of completeRows) {
-        try {
-          const result = await api.users.create(row.email.trim().toLowerCase(), row.firstName.trim(), row.lastName.trim(), 'student', 'FMA#2026');
-          if (result?.id) {
-            try {
-              await api.teacher.updateStudentProfile(result.id, {
-                firstName: row.firstName.trim(),
-                lastName: row.lastName.trim(),
-                email: row.email.trim().toLowerCase(),
-                parentFirstName: row.parentFirstName?.trim() || undefined,
-                phone: row.phone?.trim() || undefined,
-                secondaryPhone: row.secondaryPhone?.trim() || undefined,
-                location: row.location?.trim() || undefined,
-              });
-            } catch { /* non-critical */ }
-
-            const isInactive = /not.?active|inactive|jo.?aktiv/i.test(row.status || '');
-            if (isInactive) {
-              try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
-            }
-
-            if (row.classCode) {
-              try {
-                const classId = await api.classes.getIdByCode(row.classCode);
-                if (classId) { await api.classes.enrollStudent(classId, result.id); autoEnrolledIds.add(result.id); }
-              } catch { /* non-critical */ }
-            }
-
-            created.push({ id: result.id, firstName: row.firstName.trim(), lastName: row.lastName.trim(), email: row.email.trim().toLowerCase() });
-          }
-        } catch (e: any) {
-          errors.push(`${row.email || `${row.firstName} ${row.lastName}`}: ${e.message}`);
-        }
-      }
-
-      const needsAssignment = new Set(created.map(u => u.id).filter(id => !autoEnrolledIds.has(id)));
-      setImportedStudents(created);
-      setRemainingIds(needsAssignment);
-      setCsvSelectedIds(new Set(needsAssignment));
-      setImportErrors(errors);
+      setCsvReady(ready);
       setCsvNeedsInfo(needsInfoRows);
+      setCsvResult(null);
       setCsvView('list');
       setCsvIgnoreMode(false);
       setCsvIgnoreSelected(new Set());
       setCsvEditingIdx(null);
       setCsvEditRow(null);
-      if (created.length > 0) await loadStudents();
+      setCsvOpen(true);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'CSV import failed.');
     } finally {
@@ -441,51 +400,73 @@ export default function Students() {
     }
   };
 
-  const handleOpenAssignModal = async () => {
-    setAssigning(false);
-    setAssignMode('existing');
-    setAssignClassId('');
-    setNewClassName('');
-    setNewClassTeacherId('');
-    setNewClassProgram('');
-    setNewClassCode(generateCode());
+  // Create one student from a parsed row. Enrols by class code when the code
+  // matches a real class (invalid codes are ignored); archives inactive students;
+  // saves the remaining registration info so they land in the right tab (full
+  // info → approved, missing degree/location/class → missing-info, inactive →
+  // archived). The ID document is not required.
+  const createStudentFromRow = async (row: CsvStudentRow): Promise<void> => {
+    const email = row.email.trim().toLowerCase();
+    const result = await api.users.create(email, row.firstName.trim(), row.lastName.trim(), 'student', 'FMA#2026');
+    if (!result?.id) throw new Error('Account not created');
+
     try {
-      const [classes, teachers, programs] = await Promise.all([
-        api.classes.getAll(),
-        api.classes.getAvailableTeachers(),
-        api.programs.getAll(),
-      ]);
-      setAssignClasses((classes as any[]).map(c => ({ id: c.id, title: c.title })));
-      setAssignTeachers(teachers as any[]);
-      setAssignPrograms((programs as any[]).map(p => ({ id: p.id, name: p.name })));
-    } catch { /* proceed with empty lists */ }
-    setShowAssignModal(true);
+      await api.teacher.updateStudentProfile(result.id, {
+        firstName: row.firstName.trim(),
+        lastName: row.lastName.trim(),
+        email,
+        parentFirstName: row.parentFirstName?.trim() || undefined,
+        phone: row.phone?.trim() || undefined,
+        secondaryPhone: row.secondaryPhone?.trim() || undefined,
+        location: row.location?.trim() || undefined,
+      });
+    } catch { /* non-critical */ }
+
+    const isInactive = /not.?active|inactive|jo.?aktiv/i.test(row.status || '');
+    if (isInactive) {
+      try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
+    }
+
+    if (row.classCode?.trim()) {
+      try {
+        const classId = await api.classes.getIdByCode(row.classCode.trim());
+        if (classId) await api.classes.enrollStudent(classId, result.id);
+      } catch { /* invalid code or already enrolled — proceed without a class */ }
+    }
+
+    try {
+      await api.registrations.applyImportedInfo(email, {
+        program: row.program,
+        location: row.location,
+        phone: row.phone,
+        secondaryPhone: row.secondaryPhone,
+        parentFirstName: row.parentFirstName,
+        isArchived: isInactive,
+      });
+    } catch { /* non-critical */ }
   };
 
-  const handleAssign = async () => {
-    setAssigning(true);
-    try {
-      let classId: string;
-      if (assignMode === 'create') {
-        const created = await api.classes.create(newClassProgram, newClassName.trim(), newClassTeacherId, [], newClassCode);
-        classId = (created as any).id;
-      } else {
-        classId = assignClassId;
+  const handleConfirmImport = async () => {
+    if (csvReady.length === 0) return;
+    setCsvCreating(true);
+    const errors: string[] = [];
+    let created = 0;
+    for (const row of csvReady) {
+      try {
+        await createStudentFromRow(row);
+        created++;
+      } catch (e: any) {
+        errors.push(`${row.email || `${row.firstName} ${row.lastName}`}: ${e.message}`);
       }
-      const toEnroll = [...csvSelectedIds].filter(id => remainingIds.has(id));
-      await Promise.allSettled(toEnroll.map(id => api.classes.enrollStudent(classId, id)));
-      setRemainingIds(prev => { const next = new Set(prev); toEnroll.forEach(id => next.delete(id)); return next; });
-      setCsvSelectedIds(new Set());
-      setShowAssignModal(false);
-    } catch (e: any) {
-      alert(e.message || 'Failed to assign students');
-    } finally {
-      setAssigning(false);
     }
+    setCsvResult({ created, errors });
+    setCsvReady([]);
+    setCsvCreating(false);
+    if (created > 0) await loadStudents();
   };
 
   const handleIgnoreAll = () => {
-    if (!window.confirm(`${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} will not be created and will not appear in the system. Are you sure?`)) return;
+    if (!window.confirm(`${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`)) return;
     setCsvNeedsInfo([]);
     setCsvIgnoreMode(false);
     setCsvIgnoreSelected(new Set());
@@ -495,50 +476,64 @@ export default function Students() {
   const handleIgnoreSelected = () => {
     const count = csvIgnoreSelected.size;
     if (count === 0) return;
-    if (!window.confirm(`${count} student${count !== 1 ? 's' : ''} will not be created and will not appear in the system. Are you sure?`)) return;
+    if (!window.confirm(`${count} student${count !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`)) return;
     const next = csvNeedsInfo.filter((_, i) => !csvIgnoreSelected.has(i));
     setCsvNeedsInfo(next);
     setCsvIgnoreSelected(new Set());
     if (next.length === 0) { setCsvView('list'); setCsvIgnoreMode(false); }
   };
 
-  const handleSaveNeedsInfo = async () => {
+  // Move a filled-in row from "needs info" into the ready list (still not created
+  // until the admin clicks Import).
+  const handleSaveNeedsInfo = () => {
     if (csvEditingIdx === null || !csvEditRow) return;
-    setCsvEditSaving(true);
-    try {
-      const result = await api.users.create(csvEditRow.email.trim().toLowerCase(), csvEditRow.firstName.trim(), csvEditRow.lastName.trim(), 'student', 'FMA#2026');
-      if (result?.id) {
-        try {
-          await api.teacher.updateStudentProfile(result.id, {
-            firstName: csvEditRow.firstName.trim(),
-            lastName: csvEditRow.lastName.trim(),
-            email: csvEditRow.email.trim().toLowerCase(),
-            parentFirstName: csvEditRow.parentFirstName?.trim() || undefined,
-            phone: csvEditRow.phone?.trim() || undefined,
-            secondaryPhone: csvEditRow.secondaryPhone?.trim() || undefined,
-            location: csvEditRow.location?.trim() || undefined,
-          });
-        } catch { /* non-critical */ }
-        const isInactive = /not.?active|inactive|jo.?aktiv/i.test(csvEditRow.status || '');
-        if (isInactive) {
-          try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
-        }
-        setImportedStudents(prev => [...prev, { id: result.id, firstName: csvEditRow.firstName.trim(), lastName: csvEditRow.lastName.trim(), email: csvEditRow.email.trim().toLowerCase() }]);
-        setRemainingIds(prev => new Set([...prev, result.id]));
-        setCsvSelectedIds(prev => new Set([...prev, result.id]));
-        setCsvNeedsInfo(prev => {
-          const next = prev.filter((_, i) => i !== csvEditingIdx);
-          if (next.length === 0) setCsvView('list');
-          return next;
-        });
-        setCsvEditingIdx(null);
-        setCsvEditRow(null);
-      }
-    } catch (e: any) {
-      alert(e.message || 'Failed to create student');
-    } finally {
-      setCsvEditSaving(false);
-    }
+    if (getMissingFields(csvEditRow).length > 0) return;
+    const row = csvEditRow;
+    setCsvReady(prev => [...prev, row]);
+    setCsvNeedsInfo(prev => {
+      const next = prev.filter((_, i) => i !== csvEditingIdx);
+      if (next.length === 0) setCsvView('list');
+      return next;
+    });
+    setCsvEditingIdx(null);
+    setCsvEditRow(null);
+  };
+
+  const closeCsv = () => {
+    setCsvOpen(false);
+    setCsvReady([]);
+    setCsvNeedsInfo([]);
+    setCsvResult(null);
+    setCsvView('list');
+    setCsvIgnoreMode(false);
+    setCsvIgnoreSelected(new Set());
+    setCsvEditingIdx(null);
+    setCsvEditRow(null);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedStudents.length === 0) return;
+    if (!confirm(`Permanently delete ${selectedStudents.length} student${selectedStudents.length !== 1 ? 's' : ''}? This deletes their full accounts and cannot be undone.`)) return;
+    setBulkDeleting(true);
+    const ids = [...selectedStudents];
+    const results = await Promise.allSettled(ids.map(id => api.teacher.removeStudentAccount(id)));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    setSelectedStudents([]);
+    if (selectedStudentForPanel && ids.includes(selectedStudentForPanel.id)) setSelectedStudentForPanel(null);
+    await loadStudents();
+    setBulkDeleting(false);
+    if (failed > 0) alert(`${failed} student${failed !== 1 ? 's' : ''} could not be deleted.`);
+  };
+
+  const loadEditClasses = (program: string) => {
+    setEditProgram(program);
+    setEditClassSelect('');
+    if (!program) { setEditDegreeClasses([]); return; }
+    setLoadingEditClasses(true);
+    api.classes.getByProgram(program)
+      .then(rows => setEditDegreeClasses((rows as { id: string; title: string }[]).map(c => ({ id: c.id, title: c.title }))))
+      .catch(() => setEditDegreeClasses([]))
+      .finally(() => setLoadingEditClasses(false));
   };
 
   const handleEditOpen = (student: AdminStudent) => {
@@ -552,26 +547,43 @@ export default function Students() {
       secondaryPhone: student.secondaryPhone || '',
       location: student.location || '',
     });
+    setEditClasses(student.classes.map(c => ({ classId: c.classId, className: c.className })));
+    loadEditClasses(student.programs[0]?.programName || student.classes[0]?.programName || '');
   };
 
   const handleEditSave = async () => {
     if (!editingStudent) return;
-    if (!editForm.firstName.trim() || !editForm.lastName.trim() || !editForm.email.includes('@')) {
-      alert('Please provide valid first name, last name, and email.');
+    if (!editForm.firstName.trim() || !editForm.lastName.trim()) {
+      alert('Please provide a first and last name.');
       return;
     }
 
     setSavingEdit(true);
     try {
+      // Email is intentionally not editable.
       await api.teacher.updateStudentProfile(editingStudent.id, {
         firstName: editForm.firstName.trim(),
         lastName: editForm.lastName.trim(),
         parentFirstName: editForm.parentFirstName.trim() || undefined,
-        email: editForm.email.trim().toLowerCase(),
+        email: editingStudent.email,
         phone: editForm.phone.trim() || undefined,
         secondaryPhone: editForm.secondaryPhone.trim() || undefined,
         location: editForm.location || undefined,
       });
+
+      // Degree on the registration record.
+      try { await api.registrations.updateRegistrationProgram(editingStudent.email, editProgram); } catch { /* non-critical */ }
+
+      // Apply class-enrollment changes (diff against the original enrollment).
+      const originalIds = new Set(editingStudent.classes.map(c => c.classId));
+      const desiredIds = new Set(editClasses.map(c => c.classId));
+      const toEnroll = [...desiredIds].filter(id => !originalIds.has(id));
+      const toUnenroll = [...originalIds].filter(id => !desiredIds.has(id));
+      await Promise.allSettled([
+        ...toEnroll.map(id => api.classes.enrollStudent(id, editingStudent.id)),
+        ...toUnenroll.map(id => api.classes.unenrollStudent(id, editingStudent.id)),
+      ]);
+
       setEditingStudent(null);
       await loadStudents();
     } catch (err) {
@@ -1061,6 +1073,20 @@ export default function Students() {
               </button>
             )}
           </div>
+
+          {isPrivileged && (!permOverridden || canRemove) && selectedStudents.length > 0 && (
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-red-500/[0.07] border border-red-500/20">
+              <span className="text-sm text-white/70">{selectedStudents.length} selected</span>
+              <button
+                onClick={() => void handleBulkDelete()}
+                disabled={bulkDeleting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+              >
+                {bulkDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                {bulkDeleting ? 'Deleting…' : `Delete ${selectedStudents.length} selected`}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto pb-4 custom-scrollbar flex-1 -mx-6 px-6">
@@ -1177,7 +1203,7 @@ export default function Students() {
                         </td>
                         <td className="py-4 pr-2" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-2">
-                            {(!permOverridden || canEdit) && (
+                            {isPrivileged && (!permOverridden || canEdit) && (
                               <button
                                 onClick={() => handleEditOpen(student)}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors"
@@ -1187,7 +1213,7 @@ export default function Students() {
                                 Edit
                               </button>
                             )}
-                            {(!permOverridden || canRemove) && (
+                            {isPrivileged && (!permOverridden || canRemove) && (
                               <button
                                 onClick={() => handleRemoveStudent(student)}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-red-500/25 text-red-300 hover:bg-red-500/10 transition-colors"
@@ -1593,7 +1619,7 @@ export default function Students() {
 
       {/* CSV Import Results Modal */}
       <AnimatePresence>
-        {(importedStudents.length > 0 || csvNeedsInfo.length > 0) && (
+        {csvOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1620,11 +1646,11 @@ export default function Students() {
                     </button>
                   )}
                   <h3 className="font-display text-xl font-medium text-white">
-                    {csvView === 'needs-info' ? 'Students with Missing Info' : 'Import Complete'}
+                    {csvView === 'needs-info' ? 'Students with Missing Info' : csvResult ? 'Import Complete' : 'Review Import'}
                   </h3>
                 </div>
                 <button
-                  onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); setCsvNeedsInfo([]); setCsvView('list'); setCsvIgnoreMode(false); setCsvEditingIdx(null); setCsvEditRow(null); }}
+                  onClick={closeCsv}
                   className="p-2 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors"
                 >
                   <X className="w-5 h-5" />
@@ -1634,88 +1660,80 @@ export default function Students() {
               {/* ── LIST VIEW ── */}
               {csvView === 'list' && (
                 <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
-                  {/* Banners */}
-                  {importedStudents.length > 0 && (
-                    <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      {importedStudents.length} student{importedStudents.length !== 1 ? 's' : ''} imported successfully
-                    </div>
-                  )}
-                  {importErrors.length > 0 && (
-                    <div className="rounded-xl bg-red-500/[0.07] border border-red-500/15 p-3 max-h-24 overflow-y-auto custom-scrollbar">
-                      <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Errors</p>
-                      {importErrors.map((e, i) => <p key={i} className="text-xs text-red-300/70">{e}</p>)}
-                    </div>
-                  )}
-
-                  {/* Checklist */}
-                  {remainingIds.size > 0 ? (
+                  {csvResult ? (
                     <>
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-white/40">{remainingIds.size} remaining — select to assign to a class</p>
+                      <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        {csvResult.created} student{csvResult.created !== 1 ? 's' : ''} imported successfully
+                      </div>
+                      {csvResult.errors.length > 0 && (
+                        <div className="rounded-xl bg-red-500/[0.07] border border-red-500/15 p-3 max-h-40 overflow-y-auto custom-scrollbar">
+                          <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">{csvResult.errors.length} could not be imported</p>
+                          {csvResult.errors.map((e, i) => <p key={i} className="text-xs text-red-300/70">{e}</p>)}
+                        </div>
+                      )}
+                      {csvNeedsInfo.length > 0 && (
                         <button
-                          type="button"
-                          onClick={() => setCsvSelectedIds(prev => prev.size === remainingIds.size ? new Set() : new Set(remainingIds))}
-                          className="text-xs text-[#949ce4] hover:text-white transition-colors"
+                          onClick={() => { setCsvView('needs-info'); setCsvIgnoreMode(false); setCsvIgnoreSelected(new Set()); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] text-amber-300 text-sm hover:bg-amber-500/10 transition-colors text-left"
                         >
-                          {csvSelectedIds.size === remainingIds.size ? 'Deselect all' : 'Select all'}
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span className="flex-1">{csvNeedsInfo.length} student{csvNeedsInfo.length !== 1 ? 's' : ''} still need info — review</span>
+                          <ChevronRight size={14} className="text-amber-400/50" />
                         </button>
-                      </div>
-                      <div className="space-y-1 max-h-52 overflow-y-auto custom-scrollbar pr-1">
-                        {importedStudents.filter(u => remainingIds.has(u.id)).map(u => {
-                          const checked = csvSelectedIds.has(u.id);
-                          return (
-                            <button
-                              key={u.id}
-                              type="button"
-                              onClick={() => setCsvSelectedIds(prev => { const next = new Set(prev); if (next.has(u.id)) next.delete(u.id); else next.add(u.id); return next; })}
-                              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${checked ? 'bg-[#949ce4]/10 border-[#949ce4]/30' : 'bg-white/[0.02] border-white/5 hover:border-white/10'}`}
-                            >
-                              <div className={`w-[18px] h-[18px] rounded border flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-[#949ce4] border-[#949ce4]' : 'border-white/20'}`}>
-                                {checked && <Check size={10} className="text-white" />}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-white truncate">{u.firstName} {u.lastName}</p>
-                                <p className="text-[11px] text-white/35 truncate">{u.email}</p>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <button
-                        onClick={() => void handleOpenAssignModal()}
-                        disabled={csvSelectedIds.size === 0}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
-                      >
-                        <GraduationCap size={15} />
-                        Assign {csvSelectedIds.size > 0 ? `${csvSelectedIds.size} selected` : 'selected'} to class
+                      )}
+                      <button onClick={closeCsv} className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all">
+                        Done
                       </button>
                     </>
-                  ) : importedStudents.length > 0 ? (
-                    <div className="flex flex-col items-center gap-2 py-2 text-center">
-                      <CheckCircle2 className="w-7 h-7 text-emerald-400/60" />
-                      <p className="text-sm text-white/50">All students have been assigned.</p>
-                    </div>
-                  ) : null}
+                  ) : (
+                    <>
+                      <p className="text-sm text-white/55">Review the students below, then click Import. Nothing is created until you do.</p>
 
-                  {/* Missing info callout */}
-                  {csvNeedsInfo.length > 0 && (
-                    <button
-                      onClick={() => { setCsvView('needs-info'); setCsvIgnoreMode(false); setCsvIgnoreSelected(new Set()); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] text-amber-300 text-sm hover:bg-amber-500/10 transition-colors text-left"
-                    >
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span className="flex-1">View {csvNeedsInfo.length} student{csvNeedsInfo.length !== 1 ? 's' : ''} with missing information</span>
-                      <ChevronRight size={14} className="text-amber-400/50" />
-                    </button>
+                      {csvReady.length > 0 ? (
+                        <div>
+                          <p className="text-xs text-white/40 mb-2">{csvReady.length} ready to import</p>
+                          <div className="space-y-1 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                            {csvReady.map((r, i) => (
+                              <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-xl bg-white/[0.02] border border-white/5">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-white truncate">{r.firstName} {r.lastName}</p>
+                                  <p className="text-[11px] text-white/35 truncate">{r.email}{r.classCode ? ` · class ${r.classCode}` : ''}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-white/40">No complete rows to import.</p>
+                      )}
+
+                      {csvNeedsInfo.length > 0 && (
+                        <button
+                          onClick={() => { setCsvView('needs-info'); setCsvIgnoreMode(false); setCsvIgnoreSelected(new Set()); }}
+                          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] text-amber-300 text-sm hover:bg-amber-500/10 transition-colors text-left"
+                        >
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          <span className="flex-1">View {csvNeedsInfo.length} student{csvNeedsInfo.length !== 1 ? 's' : ''} with missing information</span>
+                          <ChevronRight size={14} className="text-amber-400/50" />
+                        </button>
+                      )}
+
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={closeCsv} className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5 transition-colors">
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => void handleConfirmImport()}
+                          disabled={csvCreating || csvReady.length === 0}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
+                        >
+                          {csvCreating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                          {csvCreating ? 'Importing…' : `Import${csvReady.length ? ` ${csvReady.length}` : ''}`}
+                        </button>
+                      </div>
+                    </>
                   )}
-
-                  <button
-                    onClick={() => { setImportedStudents([]); setRemainingIds(new Set()); setCsvSelectedIds(new Set()); setImportErrors([]); setCsvNeedsInfo([]); setCsvView('list'); }}
-                    className="w-full text-sm text-white/35 hover:text-white transition-colors py-1"
-                  >
-                    Done
-                  </button>
                 </div>
               )}
 
@@ -1821,11 +1839,11 @@ export default function Students() {
                                   Cancel
                                 </button>
                                 <button
-                                  onClick={() => void handleSaveNeedsInfo()}
-                                  disabled={csvEditSaving || !!(csvEditRow && getMissingFields(csvEditRow).length > 0)}
+                                  onClick={() => handleSaveNeedsInfo()}
+                                  disabled={!!(csvEditRow && getMissingFields(csvEditRow).length > 0)}
                                   className="flex-1 py-2 rounded-lg bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
                                 >
-                                  {csvEditSaving ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...</> : 'Save & Add'}
+                                  Add to import
                                 </button>
                               </div>
                             </div>
@@ -1840,136 +1858,6 @@ export default function Students() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Assign-to-class modal */}
-      {showAssignModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="glass-card rounded-3xl w-full max-w-md max-h-[85vh] flex flex-col">
-            <div className="p-5 border-b border-white/10 flex items-center justify-between shrink-0">
-              <h3 className="font-display text-xl font-medium">Assign to Class</h3>
-              <button onClick={() => setShowAssignModal(false)} className="p-2 text-white/40 hover:text-white hover:bg-white/5 rounded-xl transition-colors">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4">
-              {/* Selected student chips */}
-              <div>
-                <p className="text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-2">
-                  Assigning {csvSelectedIds.size} student{csvSelectedIds.size !== 1 ? 's' : ''}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {importedStudents.filter(u => csvSelectedIds.has(u.id)).map(u => (
-                    <span key={u.id} className="text-xs px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/10 text-white/70">
-                      {u.firstName} {u.lastName}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mode toggle */}
-              <div className="flex rounded-xl border border-white/10 overflow-hidden">
-                {(['existing', 'create'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => setAssignMode(mode)}
-                    className={`flex-1 py-2.5 text-sm font-medium transition-colors ${assignMode === mode ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/60'}`}
-                  >
-                    {mode === 'existing' ? 'Existing class' : 'Create new class'}
-                  </button>
-                ))}
-              </div>
-
-              {/* Existing class picker */}
-              {assignMode === 'existing' && (
-                <select
-                  value={assignClassId}
-                  onChange={e => setAssignClassId(e.target.value)}
-                  className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
-                >
-                  <option value="">Select a class...</option>
-                  {assignClasses.map(c => (
-                    <option key={c.id} value={c.id}>{c.title}</option>
-                  ))}
-                </select>
-              )}
-
-              {/* New class form */}
-              {assignMode === 'create' && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Class Name *</label>
-                      <input
-                        type="text"
-                        value={newClassName}
-                        onChange={e => setNewClassName(e.target.value)}
-                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white"
-                        placeholder="e.g. Introduction to Design"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Code</label>
-                      <div className="flex items-center gap-2">
-                        <div className="glass-input px-3 py-3 rounded-xl text-sm font-mono text-[#949ce4] tracking-widest whitespace-nowrap select-all">
-                          {newClassCode}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setNewClassCode(generateCode())}
-                          className="p-3 rounded-xl border border-white/10 text-white/40 hover:text-white hover:bg-white/5 transition-colors"
-                        >
-                          <RefreshCw size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Teacher *</label>
-                    <select
-                      value={newClassTeacherId}
-                      onChange={e => setNewClassTeacherId(e.target.value)}
-                      className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
-                    >
-                      <option value="">Select teacher...</option>
-                      {assignTeachers.map(t => (
-                        <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-widest mb-1.5">Program *</label>
-                    <select
-                      value={newClassProgram}
-                      onChange={e => setNewClassProgram(e.target.value)}
-                      className="glass-select w-full px-4 py-3 rounded-xl text-sm text-white"
-                    >
-                      <option value="">Select program...</option>
-                      {assignPrograms.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="p-5 border-t border-white/10 shrink-0">
-              <button
-                onClick={() => void handleAssign()}
-                disabled={assigning || (assignMode === 'existing' ? !assignClassId : !newClassName.trim() || !newClassTeacherId || !newClassProgram)}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50"
-              >
-                {assigning
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Assigning...</>
-                  : `Assign ${csvSelectedIds.size} Student${csvSelectedIds.size !== 1 ? 's' : ''}`
-                }
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <AnimatePresence>
         {editingStudent && (
@@ -2025,13 +1913,16 @@ export default function Students() {
                 />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input
-                    type="email"
-                    value={editForm.email}
-                    onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-                    placeholder="Email"
-                    className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
-                  />
+                  <div>
+                    <input
+                      type="email"
+                      value={editForm.email}
+                      readOnly
+                      title="Email cannot be changed"
+                      className="glass-input w-full px-3 py-2.5 rounded-xl text-sm opacity-50 cursor-not-allowed"
+                    />
+                    <p className="text-[10px] text-white/30 mt-1 ml-1">Email can't be changed</p>
+                  </div>
                   <input
                     type="tel"
                     value={editForm.phone}
@@ -2059,6 +1950,66 @@ export default function Students() {
                       <option key={loc} value={loc}>{loc}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Degree & class enrollment */}
+                <div className="space-y-3 pt-2 border-t border-white/5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Degree</label>
+                    <select
+                      value={editProgram}
+                      onChange={(e) => loadEditClasses(e.target.value)}
+                      className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
+                    >
+                      <option value="">No degree</option>
+                      {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-1.5">Classes</label>
+                    {editClasses.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {editClasses.map(c => (
+                          <span key={c.classId} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/10 text-white/70">
+                            {c.className}
+                            <button
+                              type="button"
+                              onClick={() => setEditClasses(prev => prev.filter(x => x.classId !== c.classId))}
+                              className="text-white/40 hover:text-red-300 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <select
+                        value={editClassSelect}
+                        onChange={(e) => setEditClassSelect(e.target.value)}
+                        disabled={!editProgram || loadingEditClasses}
+                        className="glass-select flex-1 px-3 py-2.5 rounded-xl text-sm disabled:opacity-50"
+                      >
+                        <option value="">{!editProgram ? 'Select a degree first' : loadingEditClasses ? 'Loading…' : 'Select a class…'}</option>
+                        {editDegreeClasses.filter(c => !editClasses.some(ec => ec.classId === c.id)).map(c => (
+                          <option key={c.id} value={c.id}>{c.title}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cls = editDegreeClasses.find(c => c.id === editClassSelect);
+                          if (!cls) return;
+                          setEditClasses(prev => prev.some(x => x.classId === cls.id) ? prev : [...prev, { classId: cls.id, className: cls.title }]);
+                          setEditClassSelect('');
+                        }}
+                        disabled={!editClassSelect}
+                        className="px-3 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5 transition-colors disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
