@@ -105,6 +105,7 @@ export default function StudentDashboard() {
           .from('invoices')
           .select('id, title, amount, status, due_date, month, year')
           .eq('student_id', user.id)
+          .is('deleted_at', null)
           .order('year', { ascending: false })
           .order('month', { ascending: false })
           .limit(5);

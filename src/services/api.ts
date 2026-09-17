@@ -641,7 +641,9 @@ export const api = {
         .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
-      // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one
+      // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one.
+      //    Soft-deleted rows are included on purpose: their key must keep this slot
+      //    occupied, otherwise sync would resurrect every invoice an admin removes.
       const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
       const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
 
@@ -776,6 +778,7 @@ export const api = {
         .from('invoices')
         .update({ status: 'overdue' })
         .eq('status', 'not_paid')
+        .is('deleted_at', null)
         .lt('due_date', todayStr);
 
       // 5b. Un-mark overdue: if due_date was moved to the future (e.g. via edit)
@@ -783,6 +786,7 @@ export const api = {
         .from('invoices')
         .update({ status: 'not_paid' })
         .eq('status', 'overdue')
+        .is('deleted_at', null)
         .gte('due_date', todayStr);
     },
 
@@ -798,6 +802,7 @@ export const api = {
             teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
           )
         `)
+        .is('deleted_at', null)
         .order('year', { ascending: false })
         .order('month', { ascending: false });
 
@@ -910,14 +915,25 @@ export const api = {
       }
     },
 
+    /** Tombstone rather than DELETE. A hard delete frees the
+     *  (enrollment_id, month, year) slot, and the syncInvoices() pass that runs on
+     *  the very next load re-creates the invoice with a new id — so the removal
+     *  never appeared to take. The tombstone keeps the slot occupied. */
     deleteInvoice: async (id: string) => {
-      const { error } = await supabase.from('invoices').delete().eq('id', id);
+      const { data, error } = await supabase
+        .from('invoices')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+        .is('deleted_at', null);
       if (error) throw new Error(error.message);
+      if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('Invoice could not be removed — it may already have been deleted.');
+      }
     },
 
     /* ─── Dashboard Stats ─── */
     getStats: async (): Promise<{ totalPaid: number; pending: number; overdue: number; invoiceCount: number }> => {
-      const { data, error } = await supabase.from('invoices').select('amount, status');
+      const { data, error } = await supabase.from('invoices').select('amount, status').is('deleted_at', null);
       if (error) throw new Error(error.message);
       let totalPaid = 0, pending = 0, overdue = 0;
       for (const r of (data || [])) {
@@ -2475,7 +2491,7 @@ export const api = {
           supabase.from('students').select('*', { count: 'exact', head: true }),
           supabase.from('students').select('*', { count: 'exact', head: true }).eq('status', 'active'),
           supabase.from('registration_applications').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-          supabase.from('invoices').select('amount, status')
+          supabase.from('invoices').select('amount, status').is('deleted_at', null)
         ]);
 
         const totalRevenue = (invoices || [])

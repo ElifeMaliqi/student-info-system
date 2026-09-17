@@ -363,14 +363,18 @@ export async function executeQuery(
       let idx = keys.length + 1;
       const { sql: whereSql, nextIdx } = buildWhere(req.filters, undefined, vals, idx);
       const { rows } = await client.query(`UPDATE ${table} SET ${sets}${whereSql} RETURNING *`, vals);
-      return { data: req.single || req.maybeSingle ? rows[0] : rows, error: null };
+      // `count` lets callers tell "matched nothing" apart from "worked", which an
+      // empty `data` alone does not express for single/maybeSingle reads.
+      return { data: req.single || req.maybeSingle ? rows[0] : rows, error: null, count: rows.length };
     }
 
     if (req.action === 'delete') {
       let idx = 1;
       const { sql: whereSql } = buildWhere(req.filters, undefined, params, idx);
-      await client.query(`DELETE FROM ${table}${whereSql}`, params);
-      return { data: null, error: null };
+      const result = await client.query(`DELETE FROM ${table}${whereSql}`, params);
+      // Report how many rows actually went. A delete that matched nothing used to
+      // return the same shape as a successful one, so silent no-ops looked fine.
+      return { data: null, error: null, count: result.rowCount ?? 0 };
     }
 
     return { data: null, error: { message: 'Unknown action' } };

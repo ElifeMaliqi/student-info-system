@@ -93,6 +93,7 @@ export default function Finance() {
 
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
   const [deleting, setDeleting]         = useState(false);
+  const [deleteError, setDeleteError]   = useState('');
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [loadingCreateOptions, setLoadingCreateOptions] = useState(false);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
@@ -468,11 +469,15 @@ export default function Finance() {
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError('');
     try {
       await api.finance.deleteInvoice(deleteTarget.id);
       setDeleteTarget(null);
       await loadAll();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      setDeleteError(err instanceof Error ? err.message : 'Could not remove this invoice.');
+    }
     finally { setDeleting(false); }
   }
 
@@ -824,7 +829,7 @@ export default function Finance() {
                             </button>
                           )}
                           {(!permOverridden || canDelete) && (
-                            <button onClick={() => setDeleteTarget(inv)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
+                            <button onClick={() => { setDeleteError(''); setDeleteTarget(inv); }} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
@@ -1103,16 +1108,22 @@ export default function Finance() {
       <AnimatePresence>
         {deleteTarget && (
           <>
-            <motion.div key="del-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeleteTarget(null)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
+            <motion.div key="del-bg" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setDeleteError(''); setDeleteTarget(null); }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50" />
             <motion.div key="del-modal" initial={{ opacity: 0, scale: 0.96, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, y: 12 }} transition={{ type: 'spring', damping: 28, stiffness: 340 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
               <div className="w-full max-w-xs bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl pointer-events-auto" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-5 text-center space-y-3">
                   <div className="mx-auto w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center border border-red-500/20"><Trash2 className="w-6 h-6 text-red-400" /></div>
                   <h2 className="text-sm font-bold text-white">Remove Invoice?</h2>
                   <p className="text-[13px] text-white/50">This will permanently remove <strong className="text-white/80">{deleteTarget.title}</strong> for {deleteTarget.studentName}.</p>
+                  {deleteError && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs text-left">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{deleteError}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
-                  <button onClick={() => setDeleteTarget(null)} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">Cancel</button>
+                  <button onClick={() => { setDeleteError(''); setDeleteTarget(null); }} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">Cancel</button>
                   <button onClick={confirmDelete} disabled={deleting} className="flex-1 bg-red-500/20 border border-red-500/30 text-red-400 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-red-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                     {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
                     Remove

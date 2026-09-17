@@ -46,14 +46,14 @@ export default function Dashboard() {
           supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
           supabase.from('programs').select('id', { count: 'exact', head: true }).eq('is_active', true),
           supabase.from('class_attendance').select('status, student_id'),
-          supabase.from('invoices').select('amount').eq('status', 'paid').eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+          supabase.from('invoices').select('amount').eq('status', 'paid').eq('month', now.getMonth() + 1).eq('year', now.getFullYear()).is('deleted_at', null),
           supabase
             .from('class_enrollments')
             .select('student_id, enrolled_at, status, class:classes(program_id)')
             .order('enrolled_at', { ascending: false })
             .limit(5),
           supabase.from('registration_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-          supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue'),
+          supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue').is('deleted_at', null),
         ]);
 
         const { count: studentCount } = studentRes;
