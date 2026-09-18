@@ -168,8 +168,19 @@ function buildWhere(filters: DbQueryRequest['filters'], orClause: string | undef
       params.push(f.value);
       clauses.push(`${col} = $${idx++}`);
     } else if (f.op === 'neq') {
-      params.push(f.value);
-      clauses.push(`${col} <> $${idx++}`);
+      // `col <> NULL` is never true in SQL, so a null neq matched no rows at all.
+      // This is how the client expresses Supabase's .not(col, 'is', null).
+      if (f.value === null) clauses.push(`${col} IS NOT NULL`);
+      else {
+        params.push(f.value);
+        clauses.push(`${col} <> $${idx++}`);
+      }
+    } else if (f.op === 'not_in') {
+      const arr = Array.isArray(f.value) ? f.value : [f.value];
+      if (arr.length) {
+        params.push(arr);
+        clauses.push(`NOT (${col} = ANY($${idx++}))`);
+      }
     } else if (f.op === 'in') {
       const arr = Array.isArray(f.value) ? f.value : [f.value];
       if (!arr.length) clauses.push('false');
@@ -198,6 +209,10 @@ function buildWhere(filters: DbQueryRequest['filters'], orClause: string | undef
     } else if (f.op === 'gt') {
       params.push(f.value);
       clauses.push(`${col} > $${idx++}`);
+    } else {
+      // An unrecognised filter used to be skipped, which widens the query — on an
+      // update or delete, potentially to every row. Refuse it instead.
+      throw new Error(`Unsupported filter operator: ${f.op}`);
     }
   }
 
@@ -285,6 +300,12 @@ export async function executeQuery(
   try {
     const table = quoteIdent(req.table);
     const params: unknown[] = [];
+
+    // An update or delete with no filter touches every row in the table. No caller
+    // needs that, and a filter lost on the way here must not turn into one.
+    if ((req.action === 'update' || req.action === 'delete') && !req.filters?.length) {
+      return { data: null, error: { message: `Refusing to ${req.action} ${req.table} without a filter` } };
+    }
 
     if (req.action === 'select') {
       const { columns, embeds } = parseSelectSpec(req.select || '*', req.table);

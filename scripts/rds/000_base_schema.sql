@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   email text UNIQUE NOT NULL,
   first_name text NOT NULL,
   last_name text NOT NULL,
-  role text NOT NULL CHECK (role IN ('admin', 'teacher', 'student')),
+  role text NOT NULL CHECK (role IN ('superadmin', 'admin', 'teacher', 'student')),
   avatar_url text,
   phone text,
   secondary_phone text,

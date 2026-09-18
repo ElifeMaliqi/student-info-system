@@ -33,16 +33,23 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     }
     setIsLoading(true);
     try {
-      await fetch('/api/notify/send-reset-access-code', {
+      const res = await fetch('/api/notify/send-reset-access-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
-      // Always show success regardless of whether the email exists
+      // A 503 means the server can't send email at all. It's returned before the
+      // address is looked up, so surfacing it reveals nothing about whether the
+      // account exists — unlike a per-user failure, which stays hidden below.
+      if (res.status === 503) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Password reset is temporarily unavailable. Please contact the school office.');
+        return;
+      }
+      // Otherwise show success regardless of whether the email exists
       setResetSent(true);
     } catch {
-      // Silently succeed to avoid email enumeration
-      setResetSent(true);
+      setError('Could not reach the server. Please check your connection and try again.');
     } finally {
       setIsLoading(false);
     }

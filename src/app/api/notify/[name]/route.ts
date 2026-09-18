@@ -116,10 +116,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
 // PUBLIC: Forgot-password flow
 // ════════════════════════════════════════════════════════════════════════════
 
+// Without an email provider a reset request can't be fulfilled. Say so instead of
+// reporting success: the old fallback told the user "sent" and wrote the live reset
+// link into the server log, where anyone with log access could use it. Callers run
+// this before looking the address up, so the response is the same whether or not an
+// account exists — it reveals server state, never user state.
+function resetEmailUnavailable(fn: string) {
+  console.error(`[${fn}] RESEND_API_KEY is not set; password reset email cannot be sent.`);
+  return NextResponse.json(
+    { success: false, error: 'Password reset by email is temporarily unavailable. Please contact the school office.' },
+    { status: 503 }
+  );
+}
+
 async function handleSendResetCode(body: Record<string, unknown>) {
   const ok = NextResponse.json({ success: true });
   const email = ((body.email as string) ?? '').trim().toLowerCase();
   if (!email || !email.includes('@')) return ok;
+  if (!resend) return resetEmailUnavailable('send-reset-access-code');
 
   const { rows: profileRows } = await query<{ first_name: string }>(
     `SELECT first_name FROM profiles WHERE email = $1`,
@@ -150,16 +164,12 @@ async function handleSendResetCode(body: Record<string, unknown>) {
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
   const firstName = profileRows[0].first_name ?? 'there';
 
-  if (resend) {
-    await resend.emails.send({
-      from: getFromEmail(),
-      to: email,
-      subject: 'Password Reset Access — Future Minds Academy',
-      html: buildResetCodeEmailHtml(resetLink, firstName),
-    });
-  } else {
-    console.log(`[send-reset-access-code] No RESEND_API_KEY. Link for ${email}: ${resetLink}`);
-  }
+  await resend.emails.send({
+    from: getFromEmail(),
+    to: email,
+    subject: 'Password Reset Access — Future Minds Academy',
+    html: buildResetCodeEmailHtml(resetLink, firstName),
+  });
 
   return ok;
 }
@@ -241,6 +251,7 @@ async function handlePasswordResetEmail(body: Record<string, unknown>) {
   const ok = NextResponse.json({ success: true });
   const email = ((body.email as string) ?? '').trim().toLowerCase();
   if (!email || !email.includes('@')) return ok;
+  if (!resend) return resetEmailUnavailable('send-password-reset-email');
 
   const { rows } = await query<{ id: string; first_name: string }>(
     `SELECT id, first_name FROM profiles WHERE email = $1`,
@@ -253,16 +264,12 @@ async function handlePasswordResetEmail(body: Record<string, unknown>) {
   const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
 
-  if (resend) {
-    await resend.emails.send({
-      from: getFromEmail(),
-      to: email,
-      subject: 'Reset Your Password — Future Minds Academy',
-      html: buildResetCodeEmailHtml(resetLink, rows[0].first_name ?? 'there'),
-    });
-  } else {
-    console.log(`[send-password-reset-email] No RESEND_API_KEY. Link for ${email}: ${resetLink}`);
-  }
+  await resend.emails.send({
+    from: getFromEmail(),
+    to: email,
+    subject: 'Reset Your Password — Future Minds Academy',
+    html: buildResetCodeEmailHtml(resetLink, rows[0].first_name ?? 'there'),
+  });
 
   return ok;
 }

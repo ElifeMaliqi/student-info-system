@@ -25,11 +25,26 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { ...init, headers });
-  const json = await res.json();
-  return json as T;
+  const text = await res.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // A gateway error page or a crashed route comes back as HTML. Hand callers the
+    // same { data, error } shape they already check, rather than a SyntaxError
+    // that surfaces as an unexplained client failure.
+    return { data: null, error: { message: `Server error (${res.status})` } } as T;
+  }
 }
 
 type Filter = { op: string; column: string; value: unknown };
+
+/** Accepts an array, or a Supabase/PostgREST list string such as `("a","b")`. */
+function parseInList(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  const s = String(value ?? '').trim().replace(/^\(|\)$/g, '');
+  if (!s) return [];
+  return s.split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+}
 
 class QueryBuilder implements PromiseLike<{ data: unknown; error: { message: string } | null; count?: number | null }> {
   private req: DbQueryRequest;
@@ -124,9 +139,16 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: { message: str
   }
 
   not(column: string, operator: string, value: unknown) {
+    this.req.filters = this.req.filters || [];
     if (operator === 'is' && value === null) {
-      this.req.filters = this.req.filters || [];
+      // The executor renders a null `neq` as IS NOT NULL.
       this.req.filters.push({ op: 'neq', column, value: null });
+    } else if (operator === 'in') {
+      this.req.filters.push({ op: 'not_in', column, value: parseInList(value) });
+    } else {
+      // Unsupported operators used to be dropped without a word, silently widening
+      // the query. Fail loudly instead.
+      throw new Error(`Unsupported filter: not(${column}, '${operator}')`);
     }
     return this;
   }
@@ -178,8 +200,8 @@ export const db = {
     return new QueryBuilder(table);
   },
 
-  rpc(fn: string, args?: Record<string, unknown>) {
-    return apiFetch<{ data: unknown; error: { message: string } | null }>('/api/rpc', {
+  rpc<T = unknown>(fn: string, args?: Record<string, unknown>) {
+    return apiFetch<{ data: T | null; error: { message: string } | null }>('/api/rpc', {
       method: 'POST',
       body: JSON.stringify({ fn, args: args ?? {} }),
     });
@@ -285,7 +307,10 @@ export const db = {
   storage: {
     from(bucket: string) {
       return {
-        upload: async (path: string, file: File) => {
+        // `_options` mirrors Supabase's signature so existing calls type-check. The
+        // avatar route names every upload itself and derives the type from the file,
+        // so neither option has anything to act on.
+        upload: async (path: string, file: File, _options?: { upsert?: boolean; contentType?: string }) => {
           const token = getToken();
           const form = new FormData();
           form.append('file', file);

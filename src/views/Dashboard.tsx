@@ -72,8 +72,11 @@ export default function Dashboard() {
         setStats({ totalStudents: studentCount || 0, activePrograms: programCount || 0, avgAttendance: avgAtt, monthlyRevenue: monthRev });
 
         const studentIds = [...new Set((enrollments || []).map((e: any) => e.student_id))];
-        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, avatar_url').in('id', studentIds.length ? studentIds : ['__none__']);
-        const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+        // An empty list is fine: the query layer renders `in ()` as false. The old
+        // '__none__' placeholder isn't a valid uuid and made Postgres reject the query.
+        const { data: profiles } = await supabase.from('profiles').select('id, first_name, last_name, avatar_url').in('id', studentIds);
+        type ProfileRow = { id: string; first_name: string; last_name: string; avatar_url: string | null };
+        const profileMap = new Map(((profiles || []) as ProfileRow[]).map((p) => [p.id, p] as const));
 
         const recent: RecentStudent[] = [];
         const seen = new Set<string>();

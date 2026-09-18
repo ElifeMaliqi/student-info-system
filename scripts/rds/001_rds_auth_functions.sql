@@ -64,9 +64,16 @@ BEGIN
   INSERT INTO auth_users (id, email, encrypted_password)
   VALUES (new_user_id, app.email, crypt(app.password_hash, gen_salt('bf')));
 
+  -- app.program holds a program id when the application came from the admin's New
+  -- Enrollment form, and a program name when it came from public registration.
+  -- Matching by name alone never found the id, leaving every admin-enrolled
+  -- student with a NULL program_id. Prefer an exact id match, then fall back.
   IF app.role = 'student' THEN
     IF app.program IS NOT NULL THEN
-      SELECT id INTO prog_id FROM programs WHERE name ILIKE '%' || app.program || '%' LIMIT 1;
+      SELECT id INTO prog_id FROM programs
+      WHERE id::text = app.program OR name ILIKE '%' || app.program || '%'
+      ORDER BY (id::text = app.program) DESC
+      LIMIT 1;
     END IF;
     INSERT INTO students (
       user_id, program_id, date_of_birth, address, city, country,
@@ -78,7 +85,10 @@ BEGIN
   END IF;
 
   IF app.role = 'teacher' AND app.program IS NOT NULL THEN
-    SELECT id INTO prog_id FROM programs WHERE name ILIKE '%' || app.program || '%' LIMIT 1;
+    SELECT id INTO prog_id FROM programs
+      WHERE id::text = app.program OR name ILIKE '%' || app.program || '%'
+      ORDER BY (id::text = app.program) DESC
+      LIMIT 1;
     IF prog_id IS NOT NULL THEN
       INSERT INTO teacher_programs (teacher_id, program_id) VALUES (new_user_id, prog_id)
       ON CONFLICT DO NOTHING;

@@ -1977,7 +1977,7 @@ export const api = {
     },
 
     removeStudentAccount: async (studentId: string): Promise<void> => {
-      const { data, error } = await supabase.rpc('admin_delete_student_account', {
+      const { data, error } = await supabase.rpc<{ success?: boolean; message?: string }>('admin_delete_student_account', {
         p_student_id: studentId,
       });
       if (error) throw new Error(error.message);
@@ -2436,7 +2436,7 @@ export const api = {
       if (insertError || !newApp) throw new Error(insertError?.message ?? 'Failed to create application.');
 
       // Immediately approve — this creates the auth user, profile, and student record
-      const { data: result, error: approveError } = await supabase.rpc('approve_registration_application', {
+      const { data: result, error: approveError } = await supabase.rpc<{ success?: boolean; user_id?: string }>('approve_registration_application', {
         application_id: newApp.id,
       });
 
