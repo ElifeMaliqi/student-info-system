@@ -88,6 +88,36 @@ export async function POST(req: NextRequest) {
         };
       }
       const student = match.rows[0];
+
+      // Duplicate rule: one imported payment per student per month. The document
+      // names no class, so a second payment in the same month can't be told apart
+      // from a re-upload — ambiguity is treated as a duplicate, never guessed as a
+      // new payment. Imported rows are the manual ones with no enrollment (invoices
+      // created by hand always have one); deleted imports don't count, so a wrong
+      // import can be removed and re-done.
+      const existing = await client.query<{ invoice_id: string }>(
+        `SELECT invoice_id FROM invoices
+          WHERE student_id = $1 AND month = $2 AND year = $3
+            AND is_manual AND enrollment_id IS NULL
+            AND deleted_at IS NULL
+          LIMIT 1`,
+        [student.id, month, year]
+      );
+      if (existing.rows[0]) {
+        return {
+          http: 200 as const,
+          body: {
+            imported: false,
+            duplicate: {
+              studentName: `${student.first_name} ${student.last_name}`,
+              month,
+              year,
+              existingInvoiceId: existing.rows[0].invoice_id,
+            },
+          },
+        };
+      }
+
       const invoiceId = generateInvoiceId(year, month);
 
       await client.query(

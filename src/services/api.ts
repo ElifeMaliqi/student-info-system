@@ -530,6 +530,7 @@ export const api = {
     importInvoiceDoc: async (file: File): Promise<
       | { imported: true; studentName: string; invoiceId: string; amount: number; month: number; year: number; title: string; paymentMethod: string | null }
       | { imported: false; unmatched: { name: string; reason?: 'archived' | 'not_found'; studentId?: string }[] }
+      | { imported: false; duplicate: { studentName: string; month: number; year: number; existingInvoiceId: string } }
     > => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Not authenticated');

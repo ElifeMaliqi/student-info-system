@@ -56,7 +56,11 @@ export default function Finance() {
   const [impFiles, setImpFiles]         = useState<File[]>([]);
   const [importing, setImporting]       = useState(false);
   const [importError, setImportError]   = useState('');
-  const [importSummary, setImportSummary] = useState<{ created: number; items: { studentName: string; amount: number; month: number; year: number }[] } | null>(null);
+  const [importSummary, setImportSummary] = useState<{
+    created: number;
+    items: { studentName: string; amount: number; month: number; year: number }[];
+    skipped: { fileName: string; studentName: string; month: number; year: number; existingInvoiceId: string }[];
+  } | null>(null);
   const [unmatched, setUnmatched]       = useState<UnmatchedStudent[] | null>(null);
   const [pendingFiles, setPendingFiles] = useState<{ file: File; names: string[] }[]>([]); // files whose student wasn't found
 
@@ -389,6 +393,7 @@ export default function Finance() {
     setImportError('');
 
     const created: { studentName: string; amount: number; month: number; year: number }[] = [];
+    const skipped: { fileName: string; studentName: string; month: number; year: number; existingInvoiceId: string }[] = [];
     const stillUnmatched: UnmatchedStudent[] = [];
     const stillPending: { file: File; names: string[] }[] = [];
     let lastError = '';
@@ -398,6 +403,10 @@ export default function Finance() {
         const res = await api.finance.importInvoiceDoc(file);
         if (res.imported) {
           created.push({ studentName: res.studentName, amount: res.amount, month: res.month, year: res.year });
+        } else if ('duplicate' in res) {
+          // Already imported for this student and month — nothing written. Not
+          // queued for retry: re-running it would only be skipped again.
+          skipped.push({ fileName: file.name, ...res.duplicate });
         } else {
           stillUnmatched.push(...res.unmatched);
           stillPending.push({ file, names: res.unmatched.map(u => u.name) });
@@ -412,11 +421,12 @@ export default function Finance() {
     setImportSummary(prev => ({
       created: (prev?.created || 0) + created.length,
       items: [...(prev?.items || []), ...created],
+      skipped: [...(prev?.skipped || []), ...skipped],
     }));
     setPendingFiles(stillPending);
     const dedup = Array.from(new Map(stillUnmatched.map(u => [u.name.toLowerCase(), u])).values());
     setUnmatched(dedup.length ? dedup : null);
-    if (lastError && created.length === 0 && dedup.length === 0) setImportError(lastError);
+    if (lastError && created.length === 0 && skipped.length === 0 && dedup.length === 0) setImportError(lastError);
     setImporting(false);
   }
 
@@ -893,6 +903,22 @@ export default function Finance() {
                       {importSummary.items.map((it, i) => (
                         <p key={i}>{it.studentName} · {fmtMoney(it.amount)} · {MONTH_NAMES[it.month - 1]} {it.year}</p>
                       ))}
+                    </div>
+                  )}
+
+                  {importSummary && importSummary.skipped.length > 0 && (
+                    <div className="px-3 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs space-y-1 max-h-40 overflow-y-auto custom-scrollbar">
+                      <p className="font-semibold text-amber-400">
+                        {importSummary.skipped.length} skipped as duplicate{importSummary.skipped.length !== 1 ? 's' : ''}
+                      </p>
+                      {importSummary.skipped.map((it, i) => (
+                        <p key={i}>
+                          {it.fileName}: {it.studentName} already has an imported payment for {MONTH_NAMES[it.month - 1]} {it.year} ({it.existingInvoiceId})
+                        </p>
+                      ))}
+                      <p className="text-amber-300/60 pt-1">
+                        If this really is a second payment, record it with Generate New Invoice instead.
+                      </p>
                     </div>
                   )}
                 </div>
