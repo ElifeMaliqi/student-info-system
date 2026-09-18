@@ -4194,10 +4194,15 @@ export const api = {
               SELECT id, email, crypt($5, gen_salt('bf')) FROM new_profile
               RETURNING id, encrypted_password
             ),
+            -- No ON CONFLICT clauses here. ON CONFLICT (col) is rejected outright
+            -- when the database lacks a unique constraint on that column, which
+            -- fails the whole statement, and the live RDS schema has already
+            -- drifted from the repo once. The students row is keyed on a fresh
+            -- uuid so it cannot conflict; the registration row is skipped with
+            -- NOT EXISTS, which behaves the same with or without the constraint.
             student_row AS (
               INSERT INTO students (user_id, status)
               SELECT id, 'active' FROM new_profile WHERE role = 'student'
-              ON CONFLICT (user_id) DO NOTHING
               RETURNING user_id
             ),
             reg_app AS (
@@ -4207,7 +4212,7 @@ export const api = {
               FROM new_profile np
               JOIN new_auth na ON na.id = np.id
               WHERE np.role IN ('student', 'teacher')
-              ON CONFLICT (email) DO NOTHING
+                AND NOT EXISTS (SELECT 1 FROM registration_applications r WHERE r.email = np.email)
             )
             SELECT * FROM new_profile
           `,

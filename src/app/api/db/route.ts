@@ -32,7 +32,11 @@ export async function POST(req: NextRequest) {
         return { rows: queryResult.rows, error: null };
       } catch (e: any) {
         console.error('[/api/db] Query error:', e.message);
-        return { rows: [], error: { message: 'Query failed' } };
+        // This path is admin-only and already accepts arbitrary SQL, so the real
+        // Postgres message reveals nothing new — while a bare "Query failed" left
+        // every failure here (account creation included) impossible to diagnose.
+        const message = e.detail ? `${e.message} (${e.detail})` : e.message;
+        return { rows: [], error: { message: message || 'Query failed' } };
       }
     });
 
