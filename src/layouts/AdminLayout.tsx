@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
   Globe, Moon, Sun, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
-  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle
+  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle, Presentation
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -117,6 +117,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const adminNavItems = [
     { id: 'dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
     { id: 'students', label: t('nav.students'), icon: Users },
+    { id: 'teachers', label: t('nav.teachers'), icon: Presentation },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
     { id: 'classes', label: 'Classes', icon: GraduationCap },
     { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
@@ -168,6 +169,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     grades:        'grades',
     announcements: 'announcements',
     students:      'users',
+    teachers:      'users',
     analytics:     'analytics',
     finance:       'finance',
     attendance:    'attendance',

@@ -32,6 +32,32 @@ export interface Teacher {
   avatar?: string;
 }
 
+/** One class in a teacher's attendance breakdown. */
+export interface TeacherClassAttendance {
+  id: string;
+  title: string;
+  /** Present + late over all marks in this class; null when none recorded. */
+  attendanceRate: number | null;
+}
+
+/** One row of the admin Teachers page. */
+export interface TeacherOverview {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  avatar: string;
+  classCount: number;
+  /** Distinct students with an active enrollment in any of the teacher's classes. */
+  studentCount: number;
+  /** Scheduled hours per week across all of the teacher's class sessions. */
+  weeklyHours: number;
+  /** Present + late over all marks in the teacher's classes; null when none recorded. */
+  attendanceRate: number | null;
+  /** Per-class rates behind attendanceRate, ordered by class title. */
+  classes: TeacherClassAttendance[];
+}
+
 export interface Invoice {
   id: string;
   invoiceId?: string;

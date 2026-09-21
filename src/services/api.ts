@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance } from '../types';
 import { supabase } from '../lib/supabase';
 
 const formatDate = (date: string) => {
@@ -4293,6 +4293,94 @@ export const api = {
         mustChangePassword: row.must_change_password,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+      }));
+    },
+
+    /** Current (non-archived) teachers with class, workload and attendance figures
+     *  for the admin Teachers page. Each figure is aggregated per teacher in its own
+     *  CTE, so joining them can't multiply rows. Attendance pools every mark across
+     *  the teacher's classes, and a late arrival counts as attended — the same rule
+     *  the admin Dashboard uses. The pooled figure is summed from the same per-class
+     *  counts returned in `classes`, so the table and the breakdown always agree. */
+    getTeacherOverview: async (): Promise<TeacherOverview[]> => {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `
+            WITH cls AS (
+              SELECT teacher_id, COUNT(*)::int AS class_count
+              FROM classes
+              GROUP BY teacher_id
+            ),
+            stu AS (
+              SELECT c.teacher_id, COUNT(DISTINCT e.student_id)::int AS student_count
+              FROM classes c
+              JOIN class_enrollments e ON e.class_id = c.id
+              WHERE e.status = 'active'
+              GROUP BY c.teacher_id
+            ),
+            hrs AS (
+              SELECT c.teacher_id,
+                     SUM(EXTRACT(EPOCH FROM (s.end_time - s.start_time)) / 3600.0)::float AS weekly_hours
+              FROM classes c
+              JOIN class_sessions s ON s.class_id = c.id
+              GROUP BY c.teacher_id
+            ),
+            per_class AS (
+              SELECT c.id, c.teacher_id, c.title,
+                     COUNT(a.class_id)::int AS marks,
+                     COUNT(a.class_id) FILTER (WHERE a.status IN ('present', 'late'))::int AS attended
+              FROM classes c
+              LEFT JOIN class_attendance a ON a.class_id = c.id
+              GROUP BY c.id, c.teacher_id, c.title
+            ),
+            att AS (
+              SELECT teacher_id,
+                     SUM(marks)::int    AS marks,
+                     SUM(attended)::int AS attended,
+                     json_agg(json_build_object('id', id, 'title', title, 'marks', marks, 'attended', attended)
+                              ORDER BY title) AS classes
+              FROM per_class
+              GROUP BY teacher_id
+            )
+            SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.avatar_url,
+                   COALESCE(cls.class_count, 0)   AS class_count,
+                   COALESCE(stu.student_count, 0) AS student_count,
+                   COALESCE(hrs.weekly_hours, 0)  AS weekly_hours,
+                   COALESCE(att.marks, 0)         AS marks,
+                   COALESCE(att.attended, 0)      AS attended,
+                   COALESCE(att.classes, '[]'::json) AS classes
+            FROM profiles p
+            LEFT JOIN cls ON cls.teacher_id = p.id
+            LEFT JOIN stu ON stu.teacher_id = p.id
+            LEFT JOIN hrs ON hrs.teacher_id = p.id
+            LEFT JOIN att ON att.teacher_id = p.id
+            WHERE p.role = 'teacher' AND COALESCE(p.is_archived, false) = false
+            ORDER BY p.first_name, p.last_name
+          `,
+          params: [],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to load teachers');
+      const rate = (attended: unknown, marks: unknown) =>
+        Number(marks) > 0 ? Math.round((Number(attended) / Number(marks)) * 1000) / 10 : null;
+      return (result.rows || []).map((row: any) => ({
+        id: row.id,
+        name: `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim(),
+        email: row.email,
+        phone: row.phone || null,
+        avatar: row.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.id}`,
+        classCount: Number(row.class_count),
+        studentCount: Number(row.student_count),
+        weeklyHours: Number(row.weekly_hours),
+        attendanceRate: rate(row.attended, row.marks),
+        classes: ((row.classes || []) as any[]).map((c): TeacherClassAttendance => ({
+          id: c.id,
+          title: c.title,
+          attendanceRate: rate(c.attended, c.marks),
+        })),
       }));
     },
 
