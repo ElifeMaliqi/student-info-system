@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken, updatePassword } from '../../../../server/auth';
 import { query } from '../../../../server/db';
 import { rateLimit, clientIp } from '../../../../server/rate-limit';
+import { appUrl } from '../../../../server/app-url';
 import { Resend } from 'resend';
 import crypto from 'crypto';
 
@@ -160,7 +161,7 @@ async function handleSendResetCode(body: Record<string, unknown>) {
     [resetToken, email, expiresAt]
   );
 
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
+  const base = appUrl();
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
   const firstName = profileRows[0].first_name ?? 'there';
 
@@ -261,7 +262,7 @@ async function handlePasswordResetEmail(body: Record<string, unknown>) {
 
   const { generateResetToken } = await import('../../../../server/auth');
   const resetToken = await generateResetToken(rows[0].id);
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
+  const base = appUrl();
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
 
   await resend.emails.send({

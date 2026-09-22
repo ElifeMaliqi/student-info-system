@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, generateResetToken, loginWithPassword, updatePassword, verifyResetToken, verifyToken } from '../../../../server/auth';
 import { rateLimit, clientIp } from '../../../../server/rate-limit';
+import { appUrl } from '../../../../server/app-url';
 import { Resend } from 'resend';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
@@ -144,7 +145,7 @@ export async function POST(
     }
 
     const resetToken = await generateResetToken(authUser.id);
-    const base = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
+    const base = appUrl();
     const resetUrl = `${base}/resetpassword#t=${resetToken}`;
 
     if (resend) {
