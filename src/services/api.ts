@@ -290,7 +290,7 @@ export const api = {
       amount: number;
       dueDate: string;
       status?: string;
-      mode?: 'created' | 'updated';
+      mode?: 'created' | 'updated' | 'receipt';
       changeSummary?: string;
     }): Promise<void> => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -887,6 +887,8 @@ export const api = {
 
       const student = current.student as any;
       const cls = current.class as any;
+      // Marking an invoice paid sends a payment receipt instead of the "updated" email.
+      const becamePaid = newStatus === 'paid' && oldStatus !== 'paid';
       if (student?.email && changeParts.length > 0) {
         try {
           await api.finance._sendInvoiceEmail({
@@ -898,7 +900,7 @@ export const api = {
             amount: newAmount,
             dueDate: newDueDate,
             status: newStatus,
-            mode: 'updated',
+            mode: becamePaid ? 'receipt' : 'updated',
             changeSummary: changeParts.join('; '),
           });
         } catch (emailErr) {

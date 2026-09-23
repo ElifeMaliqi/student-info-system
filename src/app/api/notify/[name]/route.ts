@@ -448,6 +448,17 @@ async function handleInvoiceEmail(body: Record<string, unknown>, user: { id: str
 
   if (!resend) return NextResponse.json({ success: false, error: 'Email provider not configured' }, { status: 500 });
 
+  if (mode === 'receipt') {
+    const paidOn = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    await resend.emails.send({
+      from: getFromEmail(),
+      to: studentEmail as string,
+      subject: `Payment Receipt from Future Minds Academy: ${invoiceTitle}`,
+      html: buildInvoiceReceiptEmailHtml(String(studentName), String(className), String(invoiceTitle), String(invoiceId), Number(amount).toFixed(2), paidOn),
+    });
+    return NextResponse.json({ success: true });
+  }
+
   const isUpdated = mode === 'updated';
   const formattedAmount = Number(amount).toFixed(2);
   const formattedDue = new Date(String(dueDate)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -669,6 +680,35 @@ function buildInvoiceEmailHtml(studentName: string, className: string, invoiceTi
 <p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
 <p style="margin:0 0 16px;">${isUpdated ? `Your invoice "${esc(invoiceTitle)}" has been updated. Change: <strong style="color:#ffffff;">${esc(changeSummary || 'details were updated')}</strong>.` : `A new invoice "${esc(invoiceTitle)}" has been issued for you.`}</p>
 <p style="margin:0 0 16px;">Invoice ID: <strong style="color:#ffffff;">${esc(invoiceId)}</strong> · Class: ${esc(className)} · Amount: <strong style="color:#ffffff;">$${esc(amount)}</strong> · Due: <strong style="color:#ffffff;">${esc(dueDate)}</strong> · Status: <strong style="color:#ffffff;text-transform:capitalize;">${esc(status)}</strong></p>
+<p style="margin:0;">Warm regards,<br>Future Minds Academy · Finance Department</p>
+</div></td></tr>
+<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
+<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
+</td></tr></table></td></tr></table></body></html>`;
+}
+
+function buildInvoiceReceiptEmailHtml(studentName: string, className: string, invoiceTitle: string, invoiceId: string, amount: string, paidOn: string): string {
+  const row = (label: string, value: string, last = false) =>
+    `<tr><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}"><span style="color:rgba(255,255,255,0.4);font-size:12px;">${label}</span></td><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}text-align:right;">${value}</td></tr>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="background-color:#111118;border-radius:16px;border:1px solid rgba(255,255,255,0.06);overflow:hidden;">
+<tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
+<h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">${esc(invoiceTitle)}</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Payment Receipt</p></td></tr>
+<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
+<p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
+<p style="margin:0 0 24px;">We have received your payment for invoice "${esc(invoiceTitle)}". Thank you.</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:24px;"><tr><td style="padding:20px 24px;">
+<table width="100%">
+${row('Invoice ID', `<strong style="color:#ffffff;">${esc(invoiceId)}</strong>`)}
+${row('Class', `<span style="color:#ffffff;">${esc(className)}</span>`)}
+${row('Amount paid', `<strong style="color:#ffffff;">€${esc(amount)}</strong>`)}
+${row('Payment date', `<span style="color:#ffffff;">${esc(paidOn)}</span>`)}
+${row('Status', `<span style="color:#10b981;font-weight:700;">Paid</span>`, true)}
+</table></td></tr></table>
+<p style="margin:0 0 16px;">Please keep this email as your proof of payment.</p>
 <p style="margin:0;">Warm regards,<br>Future Minds Academy · Finance Department</p>
 </div></td></tr>
 <tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
