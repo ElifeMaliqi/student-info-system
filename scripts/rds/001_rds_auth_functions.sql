@@ -141,3 +141,52 @@ BEGIN
   RETURN json_build_object('success', true, 'message', 'Student account deleted');
 END;
 $$;
+
+-- Permanently deletes a teacher account. Refuses while the teacher still has
+-- classes: deleting a class cascades to its enrollments, attendance, grades and
+-- invoices (paid ones too), so classes must be moved to another teacher first.
+-- Records the teacher only authored in other classes (attendance marks, grades,
+-- reviewed registrations) are kept, with the author cleared.
+CREATE OR REPLACE FUNCTION public.admin_delete_teacher_account(
+  p_teacher_id uuid,
+  caller_id uuid DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_caller  uuid;
+  v_role    text;
+  v_email   text;
+  v_classes int;
+BEGIN
+  v_caller := COALESCE(caller_id, current_app_user_id());
+  SELECT role INTO v_role FROM profiles WHERE id = v_caller;
+  IF v_role NOT IN ('admin', 'superadmin') THEN
+    RAISE EXCEPTION 'Only admins can delete teacher accounts';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = p_teacher_id AND role = 'teacher') THEN
+    RETURN json_build_object('success', false, 'message', 'Teacher account not found');
+  END IF;
+
+  SELECT COUNT(*) INTO v_classes FROM classes WHERE teacher_id = p_teacher_id;
+  IF v_classes > 0 THEN
+    RETURN json_build_object('success', false, 'message',
+      'This teacher still has ' || v_classes || ' class(es). Move them to another teacher first (Edit another teacher and add the class).');
+  END IF;
+
+  SELECT email INTO v_email FROM profiles WHERE id = p_teacher_id;
+
+  UPDATE class_attendance SET recorded_by = NULL WHERE recorded_by = p_teacher_id;
+  UPDATE grade_table_entries SET graded_by = NULL WHERE graded_by = p_teacher_id;
+  UPDATE registration_applications SET reviewed_by = NULL WHERE reviewed_by = p_teacher_id;
+  DELETE FROM registration_applications WHERE email = v_email;
+  DELETE FROM auth_users WHERE id = p_teacher_id;
+  DELETE FROM profiles WHERE id = p_teacher_id AND role = 'teacher';
+
+  RETURN json_build_object('success', true, 'message', 'Teacher account deleted');
+END;
+$$;

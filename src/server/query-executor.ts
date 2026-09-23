@@ -440,6 +440,13 @@ export async function executeRpc(
       );
       return { data: rows[0]?.result, error: null };
     }
+    if (fn === 'admin_delete_teacher_account') {
+      const { rows } = await client.query(
+        `SELECT admin_delete_teacher_account($1::uuid, $2::uuid) AS result`,
+        [args.p_teacher_id, userId]
+      );
+      return { data: rows[0]?.result, error: null };
+    }
     if (fn === 'get_user_context') {
       // Returns the caller's own profile + system role + permissions. The user id
       // is taken from the authenticated session, never from client input, so this

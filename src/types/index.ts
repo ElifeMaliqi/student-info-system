@@ -44,6 +44,8 @@ export interface TeacherClassAttendance {
 export interface TeacherOverview {
   id: string;
   name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string | null;
   avatar: string;

@@ -11,7 +11,8 @@ const pool = new Pool({
 });
 
 // Re-applies the RDS auth helpers (set_app_user, current_app_user_id,
-// approve_registration_application, admin_delete_student_account). Every
+// approve_registration_application, admin_delete_student_account,
+// admin_delete_teacher_account). Every
 // statement is CREATE OR REPLACE, so this is safe to run repeatedly.
 async function run() {
   const sqlPath = path.join(process.cwd(), 'scripts/rds/001_rds_auth_functions.sql');

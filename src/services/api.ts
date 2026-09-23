@@ -4413,6 +4413,8 @@ export const api = {
       return (result.rows || []).map((row: any) => ({
         id: row.id,
         name: `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim(),
+        firstName: row.first_name ?? '',
+        lastName: row.last_name ?? '',
         email: row.email,
         phone: row.phone || null,
         avatar: row.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.id}`,
@@ -4426,6 +4428,129 @@ export const api = {
           attendanceRate: rate(c.attended, c.marks),
         })),
       }));
+    },
+
+    /** One teacher's details for the admin teacher profile page. */
+    getTeacherProfile: async (teacherId: string): Promise<{
+      id: string; name: string; email: string; phone: string | null; avatar: string; createdAt: string;
+    } | null> => {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `
+            SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.avatar_url, p.created_at
+            FROM profiles p
+            WHERE p.id = $1 AND p.role = 'teacher'
+          `,
+          params: [teacherId],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to load teacher');
+      const row = result.rows?.[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        name: `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim(),
+        email: row.email,
+        phone: row.phone || null,
+        avatar: row.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.id}`,
+        createdAt: row.created_at,
+      };
+    },
+
+    /** Every class with its current teacher, for the teacher Edit class picker. */
+    getClassesWithTeacher: async (): Promise<{ id: string; title: string; teacherId: string; teacherName: string }[]> => {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `
+            SELECT c.id, c.title, c.teacher_id, p.first_name, p.last_name
+            FROM classes c
+            JOIN profiles p ON p.id = c.teacher_id
+            ORDER BY c.title
+          `,
+          params: [],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to load classes');
+      return (result.rows || []).map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        teacherId: r.teacher_id,
+        teacherName: `${r.first_name ?? ''} ${r.last_name ?? ''}`.trim(),
+      }));
+    },
+
+    /** Updates a teacher's name, email and phone. The email is changed on the login
+     *  record (auth_users) and the registration record in the same statement, so the
+     *  teacher signs in with the new address. */
+    updateTeacher: async (teacherId: string, updates: { firstName: string; lastName: string; email: string; phone?: string }): Promise<void> => {
+      const email = updates.email.trim().toLowerCase();
+      const post = async (query: string, params: unknown[]) => {
+        const response = await fetch('/api/db', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ query, params }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to update teacher');
+        return (result.rows || []) as any[];
+      };
+
+      const taken = await post(
+        `SELECT 1 FROM profiles WHERE lower(email) = $1 AND id <> $2
+         UNION ALL
+         SELECT 1 FROM auth_users WHERE lower(email) = $1 AND id <> $2
+         LIMIT 1`,
+        [email, teacherId],
+      );
+      if (taken.length > 0) throw new Error('That email is already used by another account.');
+
+      const rows = await post(
+        `WITH old AS (
+           SELECT email FROM profiles WHERE id = $1 AND role = 'teacher'
+         ),
+         au AS (
+           UPDATE auth_users SET email = $4 WHERE id = $1 AND EXISTS (SELECT 1 FROM old)
+         ),
+         ra AS (
+           UPDATE registration_applications SET email = $4 WHERE email = (SELECT email FROM old)
+         )
+         UPDATE profiles
+         SET first_name = $2, last_name = $3, email = $4, phone = $5, updated_at = now()
+         WHERE id = $1 AND role = 'teacher'
+         RETURNING id`,
+        [teacherId, updates.firstName, updates.lastName, email, updates.phone || null],
+      );
+      if (rows.length === 0) throw new Error('Teacher not found.');
+    },
+
+    /** Moves the given classes to this teacher (a class always has exactly one teacher). */
+    assignClassesToTeacher: async (teacherId: string, classIds: string[]): Promise<void> => {
+      if (classIds.length === 0) return;
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          query: `UPDATE classes SET teacher_id = $1, updated_at = now() WHERE id = ANY($2::uuid[])`,
+          params: [teacherId, classIds],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to assign classes');
+    },
+
+    /** Permanently deletes a teacher. The DB function refuses while they still have classes. */
+    deleteTeacher: async (teacherId: string): Promise<void> => {
+      const { data, error } = await supabase.rpc<{ success?: boolean; message?: string }>('admin_delete_teacher_account', {
+        p_teacher_id: teacherId,
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.success) throw new Error(data?.message || 'Failed to delete teacher account.');
     },
 
     getById: async (userId: string) => {
