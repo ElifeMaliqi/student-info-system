@@ -2149,6 +2149,33 @@ export const api = {
       if (error) throw new Error(error.message);
     },
 
+    /** Deletes a registration and, when the person has an account of the same role,
+     *  that account too — the same delete as Remove on the Students / Teachers pages
+     *  (a teacher who still has classes is refused). Other accounts are never touched. */
+    deleteWithAccount: async (app: { id: string; email: string; role: string }): Promise<void> => {
+      const post = async (query: string, params: unknown[]) => {
+        const response = await fetch('/api/db', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ query, params }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to delete registration');
+        return (result.rows || []) as any[];
+      };
+
+      const [profile] = await post(
+        `SELECT id, role FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
+        [app.email],
+      );
+      if (profile && profile.role === app.role) {
+        if (app.role === 'student') await api.teacher.removeStudentAccount(profile.id);
+        else if (app.role === 'teacher') await api.users.deleteTeacher(profile.id);
+      }
+
+      await post(`DELETE FROM registration_applications WHERE id = $1`, [app.id]);
+    },
+
     // Push imported CSV details onto the student's (auto-approved) application so
     // the registration record carries the same data — degree, location, contact —
     // and mirrors the archived state for students imported as inactive.

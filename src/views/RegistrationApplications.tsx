@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
@@ -16,6 +16,7 @@ export default function RegistrationApplications() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived' | 'missing'>('pending');
+  const [roleTab, setRoleTab] = useState<'student' | 'teacher'>('student');
   const [enrolledEmails, setEnrolledEmails] = useState<Set<string>>(new Set());
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'archive' | null>(null);
@@ -154,9 +155,27 @@ export default function RegistrationApplications() {
     }
   };
 
+  const doDelete = async (app: RegistrationApplication, e?: { stopPropagation: () => void }) => {
+    e?.stopPropagation();
+    if (!confirm(t('registrations.delete_confirm').replace('{name}', `${app.firstName} ${app.lastName}`))) return;
+    try {
+      setProcessingId(app.id);
+      await api.registrations.deleteWithAccount(app);
+      await loadApplications();
+      if (selectedApp?.id === app.id) closeModal();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  // Students and teachers are listed separately; every filter works within the chosen group.
+  const roleApps = applications.filter(a => a.role === roleTab);
+
   // Active = not archived. Archived = is_archived flag set.
-  const activeApps = applications.filter(a => !a.isArchived);
-  const archivedApps = applications.filter(a => a.isArchived);
+  const activeApps = roleApps.filter(a => !a.isArchived);
+  const archivedApps = roleApps.filter(a => a.isArchived);
 
   // For approved students, surface the records still missing a degree, a
   // location, or a class enrollment so admins can complete them.
@@ -235,6 +254,22 @@ export default function RegistrationApplications() {
             {t('registrations.archived')} ({archivedApps.length})
           </button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(['student', 'teacher'] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRoleTab(r)}
+            className={`px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl transition-all ${
+              roleTab === r
+                ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white'
+                : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            {r === 'student' ? t('nav.students') : t('nav.teachers')}
+          </button>
+        ))}
       </div>
 
       {isLoading ? (
@@ -327,6 +362,7 @@ export default function RegistrationApplications() {
                   </div>
                 </div>
 
+                <div className="flex gap-2">
                 {app.status === 'pending' && !app.isArchived && (
                   <div className="flex gap-2">
                     {(!permOverridden || canUpdate) && (
@@ -381,6 +417,17 @@ export default function RegistrationApplications() {
                     <ArchiveRestore className="w-5 h-5" />
                   </button>
                 )}
+                {(!permOverridden || canDelete) && (
+                  <button
+                    onClick={(e) => doDelete(app, e)}
+                    disabled={!!processingId}
+                    className="p-2 rounded-xl bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors disabled:opacity-50"
+                    title={t('registrations.delete')}
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                )}
+                </div>
               </div>
             </motion.div>
           ))}
