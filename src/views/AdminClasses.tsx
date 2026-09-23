@@ -7,7 +7,7 @@ import {
 import { api } from '../services/api';
 import type { Program, Class, ClassEnrollment } from '../types';
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function generateCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -39,7 +39,7 @@ const emptyForm = (): ClassForm => ({
 });
 
 type StudentOption = { id: string; firstName: string; lastName: string; email: string };
-type ClassWithProgram = Class & { programName: string };
+export type ClassWithProgram = Class & { programName: string };
 
 export const AdminClasses: React.FC = () => {
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -71,6 +71,30 @@ export const AdminClasses: React.FC = () => {
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Read-only "who's in this class" view, opened by clicking a class card
+  const [viewClass, setViewClass] = useState<ClassWithProgram | null>(null);
+  const [viewEnrollments, setViewEnrollments] = useState<ClassEnrollment[]>([]);
+  const [viewStatuses, setViewStatuses] = useState<Record<string, string>>({});
+  const [viewLoading, setViewLoading] = useState(false);
+  const viewMonthName = new Date().toLocaleDateString('en-US', { month: 'long' });
+
+  const openView = async (cls: ClassWithProgram) => {
+    setViewClass(cls);
+    setViewEnrollments([]);
+    setViewStatuses({});
+    setViewLoading(true);
+    try {
+      const now = new Date();
+      const [enrs, statuses] = await Promise.all([
+        api.classes.getEnrollments(cls.id),
+        api.classes.getMonthInvoiceStatuses(cls.id, now.getMonth() + 1, now.getFullYear()),
+      ]);
+      setViewEnrollments(enrs);
+      setViewStatuses(statuses);
+    } catch {}
+    finally { setViewLoading(false); }
+  };
 
   const loadAll = async () => {
     try {
@@ -349,6 +373,7 @@ export const AdminClasses: React.FC = () => {
                     <ClassCard
                       key={cls.id}
                       cls={cls}
+                      onOpen={() => openView(cls)}
                       onEdit={() => openEdit(cls)}
                       onDelete={() => setDeleteId(cls.id)}
                     />
@@ -810,20 +835,89 @@ export const AdminClasses: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Class students view */}
+      {viewClass && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={() => setViewClass(null)}
+        >
+          <div className="glass-card rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-white/10 flex items-start justify-between shrink-0">
+              <div className="min-w-0">
+                <h2 className="font-display text-xl font-medium truncate">{viewClass.title}</h2>
+                <p className="text-white/40 text-sm mt-0.5">
+                  {viewClass.teacher ? `${viewClass.teacher.firstName} ${viewClass.teacher.lastName}` : viewClass.programName}
+                </p>
+              </div>
+              <button
+                onClick={() => setViewClass(null)}
+                className="p-2 rounded-xl hover:bg-white/10 text-white/40 hover:text-white transition-colors shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto custom-scrollbar">
+              <div className="text-[11px] font-semibold text-white/40 uppercase tracking-widest mb-3">
+                Enrolled ({viewEnrollments.length})
+              </div>
+              {viewLoading ? (
+                <div className="flex items-center gap-2 text-white/30 text-sm py-4">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+                </div>
+              ) : viewEnrollments.length === 0 ? (
+                <p className="text-white/30 text-sm py-2">No students enrolled yet.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {viewEnrollments.map(e => {
+                    const status = viewStatuses[e.id];
+                    return (
+                      <div
+                        key={e.id}
+                        className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/5"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-white truncate">
+                            {e.student?.firstName} {e.student?.lastName}
+                          </p>
+                          <p className="text-[11px] text-white/35 truncate">{e.student?.email}</p>
+                        </div>
+                        {status && (
+                          <span className={`inline-flex items-center px-2 py-1 ml-2 rounded-full text-[10px] font-medium uppercase tracking-wider border shrink-0 ${
+                            status === 'paid'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                          }`}>
+                            {status === 'paid' ? 'Paid' : 'Unpaid'} {viewMonthName}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-const ClassCard = ({
+// Also used on the teacher profile page, which has no Edit/Delete buttons.
+export const ClassCard = ({
   cls,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   cls: ClassWithProgram;
-  onEdit: () => void;
-  onDelete: () => void;
+  onOpen: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) => (
-  <div className="glass-card rounded-2xl p-5 space-y-3.5 group hover:border-white/10 transition-all">
+  <div onClick={onOpen} className="glass-card rounded-2xl p-5 space-y-3.5 group hover:border-white/10 transition-all cursor-pointer">
     <div className="flex items-start justify-between gap-3">
       <div className="flex-1 min-w-0">
         <h3 className="font-semibold text-white text-sm leading-snug truncate">{cls.title}</h3>
@@ -833,20 +927,22 @@ const ClassCard = ({
           </span>
         )}
       </div>
-      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-        <button
-          onClick={onEdit}
-          className="p-1.5 rounded-lg border border-white/10 text-white/40 hover:text-white hover:bg-white/5 transition-colors"
-        >
-          <Edit2 size={13} />
-        </button>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded-lg border border-red-500/20 text-red-300/50 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-        >
-          <Trash2 size={13} />
-        </button>
-      </div>
+      {onEdit && onDelete && (
+        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <button
+            onClick={e => { e.stopPropagation(); onEdit(); }}
+            className="p-1.5 rounded-lg border border-white/10 text-white/40 hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <Edit2 size={13} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            className="p-1.5 rounded-lg border border-red-500/20 text-red-300/50 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
 
     {cls.teacher && (

@@ -3950,6 +3950,48 @@ export const api = {
       }));
     },
 
+    /** Invoice status per enrollment for one class and month (enrollment id → status). */
+    getMonthInvoiceStatuses: async (classId: string, month: number, year: number): Promise<Record<string, string>> => {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('enrollment_id, status')
+        .eq('class_id', classId)
+        .eq('month', month)
+        .eq('year', year)
+        .is('deleted_at', null);
+
+      if (error) throw new Error(error.message);
+
+      const statuses: Record<string, string> = {};
+      for (const r of (data || []) as { enrollment_id: string | null; status: string }[]) {
+        if (r.enrollment_id) statuses[r.enrollment_id] = r.status;
+      }
+      return statuses;
+    },
+
+    /** One class's attendance for a month: how many days were marked, and per student
+     *  how many of those they attended (late counts as attended, as everywhere else). */
+    getMonthAttendance: async (classId: string, month: number, year: number): Promise<{ markedDays: number; attended: Record<string, number> }> => {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const lastDay = new Date(year, month, 0).getDate();
+      const { data, error } = await supabase
+        .from('class_attendance')
+        .select('student_id, date, status')
+        .eq('class_id', classId)
+        .gte('date', `${year}-${pad(month)}-01`)
+        .lte('date', `${year}-${pad(month)}-${pad(lastDay)}`);
+
+      if (error) throw new Error(error.message);
+
+      const days = new Set<string>();
+      const attended: Record<string, number> = {};
+      for (const r of (data || []) as { student_id: string; date: string; status: string }[]) {
+        days.add(String(r.date).slice(0, 10));
+        if (r.status === 'present' || r.status === 'late') attended[r.student_id] = (attended[r.student_id] || 0) + 1;
+      }
+      return { markedDays: days.size, attended };
+    },
+
     removeStudent: async (enrollmentId: string): Promise<void> => {
       const { error } = await supabase
         .from('class_enrollments')
