@@ -25,7 +25,7 @@ export const PRIVILEGED_ROLES = new Set(['admin', 'superadmin']);
 
 // Columns on `profiles` only admins/superadmins may write. Blocks privilege
 // escalation (e.g. a student setting their own role to 'admin') and self-unarchive.
-const PROFILE_PRIVILEGED_COLUMNS = ['role', 'system_role_id', 'is_archived'];
+const PROFILE_PRIVILEGED_COLUMNS = ['role', 'system_role_id', 'is_archived', 'archived_at'];
 
 // Tables a student may write to at all. Everything else is denied for students.
 const STUDENT_WRITE_TABLES = new Set([

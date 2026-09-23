@@ -3,15 +3,15 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
-import { Users, CalendarCheck, CreditCard, BookOpen, TrendingUp, ArrowUpRight, MoreHorizontal, AlertCircle } from 'lucide-react';
+import { Users, CalendarCheck, CreditCard, BookOpen, TrendingUp, ArrowUpRight, MoreHorizontal, AlertCircle, GraduationCap } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { Skeleton } from '../components/Skeleton';
 import { supabase } from '../lib/supabase';
 
 interface DashStats {
   totalStudents: number;
-  activePrograms: number;
-  avgAttendance: number;
+  totalClasses: number;
+  totalTeachers: number;
   monthlyRevenue: number;
 }
 
@@ -25,26 +25,28 @@ interface RecentStudent {
 }
 
 interface AttentionData {
-  pendingApplications: number;
-  overdueInvoices: number;
-  atRiskStudents: number;
+  unpaidInvoices: number;
+  studentsLeft: number;
+  avgAttendance: number;
 }
 
 export default function Dashboard() {
   const { t } = useLanguage();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
-  const [stats, setStats] = useState<DashStats>({ totalStudents: 0, activePrograms: 0, avgAttendance: 0, monthlyRevenue: 0 });
+  const [stats, setStats] = useState<DashStats>({ totalStudents: 0, totalClasses: 0, totalTeachers: 0, monthlyRevenue: 0 });
   const [recentStudents, setRecentStudents] = useState<RecentStudent[]>([]);
-  const [attention, setAttention] = useState<AttentionData>({ pendingApplications: 0, overdueInvoices: 0, atRiskStudents: 0 });
+  const [attention, setAttention] = useState<AttentionData>({ unpaidInvoices: 0, studentsLeft: 0, avgAttendance: 0 });
 
   useEffect(() => {
     const load = async () => {
       try {
         const now = new Date();
-        const [studentRes, programRes, attendanceRes, paidRes, enrollmentsRes, pendingRes, overdueRes] = await Promise.all([
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        const [studentRes, classRes, teacherRes, attendanceRes, paidRes, enrollmentsRes, unpaidRes, leftRes] = await Promise.all([
           supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student'),
-          supabase.from('programs').select('id', { count: 'exact', head: true }).eq('is_active', true),
+          supabase.from('classes').select('id', { count: 'exact', head: true }),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'teacher').eq('is_archived', false),
           supabase.from('class_attendance').select('status, student_id'),
           supabase.from('invoices').select('amount').eq('status', 'paid').eq('month', now.getMonth() + 1).eq('year', now.getFullYear()).is('deleted_at', null),
           supabase
@@ -52,24 +54,25 @@ export default function Dashboard() {
             .select('student_id, enrolled_at, status, class:classes(program_id)')
             .order('enrolled_at', { ascending: false })
             .limit(5),
-          supabase.from('registration_applications').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
-          supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'overdue').is('deleted_at', null),
+          supabase.from('invoices').select('id', { count: 'exact', head: true }).in('status', ['not_paid', 'partial', 'overdue']).is('deleted_at', null),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'student').eq('is_archived', true).gte('archived_at', monthStart),
         ]);
 
         const { count: studentCount } = studentRes;
-        const { count: programCount } = programRes;
+        const { count: classCount } = classRes;
+        const { count: teacherCount } = teacherRes;
         const { data: attData } = attendanceRes;
         const { data: paidData } = paidRes;
         const { data: enrollments } = enrollmentsRes;
-        const { count: pendingApps } = pendingRes;
-        const { count: overdueInv } = overdueRes;
+        const { count: unpaidInv } = unpaidRes;
+        const { count: leftCount } = leftRes;
 
         let attTotal = 0, attPresent = 0;
         (attData || []).forEach((r: any) => { attTotal++; if (r.status === 'present' || r.status === 'late') attPresent++; });
         const avgAtt = attTotal > 0 ? Math.round((attPresent / attTotal) * 1000) / 10 : 0;
         const monthRev = (paidData || []).reduce((sum: number, r: any) => sum + parseFloat(r.amount), 0);
 
-        setStats({ totalStudents: studentCount || 0, activePrograms: programCount || 0, avgAttendance: avgAtt, monthlyRevenue: monthRev });
+        setStats({ totalStudents: studentCount || 0, totalClasses: classCount || 0, totalTeachers: teacherCount || 0, monthlyRevenue: monthRev });
 
         const studentIds = [...new Set((enrollments || []).map((e: any) => e.student_id))];
         // An empty list is fine: the query layer renders `in ()` as false. The old
@@ -96,17 +99,7 @@ export default function Dashboard() {
         }
         setRecentStudents(recent);
 
-        // At-risk students: attendance < 70%
-        const attByStudent: Record<string, { total: number; present: number }> = {};
-        (attData || []).forEach((r: any) => {
-          const sid = r.student_id || 'unknown';
-          if (!attByStudent[sid]) attByStudent[sid] = { total: 0, present: 0 };
-          attByStudent[sid].total++;
-          if (r.status === 'present' || r.status === 'late') attByStudent[sid].present++;
-        });
-        const atRisk = Object.values(attByStudent).filter(s => s.total > 0 && (s.present / s.total) < 0.7).length;
-
-        setAttention({ pendingApplications: pendingApps || 0, overdueInvoices: overdueInv || 0, atRiskStudents: atRisk });
+        setAttention({ unpaidInvoices: unpaidInv || 0, studentsLeft: leftCount || 0, avgAttendance: avgAtt });
       } catch (err) {
         console.error('Dashboard load error:', err);
       } finally {
@@ -151,16 +144,17 @@ export default function Dashboard() {
           ))
         ) : (
           [
-            { label: 'dash.total_students', value: stats.totalStudents.toLocaleString(), icon: Users, color: 'text-blue-400' },
-            { label: 'dash.active_programs', value: String(stats.activePrograms), icon: BookOpen, color: 'text-purple-400' },
-            { label: 'dash.avg_attendance', value: `${stats.avgAttendance}%`, icon: CalendarCheck, color: 'text-emerald-400' },
-            { label: 'dash.monthly_revenue', value: `€${stats.monthlyRevenue.toLocaleString()}`, icon: CreditCard, color: 'text-amber-400' },
+            { label: 'dash.total_students', value: stats.totalStudents.toLocaleString(), icon: Users, color: 'text-blue-400', path: '/students' },
+            { label: 'dash.total_classes', value: String(stats.totalClasses), icon: BookOpen, color: 'text-purple-400', path: '/classes' },
+            { label: 'dash.total_teachers', value: String(stats.totalTeachers), icon: GraduationCap, color: 'text-emerald-400', path: '/teachers' },
+            { label: 'dash.monthly_revenue', value: `€${stats.monthlyRevenue.toLocaleString()}`, icon: CreditCard, color: 'text-amber-400', path: '/finance' },
           ].map((stat, i) => (
             <motion.div
               key={stat.label}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: i * 0.1 }}
+              onClick={() => router.push(stat.path)}
               className="glass-card p-5 rounded-2xl flex flex-col gap-4 group cursor-pointer"
             >
               <div className="flex justify-between items-start">
@@ -194,24 +188,24 @@ export default function Dashboard() {
             <h2 className="font-display text-lg font-medium text-amber-400">Needs Attention</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div onClick={() => router.push('/registrations')} className="bg-black/20 rounded-2xl p-4 border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-black/40 transition-colors">
+            <div onClick={() => router.push('/finance')} className="bg-black/20 rounded-2xl p-4 border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-black/40 transition-colors">
               <div>
-                <div className="text-2xl font-display font-medium text-white mb-1">{attention.pendingApplications}</div>
-                <div className="text-xs text-white/50 uppercase tracking-wider">Pending Applications</div>
+                <div className="text-2xl font-display font-medium text-white mb-1">{attention.unpaidInvoices}</div>
+                <div className="text-xs text-white/50 uppercase tracking-wider">Unpaid Invoices</div>
               </div>
               <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-amber-400 transition-colors" />
             </div>
-            <div onClick={() => router.push('/finance')} className="bg-black/20 rounded-2xl p-4 border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-black/40 transition-colors">
+            <div onClick={() => router.push('/students')} className="bg-black/20 rounded-2xl p-4 border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-black/40 transition-colors">
               <div>
-                <div className="text-2xl font-display font-medium text-white mb-1">{attention.overdueInvoices}</div>
-                <div className="text-xs text-white/50 uppercase tracking-wider">Overdue Invoices</div>
+                <div className="text-2xl font-display font-medium text-white mb-1">{attention.studentsLeft}</div>
+                <div className="text-xs text-white/50 uppercase tracking-wider">Students Left This Month</div>
               </div>
               <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-amber-400 transition-colors" />
             </div>
             <div onClick={() => router.push('/attendance')} className="bg-black/20 rounded-2xl p-4 border border-white/5 flex items-center justify-between group cursor-pointer hover:bg-black/40 transition-colors">
               <div>
-                <div className="text-2xl font-display font-medium text-white mb-1">{attention.atRiskStudents}</div>
-                <div className="text-xs text-white/50 uppercase tracking-wider">Students at Risk (Attendance)</div>
+                <div className="text-2xl font-display font-medium text-white mb-1">{attention.avgAttendance}%</div>
+                <div className="text-xs text-white/50 uppercase tracking-wider">Average Attendance</div>
               </div>
               <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-amber-400 transition-colors" />
             </div>
@@ -311,7 +305,7 @@ export default function Dashboard() {
             {[
               { label: 'dash.generate_invoice', desc: 'Create a new manual invoice', icon: CreditCard, path: '/finance' },
               { label: 'dash.record_attendance', desc: 'Mark daily class attendance', icon: CalendarCheck, path: '/attendance' },
-              { label: 'dash.add_program', desc: 'Create a new academic program', icon: BookOpen, path: '/programs' },
+              { label: 'dash.add_class', desc: 'Create a new class', icon: BookOpen, path: '/classes' },
             ].map((action, i) => (
               <button key={i} onClick={() => router.push(action.path)} className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-[#fc0ce4]/5 hover:border-[#fc0ce4]/20 transition-all text-left group">
                 <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center border border-white/5 group-hover:bg-gradient-to-br group-hover:from-[#fc0ce4] group-hover:to-[#949ce4] group-hover:text-white group-hover:border-transparent transition-all">

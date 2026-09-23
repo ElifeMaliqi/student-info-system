@@ -554,7 +554,9 @@ export const api = {
       if (error) throw new Error(error.message);
     },
 
-    archiveStudent: async (studentId: string): Promise<void> => {
+    // recordLeft=false archives without an archived_at date, so the student is not
+    // counted as "left this month" (used by CSV import of already-inactive students).
+    archiveStudent: async (studentId: string, recordLeft = true): Promise<void> => {
       // 1. Snapshot all current enrollments so they can be restored on re-approval
       const { data: enrollments } = await supabase
         .from('class_enrollments')
@@ -596,7 +598,7 @@ export const api = {
       // 3. Archive the profile
       const { error } = await supabase
         .from('profiles')
-        .update({ is_archived: true })
+        .update({ is_archived: true, archived_at: recordLeft ? new Date().toISOString() : null })
         .eq('id', studentId);
       if (error) throw new Error(error.message);
     },
@@ -604,7 +606,7 @@ export const api = {
     unarchiveStudent: async (studentId: string): Promise<void> => {
       const { error } = await supabase
         .from('profiles')
-        .update({ is_archived: false })
+        .update({ is_archived: false, archived_at: null })
         .eq('id', studentId);
       if (error) throw new Error(error.message);
     },
@@ -2219,7 +2221,7 @@ export const api = {
           if (existingProfile.is_archived) {
             const { error: unarchiveErr } = await supabase
               .from('profiles')
-              .update({ is_archived: false })
+              .update({ is_archived: false, archived_at: null })
               .eq('id', existingProfile.id);
             if (unarchiveErr) throw new Error(unarchiveErr.message);
           }
@@ -4472,7 +4474,7 @@ export const api = {
         body: JSON.stringify({
           query: `
             UPDATE profiles
-            SET is_archived = true, updated_at = now()
+            SET is_archived = true, archived_at = now(), updated_at = now()
             WHERE id = $1
             RETURNING id, is_archived
           `,
@@ -4491,7 +4493,7 @@ export const api = {
         body: JSON.stringify({
           query: `
             UPDATE profiles
-            SET is_archived = false, updated_at = now()
+            SET is_archived = false, archived_at = NULL, updated_at = now()
             WHERE id = $1
             RETURNING id, is_archived
           `,

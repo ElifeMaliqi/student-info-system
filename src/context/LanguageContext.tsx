@@ -53,6 +53,9 @@ const translations = {
     'dash.generate_invoice': 'Generate Invoice',
     'dash.record_attendance': 'Record Attendance',
     'dash.add_program': 'Add Degree',
+    'dash.add_class': 'Add Class',
+    'dash.total_classes': 'Total Classes',
+    'dash.total_teachers': 'Total Teachers',
 
     // Common Table Headers
     'table.student': 'Student',
@@ -789,6 +792,9 @@ const translations = {
     'dash.generate_invoice': 'Gjenero Faturë',
     'dash.record_attendance': 'Shëno Pjesëmarrjen',
     'dash.add_program': 'Shto Diplomë',
+    'dash.add_class': 'Shto Klasë',
+    'dash.total_classes': 'Totali i Klasave',
+    'dash.total_teachers': 'Totali i Mësuesve',
 
     // Common Table Headers
     'table.student': 'Studenti',

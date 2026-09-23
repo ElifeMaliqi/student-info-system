@@ -424,7 +424,7 @@ export default function Students() {
 
     const isInactive = /not.?active|inactive|jo.?aktiv/i.test(row.status || '');
     if (isInactive) {
-      try { await api.finance.archiveStudent(result.id); } catch { /* non-critical */ }
+      try { await api.finance.archiveStudent(result.id, false); } catch { /* non-critical */ }
     }
 
     if (row.classCode?.trim()) {
