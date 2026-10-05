@@ -66,6 +66,7 @@ const PRIVILEGED_ONLY_TABLES = new Set([
   'system_roles',
   'role_permissions',
   'password_reset_tokens',
+  'email_templates', // admin-editable email content (incl. password reset)
 ]);
 
 export interface AuthzDecision {

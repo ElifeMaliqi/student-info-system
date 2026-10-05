@@ -783,6 +783,12 @@ const translations = {
     'settings.sms_templates': 'SMS Templates',
     'settings.template_vars': 'Available variables:',
     'settings.template_saved': 'Template saved!',
+    'settings.emails': 'Email Templates',
+    'settings.email_templates': 'Email Templates',
+    'settings.emails_desc': 'Customize the emails sent to students and staff. Leave a blank line between paragraphs and wrap text in **double asterisks** to make it bold. Keep block placeholders like {{resetButton}} on their own line.',
+    'settings.email_subject': 'Subject',
+    'settings.email_body': 'Email Body',
+    'settings.email_template_required': 'Subject and body cannot be empty.',
   },
   AL: {
     // Navigation
@@ -1556,6 +1562,12 @@ const translations = {
     'settings.sms_templates': 'Shabllonet SMS',
     'settings.template_vars': 'Variablat e disponueshme:',
     'settings.template_saved': 'Shablloni u ruajt!',
+    'settings.emails': 'Shabllonet e Email-it',
+    'settings.email_templates': 'Shabllonet e Email-it',
+    'settings.emails_desc': 'Personalizoni email-et dërguar studentëve dhe stafit. Lini një rresht bosh mes paragrafëve dhe vendosni tekstin mes **yjeve të dyfishta** për ta bërë të theksuar. Mbajini blloqet si {{resetButton}} në rresht më vete.',
+    'settings.email_subject': 'Subjekti',
+    'settings.email_body': 'Përmbajtja e Email-it',
+    'settings.email_template_required': 'Subjekti dhe përmbajtja nuk mund të jenë bosh.',
   }
 };
 

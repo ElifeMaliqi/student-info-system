@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare } from 'lucide-react';
+import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
@@ -53,6 +53,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [editedBodies, setEditedBodies] = useState<Record<string, string>>({});
   const [savingTemplate, setSavingTemplate] = useState('');
 
+  // Email templates
+  interface EmailTemplate { type: string; label: string; subject: string; body: string; variables: string[]; }
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
+  const [editedEmails, setEditedEmails] = useState<Record<string, { subject: string; body: string }>>({});
+  const [savingEmail, setSavingEmail] = useState('');
+
   // UI state
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -64,6 +70,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'profile', label: t('settings.profile'), icon: User },
     { id: 'platform', label: t('settings.platform'), icon: Building },
     { id: 'messages', label: t('settings.messages'), icon: MessageSquare },
+    { id: 'emails', label: t('settings.emails'), icon: Mail },
     { id: 'data', label: t('settings.data'), icon: Database },
   ];
 
@@ -82,6 +89,15 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           const bodies: Record<string, string> = {};
           data.forEach((t: SmsTemplate) => { bodies[t.type] = t.sms_body; });
           setEditedBodies(bodies);
+        }
+      });
+
+      supabase.from('email_templates').select('type, label, subject, body, variables').order('label').then(({ data }) => {
+        if (data) {
+          setEmailTemplates(data as EmailTemplate[]);
+          const edits: Record<string, { subject: string; body: string }> = {};
+          data.forEach((t: EmailTemplate) => { edits[t.type] = { subject: t.subject, body: t.body }; });
+          setEditedEmails(edits);
         }
       });
 
@@ -235,6 +251,28 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     }
   };
 
+  const handleSaveEmailTemplate = async (type: string) => {
+    const edit = editedEmails[type];
+    if (!edit?.subject.trim() || !edit?.body.trim()) {
+      showToast('error', t('settings.email_template_required'));
+      return;
+    }
+    setSavingEmail(type);
+    try {
+      const { error } = await supabase
+        .from('email_templates')
+        .update({ subject: edit.subject, body: edit.body })
+        .eq('type', type);
+      if (error) throw error;
+      setEmailTemplates(prev => prev.map(t => t.type === type ? { ...t, subject: edit.subject, body: edit.body } : t));
+      showToast('success', t('settings.template_saved'));
+    } catch (err: any) {
+      showToast('error', err.message || t('settings.save_failed'));
+    } finally {
+      setSavingEmail('');
+    }
+  };
+
   const handleExport = async (table: string) => {
     setExporting(table);
     try {
@@ -385,14 +423,14 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                   </div>
                 ) : (
                   <>
-                    <p className="text-sm text-white/50">A password reset link will be sent to your registered email address. The link expires in 1 hour.</p>
+                    <p className="text-sm text-white/50">{t('settings.reset_link_info')}</p>
                     <button
                       onClick={handleRequestPasswordReset}
                       disabled={pwResetLoading}
                       className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50"
                     >
                       {pwResetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                      {pwResetLoading ? 'Sending…' : 'Send Password Reset Link'}
+                      {pwResetLoading ? t('settings.sending') : t('settings.send_reset_link')}
                     </button>
                   </>
                 )}
@@ -546,6 +584,86 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ===== EMAIL TEMPLATES (admin only) ===== */}
+          {activeSection === 'emails' && isAdminRole && (
+            <div className="space-y-6">
+              <div className="glass-card rounded-3xl p-6 lg:p-8">
+                <h2 className="font-display text-xl font-medium mb-1">
+                  <Mail className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                  {t('settings.email_templates')}
+                </h2>
+                <p className="text-white/40 text-sm mb-6">{t('settings.emails_desc')}</p>
+
+                {emailTemplates.length === 0 ? (
+                  <div className="flex items-center justify-center py-10 text-white/30 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Loading templates…
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    {emailTemplates.map(tpl => {
+                      const edit = editedEmails[tpl.type] ?? { subject: tpl.subject, body: tpl.body };
+                      return (
+                        <div key={tpl.type} className="border border-white/8 rounded-2xl p-5 space-y-4 bg-white/[0.02]">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <div className="text-sm font-semibold text-white">{tpl.label}</div>
+                              <div className="text-[11px] text-white/30 mt-0.5 font-mono">{tpl.type}</div>
+                            </div>
+                            <button
+                              onClick={() => handleSaveEmailTemplate(tpl.type)}
+                              disabled={!!savingEmail || (edit.subject === tpl.subject && edit.body === tpl.body)}
+                              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30"
+                            >
+                              {savingEmail === tpl.type ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                              {t('settings.save')}
+                            </button>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                              {t('settings.email_subject')}
+                            </label>
+                            <input
+                              type="text"
+                              className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white font-mono placeholder:text-white/20"
+                              value={edit.subject}
+                              onChange={e => setEditedEmails(prev => ({ ...prev, [tpl.type]: { ...edit, subject: e.target.value } }))}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                              {t('settings.email_body')}
+                            </label>
+                            <textarea
+                              rows={10}
+                              className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white font-mono placeholder:text-white/20 resize-y leading-relaxed"
+                              value={edit.body}
+                              onChange={e => setEditedEmails(prev => ({ ...prev, [tpl.type]: { ...edit, body: e.target.value } }))}
+                            />
+                          </div>
+                          {tpl.variables?.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="text-[11px] font-semibold text-white/40 uppercase tracking-widest ml-1">
+                                {t('settings.template_vars')}
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {tpl.variables.map((v: string) => (
+                                  <span key={v} className="inline-flex items-center px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[11px] font-mono text-white/50">
+                                    {`{{${v}}}`}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

@@ -54,6 +54,84 @@ async function getSmsTemplate(type: string, def: string): Promise<string> {
   } catch { return def; }
 }
 
+// ── Email templates (admin-editable in Settings → Email Templates) ─────────
+// Defaults mirror the seed rows in supabase/migrations/20261005000000_create_email_templates.sql
+// and are used if the row is missing or the table can't be read.
+type EmailTemplate = { subject: string; body: string };
+
+const EMAIL_DEFAULTS: Record<string, EmailTemplate> = {
+  password_reset: {
+    subject: 'Reset Your Password — Future Minds Academy',
+    body: `Hello {{firstName}},\n\nWe received a request to reset the password for your Future Minds Academy account. Click the secure button below to proceed.\n\n{{resetButton}}\n\nIf you did not request this, you can safely ignore this email. Your password will not change.`,
+  },
+  announcement: {
+    subject: '{{title}} — {{senderName}}',
+    body: `{{content}}`,
+  },
+  attendance_alert: {
+    subject: 'Attendance Alert from Future Minds Academy: {{studentName}}',
+    body: `Hello {{studentName}},\n\nYour attendance rate in {{className}} is currently **{{attendanceRate}}%**, which is at or below the 40% threshold.\n\nPresent: **{{presentCount}}** / **{{totalCount}}** sessions.\n\nPlease contact your instructor or the administration team as soon as possible.\n\nWarm regards,\nFuture Minds Academy · Student Support Team`,
+  },
+  invoice_new: {
+    subject: 'New Invoice from Future Minds Academy: {{invoiceTitle}}',
+    body: `Hello {{studentName}},\n\nA new invoice "{{invoiceTitle}}" has been issued for you.\n\nInvoice ID: **{{invoiceId}}** · Class: {{className}} · Amount: **\${{amount}}** · Due: **{{dueDate}}** · Status: **{{status}}**\n\nWarm regards,\nFuture Minds Academy · Finance Department`,
+  },
+  invoice_updated: {
+    subject: 'Updated Invoice from Future Minds Academy: {{invoiceTitle}}',
+    body: `Hello {{studentName}},\n\nYour invoice "{{invoiceTitle}}" has been updated. Change: **{{changeSummary}}**.\n\nInvoice ID: **{{invoiceId}}** · Class: {{className}} · Amount: **\${{amount}}** · Due: **{{dueDate}}** · Status: **{{status}}**\n\nWarm regards,\nFuture Minds Academy · Finance Department`,
+  },
+  invoice_receipt: {
+    subject: 'Payment Receipt from Future Minds Academy: {{invoiceTitle}}',
+    body: `Hello {{studentName}},\n\nWe have received your payment for invoice "{{invoiceTitle}}". Thank you.\n\n{{receiptDetails}}\n\nPlease keep this email as your proof of payment.\n\nWarm regards,\nFuture Minds Academy · Finance Department`,
+  },
+  grade_new: {
+    subject: 'Your Grade is Ready – {{examName}} | Future Minds Academy',
+    body: `Hello **{{studentName}}**,\n\nYour exam **{{examName}}** has been graded.\n\n{{gradeDetails}}\n\n{{teacherNote}}\n\nWarm regards,\n**Future Minds Academy**`,
+  },
+  grade_updated: {
+    subject: 'Grade Updated – {{examName}} | Future Minds Academy',
+    body: `Hello **{{studentName}}**,\n\nYour grade for **{{examName}}** has been **updated**.\n\n{{gradeDetails}}\n\n{{teacherNote}}\n\nWarm regards,\n**Future Minds Academy**`,
+  },
+  class_cancelled: {
+    subject: 'Class Cancelled: {{className}} | Future Minds Academy',
+    body: `Hello {{studentName}},\n\nYour class **{{className}}** scheduled for **{{originalDate}}** has been **cancelled**.\n\n{{reasonBox}}\n\nIf you have any questions, please contact us.\n\nWarm regards,\nFuture Minds Academy`,
+  },
+  class_rescheduled: {
+    subject: 'Class Rescheduled: {{className}} | Future Minds Academy',
+    body: `Hello {{studentName}},\n\nYour class **{{className}}** scheduled for **{{originalDate}}** has been **rescheduled**.\n\n{{newSchedule}}\n\n{{reasonBox}}\n\nIf you have any questions, please contact us.\n\nWarm regards,\nFuture Minds Academy`,
+  },
+};
+
+async function getEmailTemplate(type: string): Promise<EmailTemplate> {
+  const def = EMAIL_DEFAULTS[type];
+  try {
+    const { rows } = await query<EmailTemplate>(`SELECT subject, body FROM email_templates WHERE type = $1`, [type]);
+    return rows[0]?.subject && rows[0]?.body ? rows[0] : def;
+  } catch { return def; }
+}
+
+function renderEmailSubject(tpl: string, vars: Record<string, string>): string {
+  return interpolate(tpl, vars).replace(/\s+/g, ' ').trim();
+}
+
+// Blank lines separate paragraphs, **text** is bold, {{var}} is replaced (HTML-escaped).
+// A paragraph that is only {{blockName}} becomes that pre-built HTML block. Blocks the
+// template leaves out are appended at the end so key details (reset link, amounts) are never lost.
+function renderEmailBody(tpl: string, vars: Record<string, string>, blocks: Record<string, string> = {}): string {
+  const used = new Set<string>();
+  const parts = tpl.replace(/\r\n/g, '\n').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => {
+    const only = p.match(/^\{\{(\w+)\}\}$/);
+    if (only && only[1] in blocks) { used.add(only[1]); return blocks[only[1]]; }
+    const html = esc(p)
+      .replace(/\*\*(.+?)\*\*/g, '<strong style="color:#ffffff;">$1</strong>')
+      .replace(/\{\{(\w+)\}\}/g, (_, k) => esc(vars[k] ?? ''))
+      .replace(/\n/g, '<br>');
+    return `<p style="margin:0 0 16px;">${html}</p>`;
+  });
+  for (const [k, html] of Object.entries(blocks)) if (!used.has(k)) parts.push(html);
+  return parts.filter(Boolean).join('\n');
+}
+
 async function assertNonStudent(userId: string): Promise<void> {
   const { rows } = await query<{ role: string }>(`SELECT role FROM profiles WHERE id = $1`, [userId]);
   if (!rows[0] || rows[0].role === 'student') throw new Error('Permission denied');
@@ -165,12 +243,7 @@ async function handleSendResetCode(body: Record<string, unknown>) {
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
   const firstName = profileRows[0].first_name ?? 'there';
 
-  await resend.emails.send({
-    from: getFromEmail(),
-    to: email,
-    subject: 'Password Reset Access — Future Minds Academy',
-    html: buildResetCodeEmailHtml(resetLink, firstName),
-  });
+  await sendPasswordResetEmail(email, firstName, resetLink);
 
   return ok;
 }
@@ -265,14 +338,20 @@ async function handlePasswordResetEmail(body: Record<string, unknown>) {
   const base = appUrl();
   const resetLink = `${base}/resetpassword#t=${resetToken}`;
 
-  await resend.emails.send({
-    from: getFromEmail(),
-    to: email,
-    subject: 'Reset Your Password — Future Minds Academy',
-    html: buildResetCodeEmailHtml(resetLink, rows[0].first_name ?? 'there'),
-  });
+  await sendPasswordResetEmail(email, rows[0].first_name ?? 'there', resetLink);
 
   return ok;
+}
+
+async function sendPasswordResetEmail(email: string, firstName: string, resetLink: string) {
+  const tpl = await getEmailTemplate('password_reset');
+  const vars = { firstName };
+  await resend!.emails.send({
+    from: getFromEmail(),
+    to: email,
+    subject: renderEmailSubject(tpl.subject, vars),
+    html: buildResetCodeEmailHtml(renderEmailBody(tpl.body, vars, { resetButton: buildResetButtonHtml(resetLink) })),
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -359,8 +438,10 @@ async function handleAnnouncementEmail(body: Record<string, unknown>, user: { id
 
   if (!resend) return NextResponse.json({ success: false, error: 'Email provider not configured' }, { status: 500 });
 
-  const subject = `${title} — ${senderName}`;
-  const html = buildAnnouncementEmailHtml(title, content, senderName);
+  const tpl = await getEmailTemplate('announcement');
+  const vars = { title, content, senderName: senderName ?? '' };
+  const subject = renderEmailSubject(tpl.subject, vars);
+  const html = buildAnnouncementEmailHtml(title, senderName ?? '', renderEmailBody(tpl.body, vars));
   const batchSize = 50;
   let sent = 0;
 
@@ -408,11 +489,16 @@ async function handleAttendanceAlertEmail(body: Record<string, unknown>, user: {
 
   if (!resend) return NextResponse.json({ success: false, error: 'Email provider not configured' }, { status: 500 });
 
+  const tpl = await getEmailTemplate('attendance_alert');
+  const vars = {
+    studentName: String(studentName), className: String(className),
+    attendanceRate: String(Number(attendanceRate)), presentCount: String(Number(presentCount)), totalCount: String(Number(totalCount)),
+  };
   await resend.emails.send({
     from: getFromEmail(),
     to: studentEmail as string,
-    subject: `Attendance Alert from Future Minds Academy: ${studentName}`,
-    html: buildAttendanceAlertEmailHtml(String(studentName), String(className), Number(attendanceRate), Number(presentCount), Number(totalCount)),
+    subject: renderEmailSubject(tpl.subject, vars),
+    html: buildAttendanceAlertEmailHtml(renderEmailBody(tpl.body, vars)),
   });
 
   return NextResponse.json({ success: true });
@@ -450,11 +536,18 @@ async function handleInvoiceEmail(body: Record<string, unknown>, user: { id: str
 
   if (mode === 'receipt') {
     const paidOn = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const tpl = await getEmailTemplate('invoice_receipt');
+    const vars = {
+      studentName: String(studentName), className: String(className), invoiceTitle: String(invoiceTitle),
+      invoiceId: String(invoiceId), amount: Number(amount).toFixed(2), paidOn,
+    };
     await resend.emails.send({
       from: getFromEmail(),
       to: studentEmail as string,
-      subject: `Payment Receipt from Future Minds Academy: ${invoiceTitle}`,
-      html: buildInvoiceReceiptEmailHtml(String(studentName), String(className), String(invoiceTitle), String(invoiceId), Number(amount).toFixed(2), paidOn),
+      subject: renderEmailSubject(tpl.subject, vars),
+      html: buildInvoiceReceiptEmailHtml(vars.invoiceTitle, renderEmailBody(tpl.body, vars, {
+        receiptDetails: buildReceiptDetailsHtml(vars.className, vars.invoiceId, vars.amount, paidOn),
+      })),
     });
     return NextResponse.json({ success: true });
   }
@@ -462,13 +555,19 @@ async function handleInvoiceEmail(body: Record<string, unknown>, user: { id: str
   const isUpdated = mode === 'updated';
   const formattedAmount = Number(amount).toFixed(2);
   const formattedDue = new Date(String(dueDate)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-  const formattedStatus = (String(status ?? 'not_paid')).replace(/_/g, ' ');
+  const formattedStatus = (String(status ?? 'not_paid')).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
+  const tpl = await getEmailTemplate(isUpdated ? 'invoice_updated' : 'invoice_new');
+  const vars = {
+    studentName: String(studentName), className: String(className), invoiceTitle: String(invoiceTitle),
+    invoiceId: String(invoiceId), amount: formattedAmount, dueDate: formattedDue, status: formattedStatus,
+    changeSummary: String(changeSummary || 'details were updated'),
+  };
   await resend.emails.send({
     from: getFromEmail(),
     to: studentEmail as string,
-    subject: isUpdated ? `Updated Invoice from Future Minds Academy: ${invoiceTitle}` : `New Invoice from Future Minds Academy: ${invoiceTitle}`,
-    html: buildInvoiceEmailHtml(String(studentName), String(className), String(invoiceTitle), String(invoiceId), formattedAmount, formattedDue, formattedStatus, isUpdated, String(changeSummary ?? '')),
+    subject: renderEmailSubject(tpl.subject, vars),
+    html: buildInvoiceEmailHtml(vars.invoiceTitle, isUpdated, renderEmailBody(tpl.body, vars)),
   });
 
   return NextResponse.json({ success: true });
@@ -509,11 +608,19 @@ async function handleGradeEmail(body: Record<string, unknown>, user: { id: strin
   if (!resend) return NextResponse.json({ success: false, error: 'Email provider not configured' }, { status: 500 });
 
   const isUpdated = mode === 'updated';
+  const tpl = await getEmailTemplate(isUpdated ? 'grade_updated' : 'grade_new');
+  const vars = {
+    studentName: String(studentName), examName: String(examName), className: String(className),
+    teacherName: String(teacherName), totalPoints: String(Number(totalPoints)), result: passed ? 'Passed' : 'Failed',
+  };
   await resend.emails.send({
     from: getFromEmail(),
     to: studentEmail as string,
-    subject: isUpdated ? `Grade Updated – ${examName} | Future Minds Academy` : `Your Grade is Ready – ${examName} | Future Minds Academy`,
-    html: buildGradeEmailHtml(String(studentName), String(examName), String(className), String(teacherName), Number(totalPoints), Boolean(passed), note as string | undefined, isUpdated),
+    subject: renderEmailSubject(tpl.subject, vars),
+    html: buildGradeEmailHtml(vars.examName, vars.className, vars.teacherName, isUpdated, renderEmailBody(tpl.body, vars, {
+      gradeDetails: buildGradeDetailsHtml(Number(totalPoints), Boolean(passed)),
+      teacherNote: note ? buildTeacherNoteHtml(String(note)) : '',
+    })),
   });
 
   return NextResponse.json({ success: true });
@@ -574,11 +681,21 @@ async function handleClassUpdateEmail(body: Record<string, unknown>, user: { id:
   if (!resend) return NextResponse.json({ success: false, error: 'Email provider not configured' }, { status: 500 });
 
   const isCancelled = updateType === 'cancelled';
+  const accent = isCancelled ? '#ef4444' : '#fc0ce4';
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const newTime = newStartTime && newEndTime ? `${newStartTime} – ${newEndTime}` : (newStartTime as string | undefined) ?? '';
+  const tpl = await getEmailTemplate(isCancelled ? 'class_cancelled' : 'class_rescheduled');
+  const vars = {
+    studentName: String(studentName), className: String(className), originalDate: fmtDate(String(originalDate)),
+    newDate: newDate ? fmtDate(String(newDate)) : '', newTime, reason: String(reason ?? ''),
+  };
+  const blocks: Record<string, string> = { reasonBox: reason ? buildReasonHtml(String(reason), accent) : '' };
+  if (!isCancelled) blocks.newSchedule = buildNewScheduleHtml(vars.newDate, newTime);
   await resend.emails.send({
     from: getFromEmail(),
     to: studentEmail as string,
-    subject: isCancelled ? `Class Cancelled: ${className} | Future Minds Academy` : `Class Rescheduled: ${className} | Future Minds Academy`,
-    html: buildClassUpdateEmailHtml(String(studentName), String(className), String(originalDate), String(updateType), newDate as string | undefined, newStartTime as string | undefined, newEndTime as string | undefined, reason as string | undefined),
+    subject: renderEmailSubject(tpl.subject, vars),
+    html: buildClassUpdateEmailHtml(vars.className, isCancelled, renderEmailBody(tpl.body, vars, blocks)),
   });
 
   return NextResponse.json({ success: true });
@@ -608,12 +725,23 @@ async function handleClassUpdateSms(body: Record<string, unknown>, user: { id: s
   await sendSms(String(studentPhone), smsBody);
   return NextResponse.json({ success: true });
 }
-
 // ════════════════════════════════════════════════════════════════════════════
 // EMAIL HTML BUILDERS (exact template styling from existing Supabase functions)
+// Body prose comes from the editable email_templates; the blocks below are the
+// pre-styled pieces a template can place with {{blockName}}.
 // ════════════════════════════════════════════════════════════════════════════
 
-function buildResetCodeEmailHtml(resetLink: string, firstName: string): string {
+const EMAIL_FOOTER = `<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
+<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
+</td></tr></table></td></tr></table></body></html>`;
+
+function emailContent(contentHtml: string): string {
+  return `<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
+${contentHtml}
+</div></td></tr>`;
+}
+
+function buildResetCodeEmailHtml(contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -621,21 +749,18 @@ function buildResetCodeEmailHtml(resetLink: string, firstName: string): string {
 <tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.3px;">Password Reset Request</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:13px;">Future Minds Academy · Account Security</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 16px;">Hello ${esc(firstName)},</p>
-<p style="margin:0 0 16px;">We received a request to reset the password for your Future Minds Academy account. Click the secure button below to proceed.</p>
-<p style="margin:0 0 24px;"><a href="${esc(resetLink)}" style="display:inline-block;background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:10px;font-weight:600;font-size:14px;">Reset My Password</a></p>
-<p style="margin:0 0 8px;color:rgba(255,255,255,0.5);font-size:13px;">This link expires in <strong style="color:rgba(255,255,255,0.75);">1 hour</strong> and can only be used once.</p>
-<p style="margin:0 0 16px;color:rgba(255,255,255,0.5);font-size:13px;">If the button does not work, copy and paste this URL into your browser:</p>
-<p style="margin:0 0 16px;word-break:break-all;"><a href="${esc(resetLink)}" style="color:#b5b9ff;font-size:12px;">${esc(resetLink)}</a></p>
-<p style="margin:16px 0 0;padding:16px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid rgba(252,12,228,0.5);color:rgba(255,255,255,0.5);font-size:12px;">If you did not request this, you can safely ignore this email. Your password will not change.</p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
 }
 
-function buildAnnouncementEmailHtml(title: string, content: string, senderName: string): string {
+function buildResetButtonHtml(resetLink: string): string {
+  return `<p style="margin:0 0 24px;"><a href="${esc(resetLink)}" style="display:inline-block;background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);color:#ffffff;text-decoration:none;padding:13px 28px;border-radius:10px;font-weight:600;font-size:14px;">Reset My Password</a></p>
+<p style="margin:0 0 8px;color:rgba(255,255,255,0.5);font-size:13px;">This link expires in <strong style="color:rgba(255,255,255,0.75);">1 hour</strong> and can only be used once.</p>
+<p style="margin:0 0 16px;color:rgba(255,255,255,0.5);font-size:13px;">If the button does not work, copy and paste this URL into your browser:</p>
+<p style="margin:0 0 16px;word-break:break-all;"><a href="${esc(resetLink)}" style="color:#b5b9ff;font-size:12px;">${esc(resetLink)}</a></p>`;
+}
+
+function buildAnnouncementEmailHtml(title: string, senderName: string, contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -643,13 +768,11 @@ function buildAnnouncementEmailHtml(title: string, content: string, senderName: 
 <tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;letter-spacing:-0.3px;">${esc(title)}</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">From ${esc(senderName)}</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;white-space:pre-wrap;">${esc(content)}</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
 }
 
-function buildAttendanceAlertEmailHtml(studentName: string, className: string, attendanceRate: number, presentCount: number, totalCount: number): string {
+function buildAttendanceAlertEmailHtml(contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -657,18 +780,11 @@ function buildAttendanceAlertEmailHtml(studentName: string, className: string, a
 <tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">Attendance Alert</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Future Minds Academy Student Support</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
-<p style="margin:0 0 16px;">Your attendance rate in ${esc(className)} is currently <strong style="color:#ffffff;">${attendanceRate}%</strong>, which is at or below the 40% threshold.</p>
-<p style="margin:0 0 16px;">Present: <strong style="color:#ffffff;">${presentCount}</strong> / <strong style="color:#ffffff;">${totalCount}</strong> sessions.</p>
-<p style="margin:0;">Please contact your instructor or the administration team as soon as possible.<br><br>Warm regards,<br>Future Minds Academy · Student Support Team</p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
 }
 
-function buildInvoiceEmailHtml(studentName: string, className: string, invoiceTitle: string, invoiceId: string, amount: string, dueDate: string, status: string, isUpdated: boolean, changeSummary: string): string {
+function buildInvoiceEmailHtml(invoiceTitle: string, isUpdated: boolean, contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -676,20 +792,11 @@ function buildInvoiceEmailHtml(studentName: string, className: string, invoiceTi
 <tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">${esc(invoiceTitle)}</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">${isUpdated ? 'Invoice Update' : 'Invoice Notification'}</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
-<p style="margin:0 0 16px;">${isUpdated ? `Your invoice "${esc(invoiceTitle)}" has been updated. Change: <strong style="color:#ffffff;">${esc(changeSummary || 'details were updated')}</strong>.` : `A new invoice "${esc(invoiceTitle)}" has been issued for you.`}</p>
-<p style="margin:0 0 16px;">Invoice ID: <strong style="color:#ffffff;">${esc(invoiceId)}</strong> · Class: ${esc(className)} · Amount: <strong style="color:#ffffff;">$${esc(amount)}</strong> · Due: <strong style="color:#ffffff;">${esc(dueDate)}</strong> · Status: <strong style="color:#ffffff;text-transform:capitalize;">${esc(status)}</strong></p>
-<p style="margin:0;">Warm regards,<br>Future Minds Academy · Finance Department</p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
 }
 
-function buildInvoiceReceiptEmailHtml(studentName: string, className: string, invoiceTitle: string, invoiceId: string, amount: string, paidOn: string): string {
-  const row = (label: string, value: string, last = false) =>
-    `<tr><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}"><span style="color:rgba(255,255,255,0.4);font-size:12px;">${label}</span></td><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}text-align:right;">${value}</td></tr>`;
+function buildInvoiceReceiptEmailHtml(invoiceTitle: string, contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -697,27 +804,24 @@ function buildInvoiceReceiptEmailHtml(studentName: string, className: string, in
 <tr><td style="background:linear-gradient(135deg,#fc0ce4 0%,#949ce4 100%);padding:32px 40px;">
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:600;">${esc(invoiceTitle)}</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Payment Receipt</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
-<p style="margin:0 0 24px;">We have received your payment for invoice "${esc(invoiceTitle)}". Thank you.</p>
-<table width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:24px;"><tr><td style="padding:20px 24px;">
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
+}
+
+function buildReceiptDetailsHtml(className: string, invoiceId: string, amount: string, paidOn: string): string {
+  const row = (label: string, value: string, last = false) =>
+    `<tr><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}"><span style="color:rgba(255,255,255,0.4);font-size:12px;">${label}</span></td><td style="padding:8px 0;${last ? '' : 'border-bottom:1px solid rgba(255,255,255,0.06);'}text-align:right;">${value}</td></tr>`;
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:24px;"><tr><td style="padding:20px 24px;">
 <table width="100%">
 ${row('Invoice ID', `<strong style="color:#ffffff;">${esc(invoiceId)}</strong>`)}
 ${row('Class', `<span style="color:#ffffff;">${esc(className)}</span>`)}
 ${row('Amount paid', `<strong style="color:#ffffff;">€${esc(amount)}</strong>`)}
 ${row('Payment date', `<span style="color:#ffffff;">${esc(paidOn)}</span>`)}
 ${row('Status', `<span style="color:#10b981;font-weight:700;">Paid</span>`, true)}
-</table></td></tr></table>
-<p style="margin:0 0 16px;">Please keep this email as your proof of payment.</p>
-<p style="margin:0;">Warm regards,<br>Future Minds Academy · Finance Department</p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+</table></td></tr></table>`;
 }
 
-function buildGradeEmailHtml(studentName: string, examName: string, className: string, teacherName: string, totalPoints: number, passed: boolean, note: string | undefined, isUpdated: boolean): string {
-  const resultColor = passed ? '#10b981' : '#ef4444';
+function buildGradeEmailHtml(examName: string, className: string, teacherName: string, isUpdated: boolean, contentHtml: string): string {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -726,26 +830,24 @@ function buildGradeEmailHtml(studentName: string, examName: string, className: s
 <p style="margin:0 0 6px;color:rgba(255,255,255,0.7);font-size:12px;text-transform:uppercase;letter-spacing:1.5px;">${isUpdated ? 'Grade Update' : 'Grade Notification'}</p>
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">${esc(examName)}</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.75);font-size:13px;">${esc(className)} · Graded by ${esc(teacherName)}</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 20px;">Hello <strong style="color:#ffffff;">${esc(studentName)}</strong>,</p>
-<p style="margin:0 0 24px;">${isUpdated ? `Your grade for <strong style="color:#ffffff;">${esc(examName)}</strong> has been <strong style="color:#ffffff;">updated</strong>.` : `Your exam <strong style="color:#ffffff;">${esc(examName)}</strong> has been graded.`}</p>
-<table width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:24px;"><tr><td style="padding:20px 24px;">
-<table width="100%"><tr><td style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);"><span style="color:rgba(255,255,255,0.4);font-size:12px;">Result</span></td><td style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);text-align:right;"><span style="color:${resultColor};font-weight:700;">${passed ? 'Passed' : 'Failed'}</span></td></tr>
-<tr><td style="padding:6px 0;"><span style="color:rgba(255,255,255,0.4);font-size:12px;">Points</span></td><td style="padding:6px 0;text-align:right;"><span style="color:#ffffff;font-weight:700;">${totalPoints}<span style="color:rgba(255,255,255,0.3);font-weight:400;"> / 100</span></span></td></tr>
-</table></td></tr></table>
-${note ? `<p style="margin:0 0 16px;padding:14px 18px;background:rgba(252,12,228,0.07);border-radius:10px;border:1px solid rgba(252,12,228,0.18);font-size:14px;"><strong style="color:rgba(252,12,228,0.8);display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;">Note from teacher</strong>${esc(note)}</p>` : ''}
-<p style="margin:0;">Warm regards,<br><strong style="color:#ffffff;">Future Minds Academy</strong></p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
 }
 
-function buildClassUpdateEmailHtml(studentName: string, className: string, originalDate: string, updateType: string, newDate?: string, newStartTime?: string, newEndTime?: string, reason?: string): string {
-  const isCancelled = updateType === 'cancelled';
+function buildGradeDetailsHtml(totalPoints: number, passed: boolean): string {
+  const resultColor = passed ? '#10b981' : '#ef4444';
+  return `<table width="100%" cellpadding="0" cellspacing="0" style="background-color:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:24px;"><tr><td style="padding:20px 24px;">
+<table width="100%"><tr><td style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);"><span style="color:rgba(255,255,255,0.4);font-size:12px;">Result</span></td><td style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);text-align:right;"><span style="color:${resultColor};font-weight:700;">${passed ? 'Passed' : 'Failed'}</span></td></tr>
+<tr><td style="padding:6px 0;"><span style="color:rgba(255,255,255,0.4);font-size:12px;">Points</span></td><td style="padding:6px 0;text-align:right;"><span style="color:#ffffff;font-weight:700;">${totalPoints}<span style="color:rgba(255,255,255,0.3);font-weight:400;"> / 100</span></span></td></tr>
+</table></td></tr></table>`;
+}
+
+function buildTeacherNoteHtml(note: string): string {
+  return `<p style="margin:0 0 16px;padding:14px 18px;background:rgba(252,12,228,0.07);border-radius:10px;border:1px solid rgba(252,12,228,0.18);font-size:14px;"><strong style="color:rgba(252,12,228,0.8);display:block;margin-bottom:4px;font-size:11px;text-transform:uppercase;">Note from teacher</strong>${esc(note)}</p>`;
+}
+
+function buildClassUpdateEmailHtml(className: string, isCancelled: boolean, contentHtml: string): string {
   const accent = isCancelled ? '#ef4444' : '#fc0ce4';
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-  const newTime = newStartTime && newEndTime ? `${newStartTime} – ${newEndTime}` : newStartTime ?? null;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background-color:#0a0a0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#0a0a0f;padding:40px 20px;"><tr><td align="center">
@@ -754,16 +856,15 @@ function buildClassUpdateEmailHtml(studentName: string, className: string, origi
 <p style="margin:0 0 6px;color:rgba(255,255,255,0.7);font-size:12px;text-transform:uppercase;letter-spacing:1.5px;">${isCancelled ? 'Class Cancellation' : 'Class Reschedule'}</p>
 <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">${esc(className)}</h1>
 <p style="margin:8px 0 0;color:rgba(255,255,255,0.75);font-size:13px;">Future Minds Academy</p></td></tr>
-<tr><td style="padding:32px 40px;"><div style="color:rgba(255,255,255,0.75);font-size:15px;line-height:1.7;">
-<p style="margin:0 0 16px;">Hello ${esc(studentName)},</p>
-<p style="margin:0 0 16px;">${isCancelled
-  ? `Your class <strong style="color:#ffffff;">${esc(className)}</strong> scheduled for <strong style="color:#ffffff;">${esc(fmtDate(originalDate))}</strong> has been <strong style="color:${accent};">cancelled</strong>.`
-  : `Your class <strong style="color:#ffffff;">${esc(className)}</strong> scheduled for <strong style="color:#ffffff;">${esc(fmtDate(originalDate))}</strong> has been <strong style="color:${accent};">rescheduled</strong>.`}</p>
-${!isCancelled && (newDate || newTime) ? `<table cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 20px;"><tr><td style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">${newDate ? `<p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:1px;font-weight:600;">New Date</p><p style="margin:0 0 14px;font-size:16px;font-weight:600;color:#ffffff;">${esc(fmtDate(newDate))}</p>` : ''}${newTime ? `<p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:1px;font-weight:600;">New Time</p><p style="margin:0;font-size:16px;font-weight:600;color:#ffffff;">${esc(newTime)}</p>` : ''}</td></tr></table>` : ''}
-${reason ? `<p style="margin:0 0 16px;padding:14px 18px;background:rgba(255,255,255,0.04);border-left:3px solid ${accent};border-radius:0 8px 8px 0;"><strong style="color:#ffffff;display:block;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Reason</strong>${esc(reason)}</p>` : ''}
-<p style="margin:0;">If you have any questions, please contact us.<br><br>Warm regards,<br>Future Minds Academy</p>
-</div></td></tr>
-<tr><td style="padding:20px 40px 28px;border-top:1px solid rgba(255,255,255,0.06);">
-<p style="margin:0;color:rgba(255,255,255,0.25);font-size:11px;text-align:center;">Future Minds Academy · Student Information System</p>
-</td></tr></table></td></tr></table></body></html>`;
+${emailContent(contentHtml)}
+${EMAIL_FOOTER}`;
+}
+
+function buildNewScheduleHtml(newDate: string, newTime: string): string {
+  if (!newDate && !newTime) return '';
+  return `<table cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 20px;"><tr><td style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:18px 20px;">${newDate ? `<p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:1px;font-weight:600;">New Date</p><p style="margin:0 0 14px;font-size:16px;font-weight:600;color:#ffffff;">${esc(newDate)}</p>` : ''}${newTime ? `<p style="margin:0 0 8px;font-size:13px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:1px;font-weight:600;">New Time</p><p style="margin:0;font-size:16px;font-weight:600;color:#ffffff;">${esc(newTime)}</p>` : ''}</td></tr></table>`;
+}
+
+function buildReasonHtml(reason: string, accent: string): string {
+  return `<p style="margin:0 0 16px;padding:14px 18px;background:rgba(255,255,255,0.04);border-left:3px solid ${accent};border-radius:0 8px 8px 0;"><strong style="color:#ffffff;display:block;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Reason</strong>${esc(reason)}</p>`;
 }
