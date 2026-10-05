@@ -16,6 +16,8 @@ import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
 import { api } from '../services/api';
 import { useModulePermissions, useUser } from '../context/UserContext';
+import { AgeInput } from '../components/AgeInput';
+import { ageFields, effectiveAge, validateAgeInput } from '../utils/age';
 
 type AdminStudent = {
   id: string;
@@ -27,6 +29,8 @@ type AdminStudent = {
   phone?: string;
   secondaryPhone?: string;
   location?: string;
+  age: number | null;
+  dateOfBirth: string | null;
   avatar: string;
   classes: { classId: string; className: string; programId: string; programName: string; enrolledAt: string }[];
   programs: { programId: string; programName: string }[];
@@ -41,6 +45,8 @@ interface EditStudentForm {
   phone: string;
   secondaryPhone: string;
   location: string;
+  age: string;
+  dateOfBirth: string;
 }
 
 type CsvStudentRow = {
@@ -67,6 +73,8 @@ interface EnrollForm {
   location: string;
   program: string;
   classId: string;
+  age: string;
+  dateOfBirth: string;
 }
 
 type ImportedStudent = { id: string; firstName: string; lastName: string; email: string };
@@ -88,6 +96,7 @@ function generateCode(): string {
 const BLANK_FORM: EnrollForm = {
   firstName: '', lastName: '', parentFirstName: '',
   email: '', password: 'FMA#2026', phone: '', secondaryPhone: '', location: '', program: '', classId: '',
+  age: '', dateOfBirth: '',
 };
 
 const LOCATION_OPTIONS = ['FMA Kids (Dardani)', 'FMA (Rruga Qarkore)'];
@@ -131,6 +140,8 @@ export default function Students() {
     phone: '',
     secondaryPhone: '',
     location: '',
+    age: '',
+    dateOfBirth: '',
   });
   const [savingEdit, setSavingEdit] = useState(false);
   // Edit form: degree + class enrollment
@@ -566,6 +577,8 @@ export default function Students() {
       phone: student.phone || '',
       secondaryPhone: student.secondaryPhone || '',
       location: student.location || '',
+      age: student.age != null ? String(student.age) : '',
+      dateOfBirth: student.dateOfBirth || '',
     });
     setEditClasses(student.classes.map(c => ({ classId: c.classId, className: c.className })));
     loadEditClasses(student.programs[0]?.programName || student.classes[0]?.programName || '');
@@ -577,10 +590,16 @@ export default function Students() {
       alert('Please provide a first and last name.');
       return;
     }
+    const editAgeError = validateAgeInput(editForm.age, editForm.dateOfBirth);
+    if (editAgeError) {
+      alert(editAgeError);
+      return;
+    }
 
     setSavingEdit(true);
     try {
       // Email is intentionally not editable.
+      const editAge = ageFields(editForm.age, editForm.dateOfBirth);
       await api.teacher.updateStudentProfile(editingStudent.id, {
         firstName: editForm.firstName.trim(),
         lastName: editForm.lastName.trim(),
@@ -589,6 +608,8 @@ export default function Students() {
         phone: editForm.phone.trim() || undefined,
         secondaryPhone: editForm.secondaryPhone.trim() || undefined,
         location: editForm.location || undefined,
+        age: editAge.age,
+        dateOfBirth: editAge.date_of_birth,
       });
 
       // Degree on the registration record.
@@ -726,6 +747,9 @@ export default function Students() {
     if (!form.firstName.trim())  { setEnrollError(t('students.err_first_name')); return; }
     if (!form.lastName.trim())   { setEnrollError(t('students.err_last_name')); return; }
     if (!form.parentFirstName.trim()) { setEnrollError(t('students.err_parent')); return; }
+    if (!form.age && !form.dateOfBirth) { setEnrollError('Age is required.'); return; }
+    const enrollAgeError = validateAgeInput(form.age, form.dateOfBirth);
+    if (enrollAgeError) { setEnrollError(enrollAgeError); return; }
     if (!form.email.includes('@')) { setEnrollError(t('students.err_email')); return; }
     if (!form.phone.trim()) { setEnrollError(t('students.err_phone')); return; }
     if (!form.location) { setEnrollError(t('students.err_location')); return; }
@@ -735,6 +759,7 @@ export default function Students() {
     setEnrolling(true);
     try {
       const idDocumentUrl = docFile ? await api.auth.uploadIdDocument(docFile) : undefined;
+      const enrollAge = ageFields(form.age, form.dateOfBirth);
       await api.registrations.adminEnroll({
         email:            form.email.trim().toLowerCase(),
         firstName:        form.firstName.trim(),
@@ -746,6 +771,8 @@ export default function Students() {
         program:          form.program,
         classId:          form.classId,
         idDocumentUrl,
+        age:              enrollAge.age,
+        dateOfBirth:      enrollAge.date_of_birth,
       });
       setEnrolledName(`${form.firstName.trim()} ${form.lastName.trim()}`);
       setForm(BLANK_FORM);
@@ -857,6 +884,17 @@ export default function Students() {
                 type="text" value={form.parentFirstName}
                 onChange={e => setField('parentFirstName', e.target.value)}
                 className={inp} placeholder="Parent's name"
+              />
+            </div>
+
+            {/* Age */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('age.label')} *</label>
+              <AgeInput
+                age={form.age}
+                dateOfBirth={form.dateOfBirth}
+                onChange={({ age, dateOfBirth }) => setForm(f => ({ ...f, age, dateOfBirth }))}
+                className={inp}
               />
             </div>
 
@@ -1345,6 +1383,10 @@ export default function Students() {
                     ))}
                   </div>
                 ) : <span className="text-sm text-white/40">Not enrolled in any program</span>}
+              </div>
+              <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('age.label')}</div>
+                <div className="text-sm text-white/90">{effectiveAge(selectedStudentForPanel.age, selectedStudentForPanel.dateOfBirth) ?? '—'}</div>
               </div>
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">Phone</div>
@@ -1944,6 +1986,13 @@ export default function Students() {
                   value={editForm.parentFirstName}
                   onChange={(e) => setEditForm((f) => ({ ...f, parentFirstName: e.target.value }))}
                   placeholder="Parent First Name"
+                  className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
+                />
+
+                <AgeInput
+                  age={editForm.age}
+                  dateOfBirth={editForm.dateOfBirth}
+                  onChange={({ age, dateOfBirth }) => setEditForm((f) => ({ ...f, age, dateOfBirth }))}
                   className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
                 />
 

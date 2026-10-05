@@ -257,9 +257,10 @@ export default function Finance() {
       }
     }
 
-    // Different overrides or mixed ? show global defaults
+    // Different overrides or mixed ? show global defaults (the age-based price when all selected share it)
+    const sharedAmount = selected.every(s => s.currentAmount === selected[0].currentAmount) ? selected[0].currentAmount : settings.defaultAmount;
     setSettingsForm({
-      defaultAmount: String(settings.defaultAmount),
+      defaultAmount: String(sharedAmount),
       titleTemplate: settings.titleTemplate,
       discountPercent: String(settings.discountPercent),
       dueDay: String(settings.dueDay),
@@ -496,8 +497,13 @@ export default function Finance() {
     if (selectedStudentIds.size === 0) return;
     setSavingSettings(true);
     try {
+      // Only pin a custom price when the admin changed it (or one was already set);
+      // otherwise the student keeps following the default / age-based price.
+      const selected = settingsStudents.filter(s => selectedStudentIds.has(s.studentId));
+      const keepsPrice = selected.some(s => s.overrideAmount != null);
+      const priceChanged = selected.some(s => String(s.currentAmount) !== settingsForm.defaultAmount);
       await api.finance.upsertOverrides(Array.from(selectedStudentIds), {
-        amount: parseFloat(settingsForm.defaultAmount),
+        amount: keepsPrice || priceChanged ? parseFloat(settingsForm.defaultAmount) : undefined,
         discountPercent: parseFloat(settingsForm.discountPercent),
         dueDay: parseInt(settingsForm.dueDay),
         titleTemplate: settingsForm.titleTemplate,

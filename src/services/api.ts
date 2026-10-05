@@ -1,5 +1,6 @@
 import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance } from '../types';
 import { supabase } from '../lib/supabase';
+import { effectiveAge, priceForAge } from '../utils/age';
 
 const formatDate = (date: string) => {
   return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -31,6 +32,16 @@ const parseRoleActions = (actions: unknown): string[] => {
     }
   }
   return [];
+};
+
+const parseAgePrices = (raw: unknown): InvoiceSettings['agePrices'] => {
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch { list = []; }
+  }
+  if (!Array.isArray(list)) return [];
+  const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
+  return list.map((r: any) => ({ minAge: num(r?.minAge), maxAge: num(r?.maxAge), amount: Number(r?.amount ?? 0) }));
 };
 
 const mapSystemRole = (row: any) => ({
@@ -187,6 +198,8 @@ export const api = {
         location: applicationData.location,
         phone: applicationData.phone,
         secondary_phone: applicationData.secondaryPhone,
+        age: applicationData.age ?? null,
+        date_of_birth: applicationData.dateOfBirth || null,
         id_document_url: applicationData.idDocumentUrl
       };
 
@@ -356,6 +369,7 @@ export const api = {
         titleTemplate: data.title_template,
         discountPercent: parseFloat(data.discount_percent),
         dueDay: data.due_day,
+        agePrices: parseAgePrices(data.age_prices),
       };
     },
 
@@ -365,6 +379,7 @@ export const api = {
       if (updates.titleTemplate != null) payload.title_template = updates.titleTemplate;
       if (updates.discountPercent != null) payload.discount_percent = updates.discountPercent;
       if (updates.dueDay != null) payload.due_day = updates.dueDay;
+      if (updates.agePrices != null) payload.age_prices = JSON.stringify(updates.agePrices);
       payload.updated_at = new Date().toISOString();
       const { error } = await supabase.from('invoice_settings').update(payload).not('id', 'is', null);
       if (error) throw new Error(error.message);
@@ -375,7 +390,7 @@ export const api = {
       // All enrollments with student + class info (exclude archived profiles via JS filter below)
       const { data: enrollments, error } = await supabase
         .from('class_enrollments')
-        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, is_archived)');
+        .select('student_id, class:classes(title, program_id), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, is_archived, age, date_of_birth)');
       if (error || !enrollments) return [];
 
       // Filter out archived students
@@ -391,7 +406,7 @@ export const api = {
       for (const o of (overrides || [])) overrideMap.set(o.student_id, o);
 
       // Group by student
-      const map = new Map<string, { name: string; programs: Set<string>; classes: string[]; override: any | null }>();
+      const map = new Map<string, { name: string; age: number | null; programs: Set<string>; classes: string[]; override: any | null }>();
       for (const enr of activeEnrollments) {
         const sid = enr.student_id;
         const s = enr.student as any;
@@ -405,6 +420,7 @@ export const api = {
         } else {
           map.set(sid, {
             name: s ? `${s.first_name} ${s.last_name}` : '',
+            age: effectiveAge(s?.age, s?.date_of_birth),
             programs: new Set(programName ? [programName] : []),
             classes: className ? [className] : [],
             override: overrideMap.get(sid) || null,
@@ -415,7 +431,9 @@ export const api = {
       const result: SettingsStudent[] = [];
       for (const [studentId, info] of map) {
         const ovr = info.override;
-        const amt = ovr?.custom_amount != null ? parseFloat(ovr.custom_amount) : defaultAmt;
+        const amt = ovr?.custom_amount != null
+          ? parseFloat(ovr.custom_amount)
+          : priceForAge(info.age, settings?.agePrices ?? [], defaultAmt);
         const disc = ovr?.custom_discount_percent != null ? parseFloat(ovr.custom_discount_percent) : (settings?.discountPercent ?? 0);
         const entry: SettingsStudent = {
           studentId,
@@ -657,7 +675,8 @@ export const api = {
 
       // 1. Settings (global defaults)
       const { data: settingsRow } = await supabase.from('invoice_settings').select('*').limit(1).single();
-      const s = settingsRow || { default_amount: 60, title_template: '{class} - {month}', discount_percent: 0, due_day: 1 };
+      const s = settingsRow || { default_amount: 60, title_template: '{class} - {month}', discount_percent: 0, due_day: 1, age_prices: [] };
+      const agePrices = parseAgePrices(s.age_prices);
 
       // 2. Per-student overrides
       const { data: overrides } = await supabase.from('student_invoice_overrides').select('*');
@@ -667,7 +686,7 @@ export const api = {
       // 3. All enrollments with class info (no status filter — same approach as SMS dedup fix)
       const { data: enrollments, error: eErr } = await supabase
         .from('class_enrollments')
-        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone)');
+        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone, age, date_of_birth)');
       if (eErr || !enrollments || enrollments.length === 0) return;
 
       // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one.
@@ -714,9 +733,11 @@ export const api = {
         const studentEmail = student?.email || '';
         const studentPhone = student?.phone || '';
 
-        // Resolve per-student or global values
+        // Resolve per-student override, else the price for the student's age, else the default
         const ovr = ovrMap.get(enr.student_id);
-        const baseAmount = ovr?.custom_amount != null ? parseFloat(ovr.custom_amount) : parseFloat(s.default_amount);
+        const baseAmount = ovr?.custom_amount != null
+          ? parseFloat(ovr.custom_amount)
+          : priceForAge(effectiveAge(student?.age, student?.date_of_birth), agePrices, parseFloat(s.default_amount));
         const disc = ovr?.custom_discount_percent != null ? parseFloat(ovr.custom_discount_percent) : parseFloat(s.discount_percent);
         const dueDay = Math.min(ovr?.custom_due_day != null ? parseInt(ovr.custom_due_day) : parseInt(s.due_day), 28);
         const titleTpl = ovr?.custom_title_template || (s.title_template as string);
@@ -1852,6 +1873,8 @@ export const api = {
       phone?: string;
       secondaryPhone?: string;
       location?: string;
+      age: number | null;
+      dateOfBirth: string | null;
       avatar: string;
       classes: { classId: string; className: string; programId: string; programName: string; enrolledAt: string }[];
       programs: { programId: string; programName: string }[];
@@ -1862,7 +1885,7 @@ export const api = {
       const [profilesResult, pendingAppsResult] = await Promise.all([
         supabase
           .from('profiles')
-          .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url, program')
+          .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url, program, age, date_of_birth')
           .eq('role', 'student')
           .eq('is_archived', false)
           .order('first_name'),
@@ -1989,6 +2012,8 @@ export const api = {
           phone: p.phone || undefined,
           secondaryPhone: p.secondary_phone || undefined,
           location: p.location || undefined,
+          age: p.age ?? null,
+          dateOfBirth: p.date_of_birth || null,
           avatar:   p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.id}`,
           classes,
           programs,
@@ -2007,6 +2032,9 @@ export const api = {
         phone?: string;
         secondaryPhone?: string;
         location?: string;
+        // Left out = unchanged (e.g. CSV import doesn't carry an age).
+        age?: number | null;
+        dateOfBirth?: string | null;
       }
     ): Promise<void> => {
       const { error } = await supabase
@@ -2019,6 +2047,8 @@ export const api = {
           phone: updates.phone || null,
           secondary_phone: updates.secondaryPhone || null,
           location: updates.location || null,
+          ...(updates.age !== undefined ? { age: updates.age } : {}),
+          ...(updates.dateOfBirth !== undefined ? { date_of_birth: updates.dateOfBirth || null } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', studentId)
@@ -2187,6 +2217,7 @@ export const api = {
           specialization,
           qualifications,
           experience_years,
+          age,
           date_of_birth,
           address,
           city,
@@ -2223,6 +2254,7 @@ export const api = {
         specialization: app.specialization,
         qualifications: app.qualifications,
         experienceYears: app.experience_years,
+        age: app.age,
         dateOfBirth: app.date_of_birth,
         address: app.address,
         city: app.city,
@@ -2353,7 +2385,7 @@ export const api = {
       // Re-approvals for archived students must bypass the RPC which tries to create a new auth user.
       const { data: appRow } = await supabase
         .from('registration_applications')
-        .select('email')
+        .select('email, age, date_of_birth')
         .eq('id', applicationId)
         .maybeSingle();
 
@@ -2374,6 +2406,14 @@ export const api = {
               .update({ is_archived: false, archived_at: null })
               .eq('id', existingProfile.id);
             if (unarchiveErr) throw new Error(unarchiveErr.message);
+          }
+          // Carry a newly given age / date of birth over to the returning student.
+          if (appRow.age != null || appRow.date_of_birth) {
+            const { error: ageErr } = await supabase
+              .from('profiles')
+              .update({ age: appRow.age ?? null, date_of_birth: appRow.date_of_birth ?? null })
+              .eq('id', existingProfile.id);
+            if (ageErr) throw new Error(ageErr.message);
           }
           const { error: appErr } = await supabase
             .from('registration_applications')
@@ -2512,6 +2552,8 @@ export const api = {
       program: string;
       classId: string;
       idDocumentUrl?: string;
+      age?: number | null;
+      dateOfBirth?: string | null;
     }): Promise<void> => {
       if (!enrollData.program) throw new Error('Degree is required.');
       if (!enrollData.classId) throw new Error('Class is required.');
@@ -2559,6 +2601,8 @@ export const api = {
         location:          enrollData.location,
         phone:             enrollData.phone,
         secondary_phone:   enrollData.secondaryPhone || null,
+        age:               enrollData.age ?? null,
+        date_of_birth:     enrollData.dateOfBirth || null,
         id_document_url:   enrollData.idDocumentUrl || null,
         status:            'pending',
       };

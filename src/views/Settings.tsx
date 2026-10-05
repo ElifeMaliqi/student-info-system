@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail } from 'lucide-react';
+import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail, Receipt, Plus, Trash2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
+import { api } from '../services/api';
 import { exportCsv } from '../utils/csv';
 
 interface AppSettings {
@@ -59,6 +60,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [editedEmails, setEditedEmails] = useState<Record<string, { subject: string; body: string }>>({});
   const [savingEmail, setSavingEmail] = useState('');
 
+  // Invoice pricing (default price + price per age range)
+  type AgePriceRow = { minAge: string; maxAge: string; amount: string };
+  const [invoiceDefault, setInvoiceDefault] = useState('');
+  const [agePriceRows, setAgePriceRows] = useState<AgePriceRow[]>([]);
+  const [invoiceLoaded, setInvoiceLoaded] = useState(false);
+  const [savingInvoice, setSavingInvoice] = useState(false);
+
   // UI state
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -71,6 +79,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'platform', label: t('settings.platform'), icon: Building },
     { id: 'messages', label: t('settings.messages'), icon: MessageSquare },
     { id: 'emails', label: t('settings.emails'), icon: Mail },
+    { id: 'invoices', label: t('settings.invoices'), icon: Receipt },
     { id: 'data', label: t('settings.data'), icon: Database },
   ];
 
@@ -90,6 +99,18 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           data.forEach((t: SmsTemplate) => { bodies[t.type] = t.sms_body; });
           setEditedBodies(bodies);
         }
+      });
+
+      api.finance.getSettings().then(sett => {
+        if (sett) {
+          setInvoiceDefault(String(sett.defaultAmount));
+          setAgePriceRows(sett.agePrices.map(r => ({
+            minAge: r.minAge != null ? String(r.minAge) : '',
+            maxAge: r.maxAge != null ? String(r.maxAge) : '',
+            amount: String(r.amount),
+          })));
+        }
+        setInvoiceLoaded(true);
       });
 
       supabase.from('email_templates').select('type, label, subject, body, variables').order('label').then(({ data }) => {
@@ -270,6 +291,36 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       showToast('error', err.message || t('settings.save_failed'));
     } finally {
       setSavingEmail('');
+    }
+  };
+
+  const handleSaveInvoiceSettings = async () => {
+    const isAge = (v: string) => v === '' || (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 120);
+    const isPrice = (v: string) => v !== '' && Number.isFinite(Number(v)) && Number(v) >= 0;
+    const invalid = !isPrice(invoiceDefault) || agePriceRows.some(r =>
+      !isPrice(r.amount) || !isAge(r.minAge) || !isAge(r.maxAge) ||
+      (r.minAge === '' && r.maxAge === '') ||
+      (r.minAge !== '' && r.maxAge !== '' && Number(r.minAge) > Number(r.maxAge))
+    );
+    if (invalid) {
+      showToast('error', t('settings.invalid_price'));
+      return;
+    }
+    setSavingInvoice(true);
+    try {
+      await api.finance.updateSettings({
+        defaultAmount: Number(invoiceDefault),
+        agePrices: agePriceRows.map(r => ({
+          minAge: r.minAge === '' ? null : Number(r.minAge),
+          maxAge: r.maxAge === '' ? null : Number(r.maxAge),
+          amount: Number(r.amount),
+        })),
+      });
+      showToast('success', t('settings.invoice_settings_saved'));
+    } catch (err: any) {
+      showToast('error', err.message || t('settings.save_failed'));
+    } finally {
+      setSavingInvoice(false);
     }
   };
 
@@ -664,6 +715,92 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ===== INVOICE PRICING (admin only) ===== */}
+          {activeSection === 'invoices' && isAdminRole && (
+            <div className="space-y-6">
+              <div className="glass-card rounded-3xl p-6 lg:p-8">
+                <div className="flex items-start justify-between gap-4 mb-1">
+                  <h2 className="font-display text-xl font-medium">
+                    <Receipt className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                    {t('settings.invoices')}
+                  </h2>
+                  <button
+                    onClick={handleSaveInvoiceSettings}
+                    disabled={savingInvoice || !invoiceLoaded}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30"
+                  >
+                    {savingInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    {t('settings.save')}
+                  </button>
+                </div>
+                <p className="text-white/40 text-sm mb-6">{t('settings.invoices_desc')}</p>
+
+                {!invoiceLoaded ? (
+                  <div className="flex items-center justify-center py-10 text-white/30 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    {t('layout.loading')}
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    <div className="space-y-2 max-w-xs">
+                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                        {t('settings.default_price')}
+                      </label>
+                      <input
+                        type="number" step="0.01" min="0"
+                        className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20"
+                        value={invoiceDefault}
+                        onChange={e => setInvoiceDefault(e.target.value)}
+                      />
+                      <p className="text-[11px] text-white/35 ml-1">{t('settings.default_price_hint')}</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                        {t('settings.age_prices')}
+                      </div>
+                      {agePriceRows.map((row, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end">
+                          {(['minAge', 'maxAge', 'amount'] as const).map(field => (
+                            <div key={field} className="space-y-1.5">
+                              <label className="text-[10px] font-semibold text-white/40 uppercase tracking-widest ml-1">
+                                {field === 'minAge' ? t('settings.age_from') : field === 'maxAge' ? t('settings.age_to') : t('settings.price')}
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step={field === 'amount' ? '0.01' : '1'}
+                                placeholder={field === 'amount' ? '' : t('settings.age_any')}
+                                className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20"
+                                value={row[field]}
+                                onChange={e => setAgePriceRows(rows => rows.map((r, j) => j === i ? { ...r, [field]: e.target.value } : r))}
+                              />
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setAgePriceRows(rows => rows.filter((_, j) => j !== i))}
+                            className="p-3 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setAgePriceRows(rows => [...rows, { minAge: '', maxAge: '', amount: '' }])}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-xs font-medium hover:bg-white/5 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {t('settings.add_age_range')}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

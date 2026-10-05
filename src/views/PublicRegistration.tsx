@@ -5,6 +5,8 @@ import { motion } from 'motion/react';
 import { ArrowRight, Upload, CheckCircle, XCircle, Loader2, ArrowLeft, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
 import { useLanguage } from '../context/LanguageContext';
+import { AgeInput } from '../components/AgeInput';
+import { ageFields, validateAgeInput } from '../utils/age';
 
 interface RegistrationFormData {
   firstName: string;
@@ -15,6 +17,8 @@ interface RegistrationFormData {
   confirmPassword: string;
   phone: string;
   secondaryPhone: string;
+  age: string;
+  dateOfBirth: string;
   location: string;
   program: string;
   idDocument?: File;
@@ -36,6 +40,8 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     confirmPassword: '',
     phone: '',
     secondaryPhone: '',
+    age: '',
+    dateOfBirth: '',
     location: '',
     program: '',
   });
@@ -94,6 +100,15 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
       setError("Parent's first name is required");
       return false;
     }
+    if (!formData.age && !formData.dateOfBirth) {
+      setError('Age is required');
+      return false;
+    }
+    const ageError = validateAgeInput(formData.age, formData.dateOfBirth);
+    if (ageError) {
+      setError(ageError);
+      return false;
+    }
     if (!formData.email.includes('@')) {
       setError('Please enter a valid email address');
       return false;
@@ -133,6 +148,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
 
     try {
       const idDocumentUrl = idDocument ? await api.auth.uploadIdDocument(idDocument) : undefined;
+      const { age, date_of_birth } = ageFields(formData.age, formData.dateOfBirth);
       await api.auth.register({
         email: formData.email,
         firstName: formData.firstName,
@@ -144,6 +160,8 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
         location: formData.location,
         phone: formData.phone,
         secondaryPhone: formData.secondaryPhone || undefined,
+        age,
+        dateOfBirth: date_of_birth,
         idDocumentUrl,
       });
 
@@ -373,6 +391,18 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
                     className="glass-input w-full px-4 py-3 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
                     placeholder="Parent's name"
                     required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                    Age *
+                  </label>
+                  <AgeInput
+                    age={formData.age}
+                    dateOfBirth={formData.dateOfBirth}
+                    onChange={({ age, dateOfBirth }) => { setFormData(prev => ({ ...prev, age, dateOfBirth })); setError(''); }}
+                    className="glass-input w-full px-4 py-3 rounded-2xl text-sm text-white placeholder:text-white/20 bg-white/5"
                   />
                 </div>
 

@@ -8,6 +8,7 @@ import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { RegistrationApplication, Class } from '../types';
 import { Skeleton } from '../components/Skeleton';
+import { effectiveAge } from '../utils/age';
 
 export default function RegistrationApplications() {
   const { t } = useLanguage();
@@ -542,6 +543,14 @@ export default function RegistrationApplications() {
 
               {selectedApp.role === 'student' && (
                 <>
+                  {effectiveAge(selectedApp.age, selectedApp.dateOfBirth) != null && (
+                    <div>
+                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
+                        {t('age.label')}
+                      </label>
+                      <p className="text-white">{effectiveAge(selectedApp.age, selectedApp.dateOfBirth)}</p>
+                    </div>
+                  )}
                   {selectedApp.dateOfBirth && (
                     <div>
                       <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">

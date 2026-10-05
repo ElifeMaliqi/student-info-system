@@ -85,6 +85,8 @@ export interface InvoiceSettings {
   titleTemplate: string;
   discountPercent: number;
   dueDay: number;
+  /** Monthly price per age range; students without an age use defaultAmount. */
+  agePrices: { minAge: number | null; maxAge: number | null; amount: number }[];
 }
 
 export interface StudentInvoiceOverride {
@@ -182,7 +184,8 @@ export interface RegistrationApplication {
   parentFirstName?: string;
   phone?: string;
   secondaryPhone?: string;
-  dateOfBirth?: string;
+  age?: number | null;
+  dateOfBirth?: string | null;
   address?: string;
   city?: string;
   country?: string;

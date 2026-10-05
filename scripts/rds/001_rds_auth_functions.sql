@@ -49,7 +49,7 @@ BEGIN
 
   INSERT INTO profiles (
     id, email, first_name, last_name, role, must_change_password,
-    location, phone, secondary_phone, date_of_birth, address, city, country,
+    location, phone, secondary_phone, date_of_birth, age, address, city, country,
     emergency_contact_name, emergency_contact_phone, specialization, qualifications,
     experience_years, parent_first_name, id_document_url, program
   ) VALUES (
@@ -58,7 +58,7 @@ BEGIN
     CASE WHEN app.password_hash ~ '^\$2[aby]\$'
       THEN app.password_hash = crypt('FMA#2026', app.password_hash)
       ELSE app.password_hash = 'FMA#2026' END,
-    app.location, app.phone, app.secondary_phone, app.date_of_birth, app.address,
+    app.location, app.phone, app.secondary_phone, app.date_of_birth, app.age, app.address,
     app.city, app.country, app.emergency_contact_name, app.emergency_contact_phone,
     app.specialization, app.qualifications, app.experience_years,
     app.parent_first_name, app.id_document_url, app.program
