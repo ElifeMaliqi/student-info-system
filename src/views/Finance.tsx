@@ -1007,13 +1007,13 @@ export default function Finance() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Month</label>
-                          <select value={createForm.month} onChange={e => setCreateForm(f => ({ ...f, month: e.target.value }))} className="glass-select w-full px-3 py-2.5 rounded-xl text-sm">
+                          <select value={createForm.month} onChange={e => setCreateForm(f => ({ ...f, month: e.target.value, dueDate: `${f.year}-${String(e.target.value).padStart(2, '0')}-15` }))} className="glass-select w-full px-3 py-2.5 rounded-xl text-sm">
                             {MONTH_KEYS.map((mk, idx) => <option key={mk} value={idx + 1}>{t(`months.${mk}`)}</option>)}
                           </select>
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Year</label>
-                          <input type="number" min="2020" value={createForm.year} onChange={e => setCreateForm(f => ({ ...f, year: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
+                          <input type="number" min="2020" value={createForm.year} onChange={e => setCreateForm(f => ({ ...f, year: e.target.value, dueDate: `${e.target.value}-${String(f.month).padStart(2, '0')}-15` }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
                         </div>
                       </div>
 

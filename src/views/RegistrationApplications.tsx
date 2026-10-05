@@ -15,7 +15,7 @@ export default function RegistrationApplications() {
   const [applications, setApplications] = useState<RegistrationApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived' | 'missing'>('pending');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived' | 'missing'>('all');
   const [roleTab, setRoleTab] = useState<'student' | 'teacher'>('student');
   const [enrolledEmails, setEnrolledEmails] = useState<Set<string>>(new Set());
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -529,15 +529,14 @@ export default function RegistrationApplications() {
                   <label className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2 block">
                     {t('registrations.id_document')}
                   </label>
-                  <a
-                    href={selectedApp.idDocumentUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
+                    onClick={() => { api.auth.openIdDocument(selectedApp.idDocumentUrl!).catch(err => alert(err.message)); }}
                     className="text-[#fc0ce4] hover:underline flex items-center gap-2"
                   >
                     <FileText className="w-4 h-4" />
                     {t('registrations.view_document')}
-                  </a>
+                  </button>
                 </div>
               )}
 

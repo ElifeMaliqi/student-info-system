@@ -2,6 +2,11 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+// Return DATE columns as plain 'YYYY-MM-DD' strings. By default node-pg turns them
+// into a JS Date at local midnight, which serializes to the previous day on servers
+// ahead of UTC and breaks every client formatter that expects 'YYYY-MM-DD'.
+pg.types.setTypeParser(1082, (value: string) => value);
+
 function getConnectionString(): string {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   const host = process.env.DB_HOST;

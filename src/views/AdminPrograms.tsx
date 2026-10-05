@@ -517,7 +517,7 @@ export default function AdminPrograms() {
                 transition={{ delay: idx * 0.05 }}
                 className="glass-card rounded-2xl p-6 text-left group relative"
               >
-                <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-3 right-12 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   {(!permOverridden || canUpdate) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openEditDegree(program); }}
@@ -587,6 +587,9 @@ export default function AdminPrograms() {
                 </div>
 
                 <form onSubmit={handleCreateDegree} className="space-y-4">
+                  {error && (
+                    <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">{error}</div>
+                  )}
                   <div>
                     <label className="text-xs font-semibold text-white/60 uppercase tracking-widest ml-1 block mb-2">
                       {t('programs.degree_name_req')}

@@ -169,7 +169,7 @@ export const SuperAdminUsers: React.FC = () => {
           const result = await api.users.create(u.email, u.firstName, u.lastName, u.role || csvRole, u.password);
           if (result?.id) {
             created.push({ id: result.id, firstName: u.firstName, lastName: u.lastName, email: u.email });
-            if (u.classCode) {
+            if (u.classCode && (u.role || csvRole) === 'student') {
               try {
                 const classId = await api.classes.getIdByCode(u.classCode);
                 if (classId) await api.classes.enrollStudent(classId, result.id);
@@ -621,8 +621,8 @@ export const SuperAdminUsers: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Checklist of remaining students */}
-                  {remainingIds.size > 0 ? (
+                  {/* Checklist of remaining students — class assignment is for students only */}
+                  {csvRole === 'student' && (remainingIds.size > 0 ? (
                     <>
                       <div className="flex items-center justify-between">
                         <p className="text-xs text-white/40">{remainingIds.size} remaining — select to assign to a class</p>
@@ -679,7 +679,7 @@ export const SuperAdminUsers: React.FC = () => {
                       <CheckCircle2 className="w-8 h-8 text-emerald-400/60" />
                       <p className="text-sm text-white/50">All students have been assigned.</p>
                     </div>
-                  )}
+                  ))}
 
                   <button
                     onClick={() => setShowCSVModal(false)}

@@ -52,6 +52,27 @@ const mapSystemRole = (row: any) => ({
 
 export const api = {
   auth: {
+    // Stores an applicant's ID document and returns the URL to save on the application.
+    uploadIdDocument: async (file: File): Promise<string> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/upload/id-document', { method: 'POST', body: form });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.url) throw new Error(body.error || 'Failed to upload ID document');
+      return body.url as string;
+    },
+
+    // Our stored ID documents need the admin's token, which a plain link can't send.
+    // The tab is opened before the fetch so popup blockers don't stop it.
+    openIdDocument: async (url: string): Promise<void> => {
+      if (!url.startsWith('/api/upload/id-document')) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
+      const tab = window.open('', '_blank');
+      const res = await fetch(url, { headers: getAuthHeaders() });
+      if (!res.ok) { tab?.close(); throw new Error('Failed to open ID document'); }
+      const blobUrl = URL.createObjectURL(await res.blob());
+      if (tab) tab.location.href = blobUrl;
+    },
+
     login: async (email: string, password: string): Promise<{ user: User, token: string }> => {
       console.log('[api.auth.login] signInWithPassword starting...');
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -126,6 +147,9 @@ export const api = {
     },
 
     register: async (applicationData: Omit<RegistrationApplication, 'id' | 'status' | 'created_at' | 'updated_at'>): Promise<void> => {
+      // Emails are stored lowercase everywhere; otherwise "A@x" and "a@x" become two people.
+      applicationData = { ...applicationData, email: applicationData.email.trim().toLowerCase() };
+
       const { data: existingUser } = await supabase
         .from('profiles')
         .select('email')
@@ -465,6 +489,8 @@ export const api = {
       className?: string;
     }): Promise<void> => {
       const invoiceId = api.finance._generateInvoiceId(params.year, params.month);
+      // Like auto-generated invoices, amount is the final price after discount.
+      const finalAmount = Math.round(params.amount * (1 - (params.discountPercent ?? 0) / 100) * 100) / 100;
       const insResp = await fetch('/api/db', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -483,7 +509,7 @@ export const api = {
             params.month,
             params.year,
             params.dueDate,
-            Math.round(params.amount * 100) / 100,
+            finalAmount,
             params.discountPercent ?? 0,
           ],
         }),
@@ -503,7 +529,7 @@ export const api = {
             className: params.className || 'Class',
             invoiceTitle: params.title,
             invoiceId,
-            amount: params.amount,
+            amount: finalAmount,
             dueDate: params.dueDate,
             status: 'not_paid',
             mode: 'created',
@@ -517,7 +543,7 @@ export const api = {
           studentPhone: params.studentPhone,
           studentName: params.studentName || 'Student',
           className: params.className || 'Class',
-          amount: params.amount,
+          amount: finalAmount,
           dueDate: params.dueDate,
           status: 'not_paid',
           mode: 'created',
@@ -1623,6 +1649,24 @@ export const api = {
   },
 
   teacher: {
+    // Average final-project points per student, over graded entries only.
+    getAverageGrades: async (studentIds: string[]): Promise<Record<string, number>> => {
+      if (studentIds.length === 0) return {};
+      const { data, error } = await supabase
+        .from('grade_table_entries')
+        .select('student_id, total_points')
+        .in('student_id', studentIds);
+      if (error) throw new Error(error.message);
+      const sums: Record<string, { total: number; count: number }> = {};
+      (data || []).forEach((e: { student_id: string; total_points: string | number | null }) => {
+        if (e.total_points == null) return;
+        const sum = (sums[e.student_id] = sums[e.student_id] || { total: 0, count: 0 });
+        sum.total += Number(e.total_points);
+        sum.count++;
+      });
+      return Object.fromEntries(Object.entries(sums).map(([id, s]) => [id, s.total / s.count]));
+    },
+
     getStudents: async (teacherId: string) => {
       // Get students from teacher_programs relationship (legacy)
       const { data: programData, error: programError } = await supabase
@@ -1818,7 +1862,7 @@ export const api = {
       const [profilesResult, pendingAppsResult] = await Promise.all([
         supabase
           .from('profiles')
-          .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url')
+          .select('id, first_name, last_name, parent_first_name, email, phone, secondary_phone, location, avatar_url, program')
           .eq('role', 'student')
           .eq('is_archived', false)
           .order('first_name'),
@@ -1931,6 +1975,8 @@ export const api = {
         const classes = enrMap[p.id] || [];
         // Unique programs
         const progMap: Record<string, string> = {};
+        // The degree set on the student comes first; class degrees follow.
+        if (p.program) progMap[p.program] = p.program;
         classes.forEach(c => { if (c.programId) progMap[c.programId] = c.programName; });
         const programs = Object.entries(progMap).map(([programId, programName]) => ({ programId, programName }));
         return {
@@ -1991,6 +2037,17 @@ export const api = {
   },
 
   programs: {
+    // Active degree names; works signed out too (public application form).
+    getNames: async (): Promise<string[]> => {
+      const { data, error } = await supabase
+        .from('programs')
+        .select('name')
+        .eq('is_active', true)
+        .order('name');
+      if (error) throw new Error(error.message);
+      return (data || []).map((p: { name: string }) => p.name);
+    },
+
     getAll: async (): Promise<Program[]> => {
       const { data, error } = await supabase
         .from('programs')
@@ -2013,17 +2070,34 @@ export const api = {
     },
 
     create: async (program: { name: string; description?: string; duration: number; price: number; capacity: number }): Promise<Program> => {
-      const { data, error } = await supabase
+      // A deleted degree is only deactivated, and names are unique — so re-creating
+      // one with the same name brings the old row back instead of failing.
+      const { data: existing } = await supabase
         .from('programs')
-        .insert([{
-          name: program.name,
-          description: program.description || null,
-          duration_months: program.duration,
-          price: program.price,
-          capacity: program.capacity,
-        }])
-        .select()
-        .single();
+        .select('id, is_active')
+        .eq('name', program.name)
+        .maybeSingle();
+      if (existing?.is_active) throw new Error('A degree with this name already exists.');
+
+      const fields = {
+        name: program.name,
+        description: program.description || null,
+        duration_months: program.duration,
+        price: program.price,
+        capacity: program.capacity,
+      };
+      const { data, error } = existing
+        ? await supabase
+            .from('programs')
+            .update({ ...fields, is_active: true, updated_at: new Date().toISOString() })
+            .eq('id', existing.id)
+            .select()
+            .single()
+        : await supabase
+            .from('programs')
+            .insert([fields])
+            .select()
+            .single();
 
       if (error) throw new Error(error.message);
 
@@ -2040,6 +2114,12 @@ export const api = {
     },
 
     update: async (id: string, program: { name: string; description?: string; duration: number; price: number; capacity: number }): Promise<void> => {
+      const { data: before } = await supabase
+        .from('programs')
+        .select('name')
+        .eq('id', id)
+        .maybeSingle();
+
       const { error } = await supabase
         .from('programs')
         .update({
@@ -2053,6 +2133,26 @@ export const api = {
         .eq('id', id);
 
       if (error) throw new Error(error.message);
+
+      // Classes, students and applications reference their degree by name, so a
+      // rename has to follow through.
+      if (before?.name && before.name !== program.name) {
+        const { error: classErr } = await supabase
+          .from('classes')
+          .update({ program_id: program.name })
+          .eq('program_id', before.name);
+        if (classErr) throw new Error(classErr.message);
+        const { error: profErr } = await supabase
+          .from('profiles')
+          .update({ program: program.name })
+          .eq('program', before.name);
+        if (profErr) throw new Error(profErr.message);
+        const { error: regErr } = await supabase
+          .from('registration_applications')
+          .update({ program: program.name })
+          .eq('program', before.name);
+        if (regErr) throw new Error(regErr.message);
+      }
     },
 
     delete: async (id: string): Promise<void> => {
@@ -2200,6 +2300,27 @@ export const api = {
 
     // Update just the degree/program on a student's registration record (used by
     // the admin student-edit form). Does not touch archive state.
+    // The student's own degree: shown in the Students list and used for invoices/filters.
+    updateStudentProgram: async (studentId: string, program: string): Promise<void> => {
+      const name = program.trim() || null;
+      const { error: profErr } = await supabase
+        .from('profiles')
+        .update({ program: name })
+        .eq('id', studentId);
+      if (profErr) throw new Error(profErr.message);
+
+      let programId: string | null = null;
+      if (name) {
+        const { data: prog } = await supabase.from('programs').select('id').eq('name', name).maybeSingle();
+        programId = prog?.id ?? null;
+      }
+      const { error: stuErr } = await supabase
+        .from('students')
+        .update({ program_id: programId })
+        .eq('user_id', studentId);
+      if (stuErr) throw new Error(stuErr.message);
+    },
+
     updateRegistrationProgram: async (email: string, program: string): Promise<void> => {
       const { error } = await supabase
         .from('registration_applications')
@@ -2390,9 +2511,11 @@ export const api = {
       location: string;
       program: string;
       classId: string;
+      idDocumentUrl?: string;
     }): Promise<void> => {
       if (!enrollData.program) throw new Error('Degree is required.');
       if (!enrollData.classId) throw new Error('Class is required.');
+      enrollData = { ...enrollData, email: enrollData.email.trim().toLowerCase() };
 
       const { data: selectedClass, error: classErr } = await supabase
         .from('classes')
@@ -2436,6 +2559,7 @@ export const api = {
         location:          enrollData.location,
         phone:             enrollData.phone,
         secondary_phone:   enrollData.secondaryPhone || null,
+        id_document_url:   enrollData.idDocumentUrl || null,
         status:            'pending',
       };
 
@@ -2472,8 +2596,12 @@ export const api = {
         application_id: newApp.id,
       });
 
-      if (approveError) throw new Error(approveError.message);
-      if (!result?.success) throw new Error('Approval step failed. The account may not have been created.');
+      if (approveError || !result?.success) {
+        // Don't leave the pending application behind — it would block every retry
+        // with "A registration for this email already exists."
+        await supabase.from('registration_applications').delete().eq('id', newApp.id);
+        throw new Error(approveError?.message || 'Approval step failed. The account may not have been created.');
+      }
 
       const createdUserId = result.user_id as string | undefined;
       if (!createdUserId) throw new Error('Enrollment succeeded, but user ID was not returned.');
@@ -4079,6 +4207,7 @@ export const api = {
         .from('profiles')
         .select('id, first_name, last_name, email')
         .eq('role', 'student')
+        .eq('is_archived', false)
         .order('first_name');
 
       if (enrolledStudentIds.length > 0) {
@@ -4295,7 +4424,9 @@ export const api = {
       });
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error?.message || error.message || 'Failed to create user');
+        const message: string = error.error?.message || error.message || 'Failed to create user';
+        if (message.includes('profiles_email_key')) throw new Error('An account with this email already exists.');
+        throw new Error(message);
       }
       const result = await response.json();
       return result.rows[0];

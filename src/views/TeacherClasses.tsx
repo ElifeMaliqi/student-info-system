@@ -13,7 +13,8 @@ import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import type { GradeTable } from '../types';
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// day_of_week is stored Monday=0 … Sunday=6 (see AdminClasses DAYS).
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 type MyClass = {
   id: string;

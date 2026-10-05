@@ -6,12 +6,13 @@ import { Plus, X, Search, Loader2, CheckCircle, XCircle, ClipboardList, Trash2 }
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { api } from '../services/api';
-import { PROGRAMS } from '../constants/programs';
 import type { GradeTable, GradeTableEntry } from '../types';
 
 export default function TeacherGrading() {
   const { t } = useLanguage();
   const { user } = useUser();
+  const [programNames, setProgramNames] = useState<string[]>([]);
+  useEffect(() => { api.programs.getNames().then(setProgramNames).catch(() => setProgramNames([])); }, []);
 
   const [loading, setLoading] = useState(true);
   const [tables, setTables] = useState<GradeTable[]>([]);
@@ -453,7 +454,7 @@ export default function TeacherGrading() {
                     className="glass-select w-full px-4 py-3 rounded-xl text-sm"
                   >
                     <option value="">-- Select a degree --</option>
-                    {PROGRAMS.map(p => (
+                    {programNames.map(p => (
                       <option key={p} value={p}>{p}</option>
                     ))}
                   </select>

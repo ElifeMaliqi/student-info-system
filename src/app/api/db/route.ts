@@ -56,8 +56,16 @@ export async function POST(req: NextRequest) {
     body.filters[0].column === 'email' &&
     !!body.maybeSingle;
 
+  // Degree names for the public application form's dropdown.
+  const isProgramList = body.action === 'select' && body.table === 'programs';
+
   if (!user) {
-    if (isPublicInsert) {
+    if (isProgramList) {
+      // Names of active degrees only — nothing else about them.
+      body.select = 'name';
+      body.filters = [{ op: 'eq', column: 'is_active', value: true }];
+      body.or = undefined;
+    } else if (isPublicInsert) {
       // Force a safe shape: students only, pending status, no review/identity fields.
       body.body = sanitizePublicRegistration(body.body);
     } else if (isEmailLookup) {

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "node scripts/migrate-rds.mjs",
+    "db:migrate:dev": "node scripts/migrate-rds.mjs --env .env.development.local",
     "db:test": "node scripts/test-db-connection.mjs"
   },
   "dependencies": {

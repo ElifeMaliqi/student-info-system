@@ -39,6 +39,13 @@ const translations = {
     'role.admin': 'System Admin',
     'role.teacher': 'Teacher',
     'role.student': 'Student',
+    'role.superadmin': 'Super Admin',
+    'nav.classes': 'Classes',
+    'teacher.class': 'Class',
+    'teacher.score': 'Score',
+    'settings.reset_link_info': 'A password reset link will be sent to your registered email address. The link expires in 1 hour.',
+    'settings.send_reset_link': 'Send Password Reset Link',
+    'settings.sending': 'Sending…',
     
     // Dashboard
     'dash.overview': 'Overview',
@@ -805,6 +812,13 @@ const translations = {
     'role.admin': 'Administrator',
     'role.teacher': 'Mësues',
     'role.student': 'Student',
+    'role.superadmin': 'Super Administrator',
+    'nav.classes': 'Klasat',
+    'teacher.class': 'Klasa',
+    'teacher.score': 'Pikët',
+    'settings.reset_link_info': 'Një link për rivendosjen e fjalëkalimit do të dërgohet në adresën tuaj të emailit. Linku skadon pas 1 ore.',
+    'settings.send_reset_link': 'Dërgo linkun e rivendosjes',
+    'settings.sending': 'Duke dërguar…',
     
     // Dashboard
     'dash.overview': 'Përmbledhje',

@@ -2,10 +2,20 @@
 -- Finance v2: Auto-generated class-based monthly invoices
 -- ============================================================
 
--- Drop old finance tables
+-- Drop old finance tables. The invoices drop only fires for the v1 table (no
+-- enrollment_id column), so re-running this file can never wipe v2 invoices.
 DROP TABLE IF EXISTS installment_plans CASCADE;
 DROP TABLE IF EXISTS payments CASCADE;
-DROP TABLE IF EXISTS invoices CASCADE;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'invoices')
+     AND NOT EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'invoices' AND column_name = 'enrollment_id'
+     ) THEN
+    DROP TABLE invoices CASCADE;
+  END IF;
+END $$;
 
 -- Invoice settings (singleton row — admin configurable)
 CREATE TABLE IF NOT EXISTS invoice_settings (

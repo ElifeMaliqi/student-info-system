@@ -14,7 +14,6 @@ import { useDebounce } from '../hooks/useDebounce';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
-import { PROGRAMS } from '../constants/programs';
 import { api } from '../services/api';
 import { useModulePermissions, useUser } from '../context/UserContext';
 
@@ -194,12 +193,29 @@ export default function Students() {
   const searchParams = useSearchParams();
 
   useEffect(() => { void loadStudents(); }, []);
+  const [programNames, setProgramNames] = useState<string[]>([]);
+  const [payStatuses, setPayStatuses] = useState<Record<string, 'paid' | 'pending'>>({});
+  useEffect(() => { api.programs.getNames().then(setProgramNames).catch(() => setProgramNames([])); }, []);
 
   async function loadStudents() {
     setLoading(true);
     try { setStudents(await api.teacher.getStudentsWithDetails()); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
+
+    // Current-month payment status per student (same rule as the teacher's list).
+    try {
+      const now = new Date();
+      const monthInvoices = (await api.finance.getInvoices())
+        .filter((i: any) => i.month === now.getMonth() + 1 && i.year === now.getFullYear());
+      const byStudent: Record<string, any[]> = {};
+      monthInvoices.forEach((i: any) => { (byStudent[i.studentId] = byStudent[i.studentId] || []).push(i); });
+      const statusMap: Record<string, 'paid' | 'pending'> = {};
+      Object.entries(byStudent).forEach(([sid, invs]) => {
+        statusMap[sid] = invs.every(i => i.status === 'paid') ? 'paid' : 'pending';
+      });
+      setPayStatuses(statusMap);
+    } catch (e) { console.error(e); }
   }
 
   // Open the enroll form when navigated here with ?enroll=1
@@ -422,6 +438,10 @@ export default function Students() {
       });
     } catch { /* non-critical */ }
 
+    if (row.program?.trim()) {
+      try { await api.registrations.updateStudentProgram(result.id, row.program); } catch { /* non-critical */ }
+    }
+
     const isInactive = /not.?active|inactive|jo.?aktiv/i.test(row.status || '');
     if (isInactive) {
       try { await api.finance.archiveStudent(result.id, false); } catch { /* non-critical */ }
@@ -572,6 +592,7 @@ export default function Students() {
       });
 
       // Degree on the registration record.
+      await api.registrations.updateStudentProgram(editingStudent.id, editProgram);
       try { await api.registrations.updateRegistrationProgram(editingStudent.email, editProgram); } catch { /* non-critical */ }
 
       // Apply class-enrollment changes (diff against the original enrollment).
@@ -713,6 +734,7 @@ export default function Students() {
 
     setEnrolling(true);
     try {
+      const idDocumentUrl = docFile ? await api.auth.uploadIdDocument(docFile) : undefined;
       await api.registrations.adminEnroll({
         email:            form.email.trim().toLowerCase(),
         firstName:        form.firstName.trim(),
@@ -723,11 +745,13 @@ export default function Students() {
         location:         form.location,
         program:          form.program,
         classId:          form.classId,
+        idDocumentUrl,
       });
       setEnrolledName(`${form.firstName.trim()} ${form.lastName.trim()}`);
       setForm(BLANK_FORM);
       setDocFile(null);
       setView('success');
+      void loadStudents();
     } catch (err) {
       setEnrollError(err instanceof Error ? err.message : t('students.enrollment_failed'));
     } finally {
@@ -900,7 +924,7 @@ export default function Students() {
                   className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
                 >
                   <option value="">{t('students.select_degree_ph')}</option>
-                  {PROGRAMS.map(p => (
+                  {programNames.map(p => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
@@ -928,7 +952,7 @@ export default function Students() {
               <input
                 ref={docFileRef}
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                accept=".pdf,.jpg,.jpeg,.png"
                 className="hidden"
                 onChange={e => setDocFile(e.target.files?.[0] ?? null)}
               />
@@ -1186,7 +1210,18 @@ export default function Students() {
                           ) : <span className="text-white/30">–</span>}
                         </td>
                         <td className="py-4 text-white/40 text-xs">{enrollDate}</td>
-                        <td className="py-4 text-white/30 text-sm">–</td>
+                        <td className="py-4">
+                          {!payStatuses[student.id] ? <span className="text-white/30">–</span>
+                            : payStatuses[student.id] === 'paid' ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                                <CheckCircle2 className="w-3 h-3" /> {t('status.paid')}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium">
+                                <Clock className="w-3 h-3" /> {t('status.pending')}
+                              </span>
+                            )}
+                        </td>
                         <td className="py-4">
                           {attRate !== null ? (
                             <button
@@ -1962,7 +1997,7 @@ export default function Students() {
                       className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
                     >
                       <option value="">No degree</option>
-                      {PROGRAMS.map(p => <option key={p} value={p}>{p}</option>)}
+                      {programNames.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                   <div>

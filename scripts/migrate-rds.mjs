@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Apply base schema + supabase/migrations to AWS RDS.
- * Usage: node scripts/migrate-rds.mjs
+ * Apply base schema + supabase/migrations to a Postgres database.
+ * Usage: node scripts/migrate-rds.mjs [--env <file>] [--fresh]
+ *   --env defaults to .env (live RDS). Use --env .env.development.local for the dev database.
  */
 import pg from "pg";
 import { readFileSync, readdirSync, existsSync } from "fs";
@@ -12,7 +13,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 
 function loadEnv() {
-  const path = join(root, ".env");
+  const envArg = process.argv.indexOf("--env");
+  const path = join(root, envArg !== -1 ? process.argv[envArg + 1] : ".env");
+  if (envArg !== -1 && !existsSync(path)) throw new Error(`Env file not found: ${path}`);
   const vars = {};
   if (!existsSync(path)) return vars;
   for (const line of readFileSync(path, "utf8").split("\n")) {
@@ -88,7 +91,7 @@ async function main() {
     ssl: { rejectUnauthorized: false },
   });
 
-  console.log("Connecting to RDS...");
+  console.log(`Connecting to ${new URL(connectionString).hostname}...`);
   await client.connect();
   console.log("Connected.\n");
 

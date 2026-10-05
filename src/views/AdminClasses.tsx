@@ -706,7 +706,7 @@ export const AdminClasses: React.FC = () => {
                       />
                     </div>
                     {availableStudents.length === 0 && !enrollLoading ? (
-                      <p className="text-white/30 text-sm">All students are already enrolled.</p>
+                      <p className="text-white/30 text-sm">{enrollments.length === 0 ? 'No active students found.' : 'All students are already enrolled.'}</p>
                     ) : filteredAvailable.length === 0 ? (
                       <p className="text-white/30 text-sm">No students match your search.</p>
                     ) : (

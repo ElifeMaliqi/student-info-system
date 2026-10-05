@@ -38,6 +38,7 @@ export default function TeacherStudents() {
   const [notes,    setNotes   ] = useState<Record<string, string>>({});
   const [attStats, setAttStats] = useState<Record<string, { total: number; present: number; late: number; absent: number }>>({});
   const [payStatuses, setPayStatuses] = useState<Record<string, 'paid' | 'pending'>>({});
+  const [avgGrades, setAvgGrades] = useState<Record<string, number>>({});
   const [loading,  setLoading ] = useState(true);
   const [search,   setSearch  ] = useState('');
   const [filterClass, setFilterClass] = useState('');
@@ -87,6 +88,7 @@ export default function TeacherStudents() {
         }
       }));
       setPayStatuses(statusMap);
+      try { setAvgGrades(await api.teacher.getAverageGrades(uniqueIds)); } catch { setAvgGrades({}); }
     } catch (e) {
       console.error(e);
     } finally {
@@ -335,7 +337,11 @@ export default function TeacherStudents() {
                       </td>
 
                       {/* Avg. Grade */}
-                      <td className="py-4 text-white/25 font-medium text-base">–</td>
+                      {avgGrades[student.studentId] != null ? (
+                        <td className="py-4 font-semibold text-sm text-white/90">{Math.round(avgGrades[student.studentId] * 10) / 10} pts</td>
+                      ) : (
+                        <td className="py-4 text-white/25 font-medium text-base">–</td>
+                      )}
 
                       {/* Notes */}
                       <td className="py-4">

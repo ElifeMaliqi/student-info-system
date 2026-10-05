@@ -41,7 +41,7 @@ BEGIN
   SELECT * INTO app FROM registration_applications WHERE id = application_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Application not found'; END IF;
   IF app.status != 'pending' THEN RAISE EXCEPTION 'Application is already %', app.status; END IF;
-  IF EXISTS (SELECT 1 FROM profiles WHERE email = app.email) THEN
+  IF EXISTS (SELECT 1 FROM profiles WHERE lower(email) = lower(app.email)) THEN
     RAISE EXCEPTION 'A user with this email already exists';
   END IF;
 
@@ -53,8 +53,11 @@ BEGIN
     emergency_contact_name, emergency_contact_phone, specialization, qualifications,
     experience_years, parent_first_name, id_document_url, program
   ) VALUES (
-    new_user_id, app.email, app.first_name, app.last_name, app.role,
-    (app.password_hash = 'FMA#2026'),
+    new_user_id, lower(app.email), app.first_name, app.last_name, app.role,
+    -- password_hash is bcrypt-hashed by a trigger, so compare against the hash
+    CASE WHEN app.password_hash ~ '^\$2[aby]\$'
+      THEN app.password_hash = crypt('FMA#2026', app.password_hash)
+      ELSE app.password_hash = 'FMA#2026' END,
     app.location, app.phone, app.secondary_phone, app.date_of_birth, app.address,
     app.city, app.country, app.emergency_contact_name, app.emergency_contact_phone,
     app.specialization, app.qualifications, app.experience_years,
@@ -62,7 +65,7 @@ BEGIN
   );
 
   INSERT INTO auth_users (id, email, encrypted_password)
-  VALUES (new_user_id, app.email, crypt(app.password_hash, gen_salt('bf')));
+  VALUES (new_user_id, lower(app.email), crypt(app.password_hash, gen_salt('bf')));
 
   -- app.program holds a program id when the application came from the admin's New
   -- Enrollment form, and a program name when it came from public registration.

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, Upload, CheckCircle, XCircle, Loader2, ArrowLeft, ChevronDown } from 'lucide-react';
 import { api } from '../services/api';
@@ -44,16 +44,10 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
   const [error, setError] = useState('');
   const [status, setStatus] = useState<'idle' | 'success' | 'pending' | 'rejected' | 'already_approved'>('idle');
 
-  const programs = [
-    'Web Development',
-    'Digital Marketing with AI',
-    'UI/UX Creative Designer',
-    'Internet of Things (UAV/IoT)',
-    'UAV Engineering Degree',
-    'Cybersecurity',
-    '3D Creative Artist',
-    'Entrepreneurship'
-  ];
+  const [programs, setPrograms] = useState<string[]>([]);
+  useEffect(() => {
+    api.programs.getNames().then(setPrograms).catch(() => setPrograms([]));
+  }, []);
 
   const locations = [
     'FMA Kids (Dardani)',
@@ -138,6 +132,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     setIsSubmitting(true);
 
     try {
+      const idDocumentUrl = idDocument ? await api.auth.uploadIdDocument(idDocument) : undefined;
       await api.auth.register({
         email: formData.email,
         firstName: formData.firstName,
@@ -149,6 +144,7 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
         location: formData.location,
         phone: formData.phone,
         secondaryPhone: formData.secondaryPhone || undefined,
+        idDocumentUrl,
       });
 
       setStatus('success');
