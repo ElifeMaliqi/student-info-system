@@ -32,6 +32,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const [notifications, setNotifications] = useState<Announcement[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSeen, setNotifSeen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const { language, setLanguage, t } = useLanguage();
@@ -119,7 +120,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'students', label: t('nav.students'), icon: Users },
     { id: 'teachers', label: t('nav.teachers'), icon: Presentation },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
-    { id: 'classes', label: 'Classes', icon: GraduationCap },
+    { id: 'classes', label: t('nav.classes'), icon: GraduationCap },
     { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
     { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
@@ -149,7 +150,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   // Module → nav item (used to add extra nav items granted by system role)
   const MODULE_NAV: Record<string, { id: string; label: string; icon: any }> = {
     programs:      { id: 'programs',      label: t('nav.programs'),      icon: BookOpen },
-    classes:       { id: 'classes',       label: 'Classes',              icon: BookOpen },
+    classes:       { id: 'classes',       label: t('nav.classes'),       icon: BookOpen },
     announcements: { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
     grades:        { id: 'grades',        label: t('nav.grades'),        icon: ClipboardList },
     finance:       { id: 'finance',       label: t('nav.finance'),       icon: CreditCard },
@@ -414,7 +415,10 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
               <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme === 'dark' ? 'text-white/30' : 'text-gray-400'} group-focus-within:text-[#fc0ce4] transition-colors`} />
               <input 
                 type="text" 
-                placeholder={`${t('header.search')} (Press Cmd+K)`} 
+                placeholder={`${t('header.search')} (Press Cmd+K)`}
+                readOnly
+                onClick={() => setIsSearchOpen(true)}
+                onFocus={(e) => { e.currentTarget.blur(); setIsSearchOpen(true); }}
                 className={`w-full ${theme === 'dark' ? 'bg-white/5 border-white/5 text-white placeholder:text-white/30' : 'bg-gray-100 border-gray-200 text-gray-900 placeholder:text-gray-400'} border rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all`}
               />
             </div>
@@ -551,7 +555,18 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
         </div>
       </main>
 
-      <CommandPalette role={role} />
+      <CommandPalette
+        role={role}
+        userId={user?.id}
+        isOpen={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
+        pages={[
+          ...navItems.map(item => ({ id: item.id, label: item.label, icon: item.icon, path: `/${item.id}` })),
+          ...((role === 'admin' || role === 'superadmin')
+            ? (role === 'superadmin' ? superadminSystemItems : adminSystemItems.filter(item => isNavAllowed(item.id)))
+            : [{ id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' }]),
+        ]}
+      />
 
       <SlideOver isOpen={isFaqOpen} onClose={() => setIsFaqOpen(false)} title={t('layout.help_faq')}>
         <div className="space-y-6">
