@@ -370,6 +370,9 @@ export const api = {
         discountPercent: parseFloat(data.discount_percent),
         dueDay: data.due_day,
         agePrices: parseAgePrices(data.age_prices),
+        enrollmentCutoffDay: data.enrollment_cutoff_day ?? 3,
+        issueStartDay: data.issue_start_day ?? 1,
+        issueEndDay: data.issue_end_day ?? 7,
       };
     },
 
@@ -380,6 +383,9 @@ export const api = {
       if (updates.discountPercent != null) payload.discount_percent = updates.discountPercent;
       if (updates.dueDay != null) payload.due_day = updates.dueDay;
       if (updates.agePrices != null) payload.age_prices = JSON.stringify(updates.agePrices);
+      if (updates.enrollmentCutoffDay != null) payload.enrollment_cutoff_day = updates.enrollmentCutoffDay;
+      if (updates.issueStartDay != null) payload.issue_start_day = updates.issueStartDay;
+      if (updates.issueEndDay != null) payload.issue_end_day = updates.issueEndDay;
       payload.updated_at = new Date().toISOString();
       const { error } = await supabase.from('invoice_settings').update(payload).not('id', 'is', null);
       if (error) throw new Error(error.message);
@@ -695,10 +701,14 @@ export const api = {
       const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
       const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
 
-      // 5. Compute missing invoices
+      // 5. Compute missing invoices — only the current month is issued. A month is
+      //    issued between issue_start_day and issue_end_day; the joining month is
+      //    issued only when the student joined on or before enrollment_cutoff_day.
       const now = new Date();
       const curMonth = now.getMonth() + 1;
       const curYear = now.getFullYear();
+      const cutoffDay = s.enrollment_cutoff_day ?? 3;
+      const inIssueWindow = now.getDate() >= (s.issue_start_day ?? 1) && now.getDate() <= (s.issue_end_day ?? 7);
 
       const toInsert: any[] = [];
       const pendingInvoiceEmails: Array<{
@@ -725,8 +735,13 @@ export const api = {
       for (const enr of enrollments) {
         if (!enr.enrolled_at) continue;
         const enrolled = new Date(enr.enrolled_at);
-        let y = enrolled.getFullYear();
-        let m = enrolled.getMonth() + 1;
+        const enrolledIdx = enrolled.getFullYear() * 12 + enrolled.getMonth();
+        const curIdx = curYear * 12 + curMonth - 1;
+        if (enrolledIdx > curIdx) continue;
+        if (enrolledIdx === curIdx ? enrolled.getDate() > cutoffDay : !inIssueWindow) continue;
+        const y = curYear;
+        const m = curMonth;
+        if (existingKeys.has(`${enr.id}-${m}-${y}`)) continue;
         const className = (enr.class as any)?.title || 'Class';
         const student = enr.student as any;
         const studentName = student ? `${student.first_name || ''} ${student.last_name || ''}`.trim() : 'Student';
@@ -743,58 +758,52 @@ export const api = {
         const titleTpl = ovr?.custom_title_template || (s.title_template as string);
         const amount = baseAmount * (1 - disc / 100);
 
-        while (y < curYear || (y === curYear && m <= curMonth)) {
-          if (!existingKeys.has(`${enr.id}-${m}-${y}`)) {
-            const title = titleTpl
-              .replace('{class}', className)
-              .replace('{month}', `${MONTHS[m - 1]} ${y}`);
-            const dueM = m === 12 ? 1 : m + 1;
-            const dueY = m === 12 ? y + 1 : y;
-            const dueDate = `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
-            const roundedAmount = Math.round(amount * 100) / 100;
-            const invoiceId = api.finance._generateInvoiceId(y, m);
-            toInsert.push({
-              enrollment_id: enr.id,
-              student_id: enr.student_id,
-              class_id: enr.class_id,
-              invoice_id: invoiceId,
-              title,
-              month: m,
-              year: y,
-              due_date: dueDate,
-              amount: roundedAmount,
-              discount_percent: disc,
-              status: 'not_paid',
-              is_manual: false,
-            });
+        const title = titleTpl
+          .replace('{class}', className)
+          .replace('{month}', `${MONTHS[m - 1]} ${y}`);
+        const dueM = m === 12 ? 1 : m + 1;
+        const dueY = m === 12 ? y + 1 : y;
+        const dueDate = `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
+        const roundedAmount = Math.round(amount * 100) / 100;
+        const invoiceId = api.finance._generateInvoiceId(y, m);
+        toInsert.push({
+          enrollment_id: enr.id,
+          student_id: enr.student_id,
+          class_id: enr.class_id,
+          invoice_id: invoiceId,
+          title,
+          month: m,
+          year: y,
+          due_date: dueDate,
+          amount: roundedAmount,
+          discount_percent: disc,
+          status: 'not_paid',
+          is_manual: false,
+        });
 
-            if (studentEmail) {
-              pendingInvoiceEmails.push({
-                studentEmail,
-                studentName,
-                className,
-                invoiceTitle: title,
-                invoiceId,
-                amount: roundedAmount,
-                dueDate,
-                status: 'not_paid',
-                mode: 'created',
-              });
-            }
-            if (studentPhone) {
-              pendingInvoiceSms.push({
-                studentPhone,
-                studentName,
-                className,
-                amount: roundedAmount,
-                dueDate,
-                status: 'not_paid',
-                mode: 'created',
-              });
-            }
-          }
-          m++;
-          if (m > 12) { m = 1; y++; }
+        if (studentEmail) {
+          pendingInvoiceEmails.push({
+            studentEmail,
+            studentName,
+            className,
+            invoiceTitle: title,
+            invoiceId,
+            amount: roundedAmount,
+            dueDate,
+            status: 'not_paid',
+            mode: 'created',
+          });
+        }
+        if (studentPhone) {
+          pendingInvoiceSms.push({
+            studentPhone,
+            studentName,
+            className,
+            amount: roundedAmount,
+            dueDate,
+            status: 'not_paid',
+            mode: 'created',
+          });
         }
       }
 
@@ -4200,6 +4209,18 @@ export const api = {
         .eq('id', enrollmentId);
 
       if (error) throw new Error(error.message);
+    },
+
+    /** Move a student and their attendance + unpaid invoices to another class. No invoice or notification is sent. */
+    transferStudent: async (studentId: string, fromClassId: string, toClassId: string): Promise<{ attendanceMoved: number; attendanceKept: number; invoicesMoved: number }> => {
+      const res = await fetch('/api/students/transfer', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ studentId, fromClassId, toClassId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Transfer failed');
+      return json;
     },
 
     getAvailableTeachers: async (): Promise<{ id: string; firstName: string; lastName: string; email: string }[]> => {

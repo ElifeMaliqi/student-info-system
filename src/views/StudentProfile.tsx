@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -63,6 +63,12 @@ export default function StudentProfile() {
   const [gradeModal, setGradeModal] = useState<ProjectGrade | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferClasses, setTransferClasses] = useState<{ id: string; title: string; programName: string }[]>([]);
+  const [transferFrom, setTransferFrom] = useState('');
+  const [transferTo, setTransferTo] = useState('');
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -141,6 +147,36 @@ export default function StudentProfile() {
     }
   }
 
+  function openTransfer() {
+    setTransferFrom(classEnrollments[0]?.classId || '');
+    setTransferTo('');
+    setTransferError('');
+    setTransferOpen(true);
+    api.classes.getAll()
+      .then(cls => setTransferClasses(cls.map(c => ({ id: c.id, title: c.title, programName: c.programName }))))
+      .catch(err => setTransferError(err.message || 'Failed to load classes'));
+  }
+
+  async function handleTransfer() {
+    if (!student || !transferFrom || !transferTo) return;
+    setTransferring(true);
+    setTransferError('');
+    try {
+      await api.classes.transferStudent(student.id, transferFrom, transferTo);
+      const [attRecords, enrollments] = await Promise.all([
+        api.classAttendance.getForStudent(student.id),
+        loadClassEnrollments(student.id),
+      ]);
+      setAttendanceRecords(attRecords);
+      setClassEnrollments(enrollments);
+      setTransferOpen(false);
+    } catch (err: any) {
+      setTransferError(err.message || 'Transfer failed');
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   const attPresent = attendanceRecords.filter(r => r.status === 'present').length;
   const attLate = attendanceRecords.filter(r => r.status === 'late').length;
   const attAbsent = attendanceRecords.filter(r => r.status === 'absent').length;
@@ -168,6 +204,15 @@ export default function StudentProfile() {
               <Edit2 className="w-4 h-4" />
               {t('profile.edit')}
             </button>
+            {classEnrollments.length > 0 && (
+              <button
+                onClick={openTransfer}
+                className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                Transfer Student
+              </button>
+            )}
             <button
               onClick={() => setArchiveConfirm(true)}
               className="px-4 py-2 rounded-xl border border-red-500/30 text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
@@ -625,6 +670,94 @@ export default function StudentProfile() {
                   >
                     {archiving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Archive className="w-4 h-4" />}
                     {archiving ? 'Archiving…' : 'Archive'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Transfer Student Modal */}
+      <AnimatePresence>
+        {transferOpen && (
+          <>
+            <motion.div
+              key="transfer-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !transferring && setTransferOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              key="transfer-modal"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 340 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
+            >
+              <div
+                className="w-full max-w-sm bg-[#0f0f0f] border border-white/10 rounded-2xl shadow-2xl pointer-events-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="px-6 py-5 space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-[#fc0ce4]/10 border border-[#fc0ce4]/20">
+                      <ArrowRightLeft className="w-5 h-5 text-[#fc0ce4]" />
+                    </div>
+                    <h2 className="text-base font-semibold text-white">Transfer Student</h2>
+                  </div>
+                  <p className="text-sm text-white/60 leading-relaxed">
+                    <span className="text-white font-medium">{student?.name}</span> leaves the current class and joins the new one. Attendance moves to the new class days and unpaid invoices get the new class name. Test results stay with the old class. No new invoice and no email is sent.
+                  </p>
+                  {classEnrollments.length > 1 && (
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">From class</label>
+                      <select
+                        value={transferFrom}
+                        onChange={e => setTransferFrom(e.target.value)}
+                        className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
+                      >
+                        {classEnrollments.map(c => (
+                          <option key={c.classId} value={c.classId}>{c.className}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">To class</label>
+                    <select
+                      value={transferTo}
+                      onChange={e => setTransferTo(e.target.value)}
+                      className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
+                    >
+                      <option value="">Select a class</option>
+                      {transferClasses
+                        .filter(c => !classEnrollments.some(e => e.classId === c.id))
+                        .map(c => (
+                          <option key={c.id} value={c.id}>{c.title}{c.programName ? ` — ${c.programName}` : ''}</option>
+                        ))}
+                    </select>
+                  </div>
+                  {transferError && <p className="text-xs text-red-400">{transferError}</p>}
+                </div>
+                <div className="flex items-center gap-2 px-6 pb-5">
+                  <button
+                    onClick={() => setTransferOpen(false)}
+                    disabled={transferring}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-white/70 hover:bg-white/5 transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleTransfer}
+                    disabled={transferring || !transferFrom || !transferTo}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-sm font-medium text-[#fc0ce4] hover:opacity-80 transition-all disabled:opacity-30 flex items-center justify-center gap-2"
+                  >
+                    {transferring ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+                    {transferring ? 'Transferring…' : 'Transfer'}
                   </button>
                 </div>
               </div>

@@ -64,6 +64,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   type AgePriceRow = { minAge: string; maxAge: string; amount: string };
   const [invoiceDefault, setInvoiceDefault] = useState('');
   const [agePriceRows, setAgePriceRows] = useState<AgePriceRow[]>([]);
+  const [issueRules, setIssueRules] = useState({ enrollmentCutoffDay: '3', issueStartDay: '1', issueEndDay: '7' });
   const [invoiceLoaded, setInvoiceLoaded] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
 
@@ -109,6 +110,11 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
             maxAge: r.maxAge != null ? String(r.maxAge) : '',
             amount: String(r.amount),
           })));
+          setIssueRules({
+            enrollmentCutoffDay: String(sett.enrollmentCutoffDay),
+            issueStartDay: String(sett.issueStartDay),
+            issueEndDay: String(sett.issueEndDay),
+          });
         }
         setInvoiceLoaded(true);
       });
@@ -306,6 +312,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       showToast('error', t('settings.invalid_price'));
       return;
     }
+    const isDay = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 28;
+    if (!isDay(issueRules.enrollmentCutoffDay) || !isDay(issueRules.issueStartDay) || !isDay(issueRules.issueEndDay) ||
+      Number(issueRules.issueStartDay) > Number(issueRules.issueEndDay)) {
+      showToast('error', t('settings.invalid_issue_days'));
+      return;
+    }
     setSavingInvoice(true);
     try {
       await api.finance.updateSettings({
@@ -315,6 +327,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           maxAge: r.maxAge === '' ? null : Number(r.maxAge),
           amount: Number(r.amount),
         })),
+        enrollmentCutoffDay: Number(issueRules.enrollmentCutoffDay),
+        issueStartDay: Number(issueRules.issueStartDay),
+        issueEndDay: Number(issueRules.issueEndDay),
       });
       showToast('success', t('settings.invoice_settings_saved'));
     } catch (err: any) {
@@ -800,6 +815,28 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                         <Plus className="w-3.5 h-3.5" />
                         {t('settings.add_age_range')}
                       </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">
+                        {t('settings.issue_rules')}
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 items-end">
+                        {(['enrollmentCutoffDay', 'issueStartDay', 'issueEndDay'] as const).map(field => (
+                          <div key={field} className="space-y-1.5">
+                            <label className="text-[10px] font-semibold text-white/40 uppercase tracking-widest ml-1">
+                              {field === 'enrollmentCutoffDay' ? t('settings.enrollment_cutoff_day') : field === 'issueStartDay' ? t('settings.issue_start_day') : t('settings.issue_end_day')}
+                            </label>
+                            <input
+                              type="number" min="1" max="28" step="1"
+                              className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20"
+                              value={issueRules[field]}
+                              onChange={e => setIssueRules(r => ({ ...r, [field]: e.target.value }))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-white/35 ml-1">{t('settings.issue_rules_hint')}</p>
                     </div>
                   </div>
                 )}

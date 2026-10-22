@@ -87,6 +87,11 @@ export interface InvoiceSettings {
   dueDay: number;
   /** Monthly price per age range; students without an age use defaultAmount. */
   agePrices: { minAge: number | null; maxAge: number | null; amount: number }[];
+  /** Joining on or before this day of the month gets that month invoiced; later joins start next month. */
+  enrollmentCutoffDay: number;
+  /** Auto-generated invoices for a month are only issued between these days of that month. */
+  issueStartDay: number;
+  issueEndDay: number;
 }
 
 export interface StudentInvoiceOverride {

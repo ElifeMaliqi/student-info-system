@@ -805,6 +805,12 @@ const translations = {
     'settings.add_age_range': 'Add age range',
     'settings.invoice_settings_saved': 'Invoice settings saved!',
     'settings.invalid_price': 'Prices must be 0 or more, and each range needs a valid from/to age.',
+    'settings.issue_rules': 'Invoice Issuing',
+    'settings.enrollment_cutoff_day': 'First-month cut-off day',
+    'settings.issue_start_day': 'Issue from day',
+    'settings.issue_end_day': 'Issue to day',
+    'settings.issue_rules_hint': 'Students who join a class on or before the cut-off day are invoiced for that month. Students who join after it get no invoice that month; their first invoice is issued next month. Monthly invoices are only issued between the issue days of each month.',
+    'settings.invalid_issue_days': 'Days must be whole numbers from 1 to 28, and the issue start day can’t be after the end day.',
   },
   AL: {
     // Navigation
@@ -1600,6 +1606,12 @@ const translations = {
     'settings.add_age_range': 'Shto grupmoshë',
     'settings.invoice_settings_saved': 'Cilësimet e faturave u ruajtën!',
     'settings.invalid_price': 'Çmimet duhet të jenë 0 ose më shumë, dhe çdo grupmoshë duhet të ketë mosha të vlefshme.',
+    'settings.issue_rules': 'Lëshimi i Faturave',
+    'settings.enrollment_cutoff_day': 'Dita e fundit për muajin e parë',
+    'settings.issue_start_day': 'Lësho nga dita',
+    'settings.issue_end_day': 'Lësho deri në ditën',
+    'settings.issue_rules_hint': 'Studentët që regjistrohen në një klasë deri në ditën e fundit faturohen për atë muaj. Studentët që regjistrohen pas saj nuk marrin faturë atë muaj; fatura e parë lëshohet muajin e ardhshëm. Faturat mujore lëshohen vetëm mes ditëve të lëshimit të çdo muaji.',
+    'settings.invalid_issue_days': 'Ditët duhet të jenë numra të plotë nga 1 deri në 28, dhe dita e fillimit nuk mund të jetë pas ditës së fundit.',
   }
 };
 
