@@ -20,6 +20,17 @@ export function effectiveAge(age?: number | string | null, dob?: string | null):
 
 export type AgePrice = { minAge: number | null; maxAge: number | null; amount: number };
 
+/** age_prices column (JSON array or string) as typed rows. */
+export function parseAgePrices(raw: unknown): AgePrice[] {
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    try { list = JSON.parse(raw); } catch { list = []; }
+  }
+  if (!Array.isArray(list)) return [];
+  const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
+  return list.map((r: any) => ({ minAge: num(r?.minAge), maxAge: num(r?.maxAge), amount: Number(r?.amount ?? 0) }));
+}
+
 /** Monthly price for an age: first matching range, else the default. */
 export function priceForAge(age: number | null, agePrices: AgePrice[], defaultAmount: number): number {
   if (age == null) return defaultAmount;
