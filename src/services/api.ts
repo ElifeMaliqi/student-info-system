@@ -1,6 +1,6 @@
 import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance } from '../types';
 import { supabase } from '../lib/supabase';
-import { effectiveAge, priceForAge } from '../utils/age';
+import { effectiveAge, priceForAge, parseAgePrices } from '../utils/age';
 
 const formatDate = (date: string) => {
   return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -32,16 +32,6 @@ const parseRoleActions = (actions: unknown): string[] => {
     }
   }
   return [];
-};
-
-const parseAgePrices = (raw: unknown): InvoiceSettings['agePrices'] => {
-  let list: unknown = raw;
-  if (typeof raw === 'string') {
-    try { list = JSON.parse(raw); } catch { list = []; }
-  }
-  if (!Array.isArray(list)) return [];
-  const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
-  return list.map((r: any) => ({ minAge: num(r?.minAge), maxAge: num(r?.maxAge), amount: Number(r?.amount ?? 0) }));
 };
 
 const mapSystemRole = (row: any) => ({
@@ -676,177 +666,14 @@ export const api = {
     },
 
     /* ─── Auto-generate missing invoices ─── */
+    // Runs on the server (src/server/invoice-sync.ts), which also runs it every hour
+    // so invoices are issued even when nobody opens the Finance page.
     syncInvoices: async (): Promise<void> => {
-      const MONTHS = api.finance._MONTHS;
-
-      // 1. Settings (global defaults)
-      const { data: settingsRow } = await supabase.from('invoice_settings').select('*').limit(1).single();
-      const s = settingsRow || { default_amount: 60, title_template: '{class} - {month}', discount_percent: 0, due_day: 1, age_prices: [] };
-      const agePrices = parseAgePrices(s.age_prices);
-
-      // 2. Per-student overrides
-      const { data: overrides } = await supabase.from('student_invoice_overrides').select('*');
-      const ovrMap = new Map<string, any>();
-      for (const o of (overrides || [])) ovrMap.set(o.student_id, o);
-
-      // 3. All enrollments with class info (no status filter — same approach as SMS dedup fix)
-      const { data: enrollments, error: eErr } = await supabase
-        .from('class_enrollments')
-        .select('id, student_id, class_id, enrolled_at, class:classes(title), student:profiles!class_enrollments_student_id_fkey(first_name, last_name, email, phone, age, date_of_birth)');
-      if (eErr || !enrollments || enrollments.length === 0) return;
-
-      // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one.
-      //    Soft-deleted rows are included on purpose: their key must keep this slot
-      //    occupied, otherwise sync would resurrect every invoice an admin removes.
-      const { data: existing } = await supabase.from('invoices').select('enrollment_id, month, year');
-      const existingKeys = new Set((existing || []).map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
-
-      // 5. Compute missing invoices — only the current month is issued. A month is
-      //    issued between issue_start_day and issue_end_day; the joining month is
-      //    issued only when the student joined on or before enrollment_cutoff_day.
-      const now = new Date();
-      const curMonth = now.getMonth() + 1;
-      const curYear = now.getFullYear();
-      const cutoffDay = s.enrollment_cutoff_day ?? 3;
-      const inIssueWindow = now.getDate() >= (s.issue_start_day ?? 1) && now.getDate() <= (s.issue_end_day ?? 7);
-
-      const toInsert: any[] = [];
-      const pendingInvoiceEmails: Array<{
-        studentEmail: string;
-        studentName: string;
-        className: string;
-        invoiceTitle: string;
-        invoiceId: string;
-        amount: number;
-        dueDate: string;
-        status?: string;
-        mode?: 'created' | 'updated';
-        changeSummary?: string;
-      }> = [];
-      const pendingInvoiceSms: Array<{
-        studentPhone: string;
-        studentName: string;
-        className: string;
-        amount: number;
-        dueDate: string;
-        status: string;
-        mode: 'created' | 'updated';
-      }> = [];
-      for (const enr of enrollments) {
-        if (!enr.enrolled_at) continue;
-        const enrolled = new Date(enr.enrolled_at);
-        const enrolledIdx = enrolled.getFullYear() * 12 + enrolled.getMonth();
-        const curIdx = curYear * 12 + curMonth - 1;
-        if (enrolledIdx > curIdx) continue;
-        if (enrolledIdx === curIdx ? enrolled.getDate() > cutoffDay : !inIssueWindow) continue;
-        const y = curYear;
-        const m = curMonth;
-        if (existingKeys.has(`${enr.id}-${m}-${y}`)) continue;
-        const className = (enr.class as any)?.title || 'Class';
-        const student = enr.student as any;
-        const studentName = student ? `${student.first_name || ''} ${student.last_name || ''}`.trim() : 'Student';
-        const studentEmail = student?.email || '';
-        const studentPhone = student?.phone || '';
-
-        // Resolve per-student override, else the price for the student's age, else the default
-        const ovr = ovrMap.get(enr.student_id);
-        const baseAmount = ovr?.custom_amount != null
-          ? parseFloat(ovr.custom_amount)
-          : priceForAge(effectiveAge(student?.age, student?.date_of_birth), agePrices, parseFloat(s.default_amount));
-        const disc = ovr?.custom_discount_percent != null ? parseFloat(ovr.custom_discount_percent) : parseFloat(s.discount_percent);
-        const dueDay = Math.min(ovr?.custom_due_day != null ? parseInt(ovr.custom_due_day) : parseInt(s.due_day), 28);
-        const titleTpl = ovr?.custom_title_template || (s.title_template as string);
-        const amount = baseAmount * (1 - disc / 100);
-
-        const title = titleTpl
-          .replace('{class}', className)
-          .replace('{month}', `${MONTHS[m - 1]} ${y}`);
-        const dueM = m === 12 ? 1 : m + 1;
-        const dueY = m === 12 ? y + 1 : y;
-        const dueDate = `${dueY}-${String(dueM).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`;
-        const roundedAmount = Math.round(amount * 100) / 100;
-        const invoiceId = api.finance._generateInvoiceId(y, m);
-        toInsert.push({
-          enrollment_id: enr.id,
-          student_id: enr.student_id,
-          class_id: enr.class_id,
-          invoice_id: invoiceId,
-          title,
-          month: m,
-          year: y,
-          due_date: dueDate,
-          amount: roundedAmount,
-          discount_percent: disc,
-          status: 'not_paid',
-          is_manual: false,
-        });
-
-        if (studentEmail) {
-          pendingInvoiceEmails.push({
-            studentEmail,
-            studentName,
-            className,
-            invoiceTitle: title,
-            invoiceId,
-            amount: roundedAmount,
-            dueDate,
-            status: 'not_paid',
-            mode: 'created',
-          });
-        }
-        if (studentPhone) {
-          pendingInvoiceSms.push({
-            studentPhone,
-            studentName,
-            className,
-            amount: roundedAmount,
-            dueDate,
-            status: 'not_paid',
-            mode: 'created',
-          });
-        }
+      const res = await fetch('/api/invoices/sync', { method: 'POST', headers: getAuthHeaders() });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Invoice sync failed');
       }
-
-      if (toInsert.length > 0) {
-        const { error } = await supabase.from('invoices').insert(toInsert);
-        if (error) throw new Error(error.message);
-
-        // Send one email per newly generated invoice without blocking invoice creation.
-        if (pendingInvoiceEmails.length > 0) {
-          const emailResults = await Promise.allSettled(
-            pendingInvoiceEmails.map((payload) => api.finance._sendInvoiceEmail(payload))
-          );
-          const failed = emailResults.filter((r) => r.status === 'rejected').length;
-          if (failed > 0) {
-            console.warn(`Failed to send ${failed} invoice email(s) out of ${pendingInvoiceEmails.length}.`);
-          }
-        }
-        if (pendingInvoiceSms.length > 0) {
-          Promise.allSettled(
-            pendingInvoiceSms.map((payload) => api.finance._sendInvoiceSms(payload))
-          ).then((results) => {
-            const failed = results.filter((r) => r.status === 'rejected').length;
-            if (failed > 0) console.warn(`Failed to send ${failed} invoice SMS(s) out of ${pendingInvoiceSms.length}.`);
-          });
-        }
-      }
-
-      // 5. Mark overdue: not_paid invoices whose due_date is in the past
-      const todayStr = `${curYear}-${String(curMonth).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      await supabase
-        .from('invoices')
-        .update({ status: 'overdue' })
-        .eq('status', 'not_paid')
-        .is('deleted_at', null)
-        .lt('due_date', todayStr);
-
-      // 5b. Un-mark overdue: if due_date was moved to the future (e.g. via edit)
-      await supabase
-        .from('invoices')
-        .update({ status: 'not_paid' })
-        .eq('status', 'overdue')
-        .is('deleted_at', null)
-        .gte('due_date', todayStr);
     },
 
     /* ─── Invoices CRUD ─── */
