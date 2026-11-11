@@ -5,12 +5,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Megaphone, Plus, Calendar, Globe, GraduationCap, BookOpen,
   Users, Shield, Layers, Loader2, AlertCircle, X, Mail, MessageSquare,
+  StickyNote, Lock, Edit2, Trash2,
 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { SlideOver } from '../components/SlideOver';
-import type { Announcement, Role } from '../types';
+import { useConfirm } from '../components/NoteField';
+import type { Announcement, AdminNote, Role } from '../types';
 
 type Priority = 'low' | 'medium' | 'high' | 'urgent';
 type AudienceType = 'all' | 'students' | 'teachers' | 'admins' | 'program_specific' | 'class_specific';
@@ -59,7 +62,67 @@ export default function Announcements({ role }: { role: Role }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
+  // Admin notes tab (admins/superadmins only)
+  const isAdminRole = role === 'admin' || role === 'superadmin';
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<'announcements' | 'notes'>('announcements');
+  const [notes, setNotes] = useState<AdminNote[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [editNotePrivate, setEditNotePrivate] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState('');
+  const [confirmEl, ask] = useConfirm();
+
   useEffect(() => { if (user) void loadAnnouncements(); }, [user]);
+
+  useEffect(() => {
+    if (isAdminRole && searchParams?.get('tab') === 'notes') setTab('notes');
+  }, [searchParams, isAdminRole]);
+
+  useEffect(() => { if (user && isAdminRole && tab === 'notes') void loadNotes(); }, [user, tab]);
+
+  async function loadNotes() {
+    setNotesLoading(true);
+    try {
+      setNotes(await api.notes.getAll());
+    } catch (e) { console.error(e); }
+    finally { setNotesLoading(false); }
+  }
+
+  function startEditNote(n: AdminNote) {
+    setEditingNoteId(n.id);
+    setEditNoteText(n.note);
+    setEditNotePrivate(n.isPrivate);
+    setNoteError('');
+  }
+
+  async function saveEditNote() {
+    if (!editingNoteId || !editNoteText.trim()) return;
+    setSavingNote(true);
+    setNoteError('');
+    try {
+      await api.notes.update(editingNoteId, editNoteText.trim(), editNotePrivate);
+      setEditingNoteId(null);
+      await loadNotes();
+    } catch (e) {
+      setNoteError(e instanceof Error ? e.message : 'Failed to update note');
+    } finally {
+      setSavingNote(false);
+    }
+  }
+
+  async function deleteNote(n: AdminNote) {
+    const ok = await ask({ title: t('notes.delete_title'), message: t('notes.delete_msg'), confirmLabel: t('notes.delete'), withNote: false });
+    if (!ok) return;
+    try {
+      await api.notes.delete(n.id);
+      await loadNotes();
+    } catch (e) {
+      setNoteError(e instanceof Error ? e.message : 'Failed to delete note');
+    }
+  }
 
   useEffect(() => {
     if (!showCreate || !user || role === 'student') return;
@@ -148,7 +211,7 @@ export default function Announcements({ role }: { role: Role }) {
             <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{t('announcements.title')}</h1>
             <p className="text-white/50 text-sm">{t('announcements.desc')}</p>
           </div>
-          {role !== 'student' && (!permOverridden || canCreate) && (
+          {role !== 'student' && tab === 'announcements' && (!permOverridden || canCreate) && (
             <button
               onClick={() => setShowCreate(true)}
               className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] self-start sm:self-auto"
@@ -159,8 +222,138 @@ export default function Announcements({ role }: { role: Role }) {
           )}
         </div>
 
-        {/* List */}
-        {loading ? (
+        {isAdminRole && (
+          <div className="flex flex-wrap gap-2">
+            {(['announcements', 'notes'] as const).map(tb => (
+              <button
+                key={tb}
+                onClick={() => setTab(tb)}
+                className={`px-4 py-2 text-xs font-medium uppercase tracking-wider rounded-xl transition-all ${
+                  tab === tb
+                    ? 'bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white'
+                    : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                {tb === 'announcements' ? t('notes.tab_announcements') : t('notes.tab_notes')}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Notes */}
+        {tab === 'notes' ? (
+          notesLoading ? (
+            <div className="flex items-center justify-center py-24 text-white/30">
+              <Loader2 className="w-5 h-5 animate-spin" />
+            </div>
+          ) : notes.length === 0 ? (
+            <div className="glass-card rounded-3xl p-16 flex flex-col items-center gap-3 text-white/30">
+              <StickyNote className="w-8 h-8 opacity-40" />
+              <p className="text-sm">{t('notes.empty')}</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {noteError && (
+                <p className="flex items-center gap-2 text-xs text-red-400">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {noteError}
+                </p>
+              )}
+              {notes.map(n => {
+                const isMine = n.authorId === user?.id;
+                const isEditing = editingNoteId === n.id;
+                return (
+                  <div key={n.id} className="glass-card rounded-2xl overflow-hidden flex">
+                    <div className="w-1 shrink-0 bg-[#949ce4]" />
+                    <div className="flex-1 p-5 min-w-0">
+                      <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center shrink-0">
+                          <StickyNote className="w-5 h-5 text-white/40" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1.5">
+                            <h3 className="text-base font-semibold text-white/90 leading-snug">{n.action}</h3>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {n.isPrivate && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-semibold uppercase tracking-wider bg-white/5 border-white/10 text-white/50">
+                                  <Lock className="w-3 h-3" />{t('notes.private_badge')}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1 text-xs text-white/30">
+                                <Calendar className="w-3 h-3" />{n.date}
+                              </span>
+                            </div>
+                          </div>
+                          {isEditing ? (
+                            <div className="space-y-2 mb-3">
+                              <textarea
+                                rows={3}
+                                value={editNoteText}
+                                onChange={e => setEditNoteText(e.target.value)}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 transition-all resize-none"
+                              />
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={editNotePrivate}
+                                  onChange={e => setEditNotePrivate(e.target.checked)}
+                                  className="w-4 h-4 rounded border-white/20 bg-white/5 text-[#fc0ce4] focus:ring-[#fc0ce4]/30 focus:ring-offset-0 cursor-pointer accent-[#fc0ce4]"
+                                />
+                                <span className="text-xs text-white/60">{t('notes.private')}</span>
+                              </label>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setEditingNoteId(null)}
+                                  className="px-4 py-2 rounded-xl border border-white/10 text-xs font-medium hover:bg-white/5 transition-colors"
+                                >
+                                  {t('common.cancel')}
+                                </button>
+                                <button
+                                  onClick={() => void saveEditNote()}
+                                  disabled={savingNote || !editNoteText.trim()}
+                                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-xs font-semibold hover:opacity-90 disabled:opacity-50 transition-all"
+                                >
+                                  {savingNote && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                                  {t('common.save')}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-white/55 leading-relaxed mb-3 whitespace-pre-wrap">{n.note}</p>
+                          )}
+                          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2">
+                              <div className="w-5 h-5 rounded-full bg-white/10 flex items-center justify-center text-[9px] font-bold text-white/70">
+                                {n.author.charAt(0)}
+                              </div>
+                              <span className="font-medium text-white/60">{n.author}</span>
+                            </div>
+                            {isMine && !isEditing && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => startEditNote(n)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                                >
+                                  <Edit2 className="w-3 h-3" />{t('notes.edit')}
+                                </button>
+                                <button
+                                  onClick={() => void deleteNote(n)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                >
+                                  <Trash2 className="w-3 h-3" />{t('notes.delete')}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : loading ? (
           <div className="flex items-center justify-center py-24 text-white/30">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>
@@ -461,6 +654,7 @@ export default function Announcements({ role }: { role: Role }) {
           </button>
         </form>
       </SlideOver>
+      {confirmEl}
     </>
   );
 }

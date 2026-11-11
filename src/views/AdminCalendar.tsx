@@ -12,6 +12,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { CalendarEvent, AdminDayClass } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -370,6 +371,11 @@ export default function AdminCalendar() {
   const { t } = useLanguage();
   const { user } = useUser();
 
+  // Optional admin note for whichever form is open; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [showCreate, rescheduleMode, confirmCancel, bulkClearProgramId, bulkOpen, detailClass]);
+
   // ── Calendar grid ─────────────────────────────────────────────────────────
   const gridDays = useMemo(() => buildGrid(viewYear, viewMonth), [viewYear, viewMonth]);
   const weeks    = useMemo<Date[][]>(() => {
@@ -528,6 +534,7 @@ export default function AdminCalendar() {
         newEndTime,
         reason:       rescheduleReason || undefined,
       });
+      await saveNote('calendar', `Class rescheduled – ${snapshot.className}: ${snapshot.originalDate} → ${rescheduleForm.date} ${newStartTime}–${newEndTime}`, note);
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen!));
       setAdminDayClasses(classes);
       setDetailClass(null);
@@ -559,6 +566,7 @@ export default function AdminCalendar() {
         updateType:   'cancelled',
         reason:       cancelReason || undefined,
       });
+      await saveNote('calendar', `Class cancelled – ${snapshot.className} on ${snapshot.originalDate}`, note);
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen!));
       setAdminDayClasses(classes);
       setDetailClass(null);
@@ -593,6 +601,7 @@ export default function AdminCalendar() {
           reason,
         });
       });
+      await saveNote('calendar', `All classes cancelled – ${cls[0].programName} on ${cls[0].originalDate} (${cls.map(c => c.className).join(', ')})`, note);
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen));
       setAdminDayClasses(classes);
       setBulkClearProgramId(null);
@@ -650,6 +659,7 @@ export default function AdminCalendar() {
           reason,
         });
       });
+      await saveNote('calendar', `Classes rescheduled – ${bulkSelectedList.map(cls => { const f = bulkForms.get(cls.classId); return `${cls.className}: ${cls.originalDate} → ${f?.date || 'cancelled'}`; }).join('; ')}`, note);
       const classes = await api.calendar.getClassesForDay(toInputDate(adminDayOpen));
       setAdminDayClasses(classes);
       setBulkOpen(false);
@@ -709,6 +719,7 @@ export default function AdminCalendar() {
         event_type: 'meeting',
         participants: participants.map(p => p.userId!).filter(Boolean),
       });
+      await saveNote('calendar', `Event created – ${form.title.trim()} (${form.startDate})`, note);
       setShowCreate(false);
       void loadEvents();
     } catch (e) {
@@ -720,9 +731,12 @@ export default function AdminCalendar() {
   // ── Delete event ──────────────────────────────────────────────────────────
   async function deleteEvent() {
     if (!selEvent) return;
+    const deleteNote = await ask({ title: `${t('cal.delete_event')}?`, message: <strong className="text-white/80">{selEvent.title}</strong>, confirmLabel: t('cal.delete_event') });
+    if (!deleteNote) return;
     setDeleting(true);
     try {
       await api.calendar.deleteEvent(selEvent.id);
+      await saveNote('calendar', `Event deleted – ${selEvent.title}`, deleteNote);
       setShowDetail(false); setSelEvent(null);
       void loadEvents();
     } catch (e) { console.error(e); }
@@ -1081,6 +1095,7 @@ export default function AdminCalendar() {
                                 className={inputCls('resize-none')}
                               />
                             </div>
+                            <NoteField value={note} onChange={setNote} />
                             <div className="flex gap-2">
                               <button
                                 onClick={() => { setRescheduleMode(false); setRescheduleReason(''); }}
@@ -1119,6 +1134,7 @@ export default function AdminCalendar() {
                                 className={inputCls('resize-none')}
                               />
                             </div>
+                            <NoteField value={note} onChange={setNote} />
                             <div className="flex gap-2">
                               <button
                                 onClick={() => { setConfirmCancel(false); setCancelReason(''); }}
@@ -1212,6 +1228,7 @@ export default function AdminCalendar() {
                                         rows={2}
                                         className={inputCls('resize-none text-xs')}
                                       />
+                                      <NoteField value={note} onChange={setNote} />
                                       {bulkClearError && (
                                         <p className="text-xs text-red-400">{bulkClearError}</p>
                                       )}
@@ -1424,6 +1441,9 @@ export default function AdminCalendar() {
                   rows={2}
                   className={inputCls('resize-none')}
                 />
+                <div className="mt-3">
+                  <NoteField value={note} onChange={setNote} />
+                </div>
               </div>
             )}
 
@@ -1586,6 +1606,10 @@ export default function AdminCalendar() {
               </div>
             </div>
 
+            <div className="px-6 pb-4">
+              <NoteField value={note} onChange={setNote} />
+            </div>
+
             <div className="px-6 py-4 border-t border-white/5 flex items-center justify-end gap-3">
               {createError && (
                 <p className="flex-1 text-xs text-red-400 flex items-center gap-1.5 mr-3">
@@ -1718,6 +1742,7 @@ export default function AdminCalendar() {
           </ModalShell>
         )}
       </AnimatePresence>
+      {confirmEl}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import type { GradeTable, GradeTableEntry } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 export default function AdminGrades() {
   const { t } = useLanguage();
@@ -21,6 +22,9 @@ export default function AdminGrades() {
   // Inline grade editing
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ points: string; note: string; passed: boolean | null }>({ points: '', note: '', passed: null });
+  // Optional admin note for the grade being edited; fresh for each row.
+  const [adminNote, setAdminNote] = useState<NoteValue>(EMPTY_NOTE);
+  useEffect(() => { setAdminNote(EMPTY_NOTE); }, [editingEntryId]);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -85,6 +89,8 @@ export default function AdminGrades() {
     setEditError('');
     try {
       await api.gradeTables.gradeStudent(entry.id, pts, editForm.passed, editForm.note.trim() || undefined);
+      const tableName = tables.find(tb => tb.entries.some(e => e.id === entry.id))?.name || '';
+      await saveNote('academics', `Grade edited – ${entry.studentName}: ${tableName} (${pts} pts, ${editForm.passed ? 'passed' : 'failed'})`, adminNote);
       const now = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       setTables(prev => prev.map(t => ({
         ...t,
@@ -352,6 +358,7 @@ export default function AdminGrades() {
                                           {editSaving ? t('common.saving') : t('common.submit')}
                                         </button>
                                       </div>
+                                      <NoteField value={adminNote} onChange={setAdminNote} />
                                       {editError && <p className="text-xs text-red-400">{editError}</p>}
                                     </div>
                                   </td>

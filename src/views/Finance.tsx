@@ -13,6 +13,7 @@ import { Invoice, InvoiceSettings, SettingsStudent } from '../types';
 import { playPopSound } from '../utils/sound';
 import { exportCsv } from '../utils/csv';
 import { UnmatchedStudentsModal, type UnmatchedStudent } from '../components/UnmatchedStudentsModal';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 type StatusFilter = 'all' | 'paid' | 'partial' | 'not_paid' | 'overdue';
 
@@ -52,6 +53,10 @@ export default function Finance() {
 
   // Only admins/superadmins may import payment documents.
   const canImportDocs = user?.role === 'admin' || user?.role === 'superadmin';
+
+  // Optional admin note for whichever popup/form is open.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
   const [showImport, setShowImport]     = useState(false);
   const [impFiles, setImpFiles]         = useState<File[]>([]);
   const [importing, setImporting]       = useState(false);
@@ -208,10 +213,13 @@ export default function Finance() {
     );
   }, [settingsStudents, settingsSearch]);
 
-  async function handleArchiveStudent(studentId: string) {
+  async function handleArchiveStudent(studentId: string, studentName: string) {
+    const archiveNote = await ask({ title: 'Archive student?', message: <>Archive <strong className="text-white/80">{studentName}</strong>?</>, confirmLabel: 'Archive' });
+    if (!archiveNote) return;
     setArchivingStudentId(studentId);
     try {
       await api.finance.archiveStudent(studentId);
+      await saveNote('finance', `Student archived – ${studentName}`, archiveNote);
       playPopSound();
       const students = await api.finance.getStudentsForSettings();
       setSettingsStudents(students);
@@ -221,9 +229,13 @@ export default function Finance() {
 
   async function restoreToDefault() {
     if (selectedStudentIds.size === 0) return;
+    const names = settingsStudents.filter(s => selectedStudentIds.has(s.studentId)).map(s => s.studentName).join(', ');
+    const restoreNote = await ask({ title: 'Restore to default?', message: <>Remove custom invoice settings for <strong className="text-white/80">{names}</strong>?</>, confirmLabel: 'Restore' });
+    if (!restoreNote) return;
     setRestoringDefaults(true);
     try {
       await api.finance.deleteOverrides(Array.from(selectedStudentIds));
+      await saveNote('finance', `Invoice settings restored to default – ${names}`, restoreNote);
       playPopSound();
       const students = await api.finance.getStudentsForSettings();
       setSettingsStudents(students);
@@ -323,6 +335,7 @@ export default function Finance() {
   }
 
   async function openGenerateNewInvoice() {
+    setNote(EMPTY_NOTE);
     setShowCreateInvoice(true);
     setCreateInvoiceError('');
     setLoadingCreateOptions(true);
@@ -366,6 +379,7 @@ export default function Finance() {
         studentPhone: selected.studentPhone,
         className: selected.className,
       });
+      await saveNote('finance', `Invoice created – ${selected.studentName}: ${createForm.title}`, note);
       playPopSound();
       setShowCreateInvoice(false);
       await loadAll();
@@ -382,6 +396,7 @@ export default function Finance() {
     setImpFiles([]);
     setUnmatched(null);
     setPendingFiles([]);
+    setNote(EMPTY_NOTE);
     setShowImport(true);
   }
 
@@ -418,7 +433,12 @@ export default function Finance() {
       }
     }
 
-    if (created.length) { playPopSound(); await loadAll(); }
+    if (created.length) {
+      await saveNote('finance', `Payment documents imported – ${created.length} paid invoice${created.length !== 1 ? 's' : ''} (${created.map(c => c.studentName).join(', ')})`, note);
+      setNote(EMPTY_NOTE);
+      playPopSound();
+      await loadAll();
+    }
     setImportSummary(prev => ({
       created: (prev?.created || 0) + created.length,
       items: [...(prev?.items || []), ...created],
@@ -444,6 +464,7 @@ export default function Finance() {
     setChangingStatus(true);
     try {
       await api.finance.updateInvoice(statusInvoice.id, { status: newStatus });
+      await saveNote('finance', `Invoice marked ${newStatus.replace('_', ' ')} – ${statusInvoice.studentName}: ${statusInvoice.title}`, note);
       setStatusInvoice(null);
       playPopSound();
       await loadAll();
@@ -470,6 +491,7 @@ export default function Finance() {
         title: editTitle || undefined,
         due_date: dueDateIso,
       });
+      await saveNote('finance', `Invoice edited – ${editInvoice.studentName}: ${editTitle || editInvoice.title}`, note);
       setEditInvoice(null);
       playPopSound();
       await loadAll();
@@ -483,6 +505,7 @@ export default function Finance() {
     setDeleteError('');
     try {
       await api.finance.deleteInvoice(deleteTarget.id);
+      await saveNote('finance', `Invoice deleted – ${deleteTarget.studentName}: ${deleteTarget.title}`, note);
       setDeleteTarget(null);
       await loadAll();
     } catch (err) {
@@ -508,6 +531,7 @@ export default function Finance() {
         dueDay: parseInt(settingsForm.dueDay),
         titleTemplate: settingsForm.titleTemplate,
       });
+      await saveNote('finance', `Custom invoice settings saved – ${selected.map(s => s.studentName).join(', ')}`, note);
       playPopSound();
       // Refresh student list and go back to step 1 so the table reflects the update
       const students = await api.finance.getStudentsForSettings();
@@ -605,7 +629,7 @@ export default function Finance() {
                         </td>
                         <td className="py-4" onClick={e => e.stopPropagation()}>
                           <button
-                            onClick={() => handleArchiveStudent(s.studentId)}
+                            onClick={() => handleArchiveStudent(s.studentId, s.studentName)}
                             disabled={archivingStudentId === s.studentId}
                             className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
                             title="Archive student"
@@ -632,6 +656,7 @@ export default function Finance() {
               <button
                 onClick={() => {
                   computeFormForSelected();
+                  setNote(EMPTY_NOTE);
                   setSettingsStep(2);
                 }}
                 disabled={selectedStudentIds.size === 0}
@@ -670,6 +695,8 @@ export default function Finance() {
                 <strong className="text-white/70">Applying to:</strong> {selectedStudentIds.size} student{selectedStudentIds.size > 1 ? 's' : ''}. These settings will override the global defaults for the selected students&apos; future invoices.
               </div>
 
+              <NoteField value={note} onChange={setNote} />
+
               <div className="flex justify-end gap-4 pt-6 border-t border-white/5">
                 <button type="button" onClick={() => setSettingsStep(1)} className="px-6 py-3 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">Back</button>
                 <button type="submit" disabled={savingSettings} className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-3 rounded-xl text-sm font-semibold hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] disabled:opacity-50 flex items-center gap-2">
@@ -680,6 +707,7 @@ export default function Finance() {
             </form>
           </div>
         )}
+        {confirmEl}
       </motion.div>
     );
   }
@@ -832,7 +860,7 @@ export default function Finance() {
                       <td className="py-4 text-white/60 text-xs">{fmtDate(inv.dueDate)}</td>
                       <td className="py-4 font-medium text-white/90">{fmtMoney(inv.amount)}</td>
                       <td className="py-4">
-                        <button onClick={() => setStatusInvoice(inv)} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border cursor-pointer hover:opacity-80 transition-opacity ${STATUS_BADGE[inv.status]}`}>
+                        <button onClick={() => { setNote(EMPTY_NOTE); setStatusInvoice(inv); }} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border cursor-pointer hover:opacity-80 transition-opacity ${STATUS_BADGE[inv.status]}`}>
                           <Icon className="w-3 h-3" />
                           {t(STATUS_LABEL[inv.status])}
                         </button>
@@ -840,12 +868,12 @@ export default function Finance() {
                       <td className="py-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           {(!permOverridden || canUpdate) && (
-                            <button onClick={() => { setEditInvoice(inv); setEditAmount(String(inv.amount)); setEditTitle(inv.title); setEditDueDate(inv.dueDate ? (() => { const d = inv.dueDate.slice(0, 10).split('-'); return `${d[2]}/${d[1]}/${d[0].slice(2)}`; })() : ''); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
+                            <button onClick={() => { setNote(EMPTY_NOTE); setEditInvoice(inv); setEditAmount(String(inv.amount)); setEditTitle(inv.title); setEditDueDate(inv.dueDate ? (() => { const d = inv.dueDate.slice(0, 10).split('-'); return `${d[2]}/${d[1]}/${d[0].slice(2)}`; })() : ''); }} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40 hover:text-white" title="Edit">
                               <Pencil className="w-4 h-4" />
                             </button>
                           )}
                           {(!permOverridden || canDelete) && (
-                            <button onClick={() => { setDeleteError(''); setDeleteTarget(inv); }} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
+                            <button onClick={() => { setDeleteError(''); setNote(EMPTY_NOTE); setDeleteTarget(inv); }} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-red-400/40 hover:text-red-400" title="Remove">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
@@ -895,6 +923,8 @@ export default function Finance() {
                       Reads Student Name, Payment Amount and Date/Month of Payment. Creates paid invoices shown as “Imported Doc”.
                     </p>
                   </div>
+
+                  <NoteField value={note} onChange={setNote} />
 
                   {importError && (
                     <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
@@ -1038,6 +1068,8 @@ export default function Finance() {
                         <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Discount %</label>
                         <input type="number" step="0.1" min="0" max="100" value={createForm.discountPercent} onChange={e => setCreateForm(f => ({ ...f, discountPercent: e.target.value }))} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
                       </div>
+
+                      <NoteField value={note} onChange={setNote} />
                     </>
                   )}
                 </div>
@@ -1073,6 +1105,7 @@ export default function Finance() {
                     <span className="text-sm text-white/60">Current Status</span>
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[statusInvoice.status]}`}>{t(STATUS_LABEL[statusInvoice.status])}</span>
                   </div>
+                  <NoteField value={note} onChange={setNote} />
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Mark Status As:</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -1123,6 +1156,7 @@ export default function Finance() {
                       <input type="number" step="0.01" min="0" value={editAmount} onChange={e => setEditAmount(e.target.value)} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white" />
                     </div>
                   </div>
+                  <NoteField value={note} onChange={setNote} />
                 </div>
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
                   <button onClick={() => setEditInvoice(null)} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">Cancel</button>
@@ -1153,6 +1187,7 @@ export default function Finance() {
                       <span>{deleteError}</span>
                     </div>
                   )}
+                  <NoteField value={note} onChange={setNote} />
                 </div>
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
                   <button onClick={() => { setDeleteError(''); setDeleteTarget(null); }} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors">Cancel</button>
@@ -1166,6 +1201,7 @@ export default function Finance() {
           </>
         )}
       </AnimatePresence>
+      {confirmEl}
     </motion.div>
   );
 }

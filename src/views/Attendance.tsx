@@ -14,6 +14,7 @@ import type { CalendarEvent } from '../types';
 import { ClassAttendanceModal } from '../components/ClassAttendanceModal';
 import { UnmatchedStudentsModal, type UnmatchedStudent } from '../components/UnmatchedStudentsModal';
 import { exportCsv } from '../utils/csv';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 const MONTH_KEYS = ['jan','feb','mar','apr','may_s','jun','jul','aug','sep','oct','nov','dec'] as const;
 
@@ -63,6 +64,8 @@ export default function Attendance() {
   const [importResult, setImportResult]   = useState<Awaited<ReturnType<typeof api.classAttendance.importFromExcel>> | null>(null);
   const [unmatched, setUnmatched]         = useState<UnmatchedStudent[] | null>(null);
   const [importIgnore, setImportIgnore]   = useState<Set<string>>(new Set());
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  const [note, setNote]                   = useState<NoteValue>(EMPTY_NOTE);
 
   function reloadSessions() {
     setLoading(true);
@@ -84,6 +87,7 @@ export default function Attendance() {
     setImpClassId('');
     setUnmatched(null);
     setImportIgnore(new Set());
+    setNote(EMPTY_NOTE);
     setShowImport(true);
     api.classes.getAll()
       .then(list => {
@@ -100,6 +104,9 @@ export default function Attendance() {
     setImportResult(null);
     try {
       const res = await api.classAttendance.importFromExcel(impClassId, impYear, impFile);
+      const className = impClasses.find(c => c.id === impClassId)?.title || '';
+      await saveNote('academics', `Attendance imported – ${className} ${impYear}${res.monthsDetected.length ? ` (${res.monthsDetected.join(', ')})` : ''}`, note);
+      setNote(EMPTY_NOTE);
       setImportResult(res);
       reloadSessions();
       const pending = res.studentsUnmatched.filter(u => !ignore.has(u.name.toLowerCase()));
@@ -613,6 +620,8 @@ export default function Attendance() {
                       className="w-full text-sm text-white/70 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-medium file:bg-white/10 file:text-white hover:file:bg-white/15 file:cursor-pointer"
                     />
                   </div>
+
+                  {isPrivileged && <NoteField value={note} onChange={setNote} />}
 
                   {importError && (
                     <div className="flex items-start gap-2 text-red-400 text-xs px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">

@@ -138,8 +138,21 @@ export interface Announcement {
   author: string;
   authorRole?: string;
   date: string;
+  createdAt?: string;
   startDate?: string;
   endDate?: string;
+}
+
+export interface AdminNote {
+  id: string;
+  authorId: string;
+  author: string;
+  area: string;
+  action: string;
+  note: string;
+  isPrivate: boolean;
+  date: string;
+  createdAt: string;
 }
 
 export interface AttendanceRecord {

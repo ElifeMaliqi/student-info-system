@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Edit2, LockKeyhole, Plus, ShieldCheck, Trash2, X } from 'lucide-react';
 import { api } from '../services/api';
 import { SystemRole } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 interface RoleFormData {
   name: string;
@@ -37,6 +38,10 @@ export const SuperAdminRoles: React.FC = () => {
   const [disabledModules, setDisabledModules] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  // Optional admin note for the role form; fresh each time it opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [showModal]);
 
   useEffect(() => {
     loadRoles();
@@ -112,6 +117,7 @@ export const SuperAdminRoles: React.FC = () => {
 
       try { const bc = new BroadcastChannel('sis_permissions_update'); bc.postMessage({ type: 'role_updated' }); bc.close(); } catch {}
 
+      await saveNote('system', `Role ${editingRole ? 'updated' : 'created'} – ${formData.name.trim()}`, note);
       setSuccess(`Role ${editingRole ? 'updated' : 'created'} successfully`);
       handleCloseModal();
       await loadRoles();
@@ -123,11 +129,14 @@ export const SuperAdminRoles: React.FC = () => {
   };
 
   const handleDeleteRole = async (roleId: string) => {
-    if (!window.confirm('Are you sure you want to delete this role?')) return;
+    const roleName = roles.find(r => r.id === roleId)?.name || '';
+    const deleteNote = await ask({ title: 'Delete role?', message: 'Are you sure you want to delete this role?', confirmLabel: 'Delete' });
+    if (!deleteNote) return;
 
     try {
       setError('');
       await api.roles.delete(roleId);
+      await saveNote('system', `Role deleted – ${roleName}`, deleteNote);
       setSuccess('Role deleted successfully');
       await loadRoles();
     } catch (err: any) {
@@ -347,6 +356,7 @@ export const SuperAdminRoles: React.FC = () => {
                   })}
                 </div>
               </div>
+              <NoteField value={note} onChange={setNote} />
             </div>
 
             <div className="p-6 border-t border-white/10 flex gap-3 justify-end">
@@ -367,6 +377,7 @@ export const SuperAdminRoles: React.FC = () => {
           </div>
         </div>
       )}
+      {confirmEl}
     </div>
   );
 };
