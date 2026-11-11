@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 interface ProjectGrade {
   tableName: string;
@@ -69,6 +70,11 @@ export default function StudentProfile() {
   const [transferTo, setTransferTo] = useState('');
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState('');
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  const { isOverridden: permOverridden, canUpdate: canEdit } = useModulePermissions('users');
+  // Optional admin note for the archive / transfer popup; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  useEffect(() => { setNote(EMPTY_NOTE); }, [archiveConfirm, transferOpen]);
 
   useEffect(() => {
     if (!id) return;
@@ -138,6 +144,7 @@ export default function StudentProfile() {
     setArchiving(true);
     try {
       await api.finance.archiveStudent(student.id);
+      await saveNote('people', `Student archived – ${student.name}`, note);
       router.push('/students');
     } catch (err) {
       console.error(err);
@@ -163,6 +170,9 @@ export default function StudentProfile() {
     setTransferError('');
     try {
       await api.classes.transferStudent(student.id, transferFrom, transferTo);
+      const fromName = classEnrollments.find(c => c.classId === transferFrom)?.className || '';
+      const toName = transferClasses.find(c => c.id === transferTo)?.title || '';
+      await saveNote('academics', `Student transferred – ${student.name}: ${fromName} → ${toName}`, note);
       const [attRecords, enrollments] = await Promise.all([
         api.classAttendance.getForStudent(student.id),
         loadClassEnrollments(student.id),
@@ -200,10 +210,15 @@ export default function StudentProfile() {
         </button>
         {!isTeacher && (
           <div className="flex items-center gap-2">
-            <button className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-              <Edit2 className="w-4 h-4" />
-              {t('profile.edit')}
-            </button>
+            {isPrivileged && (!permOverridden || canEdit) && (
+              <button
+                onClick={() => router.push(`/students?edit=${id}`)}
+                className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+              >
+                <Edit2 className="w-4 h-4" />
+                {t('profile.edit')}
+              </button>
+            )}
             {classEnrollments.length > 0 && (
               <button
                 onClick={openTransfer}
@@ -654,6 +669,7 @@ export default function StudentProfile() {
                   <p className="text-sm text-white/60 leading-relaxed">
                     This will archive <span className="text-white font-medium">{student?.name}</span>, remove them from all classes, and hide their account. They can be re-activated later through the Registrations page.
                   </p>
+                  {isPrivileged && <div className="mt-3"><NoteField value={note} onChange={setNote} /></div>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">
                   <button
@@ -741,6 +757,7 @@ export default function StudentProfile() {
                         ))}
                     </select>
                   </div>
+                  {isPrivileged && <NoteField value={note} onChange={setNote} />}
                   {transferError && <p className="text-xs text-red-400">{transferError}</p>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">

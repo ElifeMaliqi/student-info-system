@@ -8,6 +8,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions, useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import { TeacherOverview } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 // Same bands as the Students page, so attendance colours mean the same everywhere.
 const tone = (rate: number) => (rate >= 75 ? 0 : rate >= 50 ? 1 : 2);
@@ -39,6 +40,8 @@ export default function Teachers() {
   const [addedClasses, setAddedClasses] = useState<ClassOption[]>([]);
   const [classSelect, setClassSelect] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
 
   const loadTeachers = () =>
     api.users.getTeacherOverview()
@@ -55,6 +58,7 @@ export default function Teachers() {
 
   const handleEditOpen = (teacher: TeacherOverview) => {
     setEditing(teacher);
+    setNote(EMPTY_NOTE);
     setEditForm({ firstName: teacher.firstName, lastName: teacher.lastName, email: teacher.email, phone: teacher.phone || '' });
     setAddedClasses([]);
     setClassSelect('');
@@ -81,6 +85,7 @@ export default function Teachers() {
         phone: editForm.phone.trim() || undefined,
       });
       await api.users.assignClassesToTeacher(editing.id, addedClasses.map(c => c.id));
+      await saveNote('people', `Teacher edited – ${editForm.firstName.trim()} ${editForm.lastName.trim()}${addedClasses.length ? ` (classes assigned: ${addedClasses.map(c => c.title).join(', ')})` : ''}`, note);
       setEditing(null);
       await loadTeachers();
     } catch (err) {
@@ -95,10 +100,12 @@ export default function Teachers() {
       alert(t('teachers.remove_has_classes').replace('{name}', teacher.name).replace('{count}', String(teacher.classCount)));
       return;
     }
-    if (!confirm(t('teachers.remove_confirm').replace('{name}', teacher.name))) return;
+    const removeNote = await ask({ title: `${t('notes.delete')}?`, message: t('teachers.remove_confirm').replace('{name}', teacher.name), confirmLabel: t('notes.delete') });
+    if (!removeNote) return;
 
     try {
       await api.users.deleteTeacher(teacher.id);
+      await saveNote('people', `Teacher deleted – ${teacher.name}`, removeNote);
       await loadTeachers();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to remove teacher.');
@@ -328,6 +335,8 @@ export default function Teachers() {
                   </div>
                 </div>
 
+                <NoteField value={note} onChange={setNote} />
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     onClick={() => setEditing(null)}
@@ -404,6 +413,7 @@ export default function Teachers() {
           </motion.div>
         )}
       </AnimatePresence>
+      {confirmEl}
     </motion.div>
   );
 }

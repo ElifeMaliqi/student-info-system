@@ -18,6 +18,7 @@ import { api } from '../services/api';
 import { useModulePermissions, useUser } from '../context/UserContext';
 import { AgeInput } from '../components/AgeInput';
 import { ageFields, effectiveAge, validateAgeInput } from '../utils/age';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 type AdminStudent = {
   id: string;
@@ -160,6 +161,10 @@ export default function Students() {
 
   // ── CSV import (staged: nothing is created until the admin clicks Import) ────
   const [csvOpen, setCsvOpen] = useState(false);
+  // Optional admin note for the add form, edit modal or CSV import; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [view, editingStudent, csvOpen]);
   const [csvReady, setCsvReady] = useState<CsvStudentRow[]>([]);     // complete rows, created on Import
   const [csvNeedsInfo, setCsvNeedsInfo] = useState<NeedsInfoRow[]>([]);
   const [csvView, setCsvView] = useState<'list' | 'needs-info'>('list');
@@ -242,6 +247,28 @@ export default function Students() {
       router.replace('/students');
     }
   }, [searchParams]);
+
+  // Open the edit modal when navigated here from a student profile with ?edit=<id>.
+  // Closing or saving the modal then returns to that profile.
+  const [editReturnId, setEditReturnId] = useState<string | null>(null);
+  useEffect(() => {
+    const editId = searchParams?.get('edit');
+    if (!editId || loading) return;
+    router.replace('/students');
+    const target = students.find(s => s.id === editId);
+    if (target && isPrivileged && (!permOverridden || canEdit)) {
+      handleEditOpen(target);
+      setEditReturnId(target.id);
+    }
+  }, [searchParams, loading, students]);
+
+  const closeEdit = () => {
+    setEditingStudent(null);
+    if (editReturnId) {
+      router.push(`/students/${editReturnId}`);
+      setEditReturnId(null);
+    }
+  };
 
   const studentFilterOptions = useMemo(() => {
     const programs = [...new Set(students.flatMap(s => s.programs.map(p => p.programName)))].sort();
@@ -490,24 +517,33 @@ export default function Students() {
         errors.push(`${row.email || `${row.firstName} ${row.lastName}`}: ${e.message}`);
       }
     }
+    if (created > 0) {
+      await saveNote('people', `Students imported from CSV – ${created} created`, note);
+      setNote(EMPTY_NOTE);
+    }
     setCsvResult({ created, errors });
     setCsvReady([]);
     setCsvCreating(false);
     if (created > 0) await loadStudents();
   };
 
-  const handleIgnoreAll = () => {
-    if (!window.confirm(`${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`)) return;
+  const handleIgnoreAll = async () => {
+    const skipNote = await ask({ title: 'Skip students?', message: `${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`, confirmLabel: 'Skip', withNote: isPrivileged });
+    if (!skipNote) return;
+    await saveNote('people', `CSV import – skipped ${csvNeedsInfo.length} student${csvNeedsInfo.length !== 1 ? 's' : ''} with missing info (${csvNeedsInfo.map(r => `${r.firstName} ${r.lastName}`.trim() || r.email).join(', ')})`, skipNote);
     setCsvNeedsInfo([]);
     setCsvIgnoreMode(false);
     setCsvIgnoreSelected(new Set());
     setCsvView('list');
   };
 
-  const handleIgnoreSelected = () => {
+  const handleIgnoreSelected = async () => {
     const count = csvIgnoreSelected.size;
     if (count === 0) return;
-    if (!window.confirm(`${count} student${count !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`)) return;
+    const skipNote = await ask({ title: 'Skip students?', message: `${count} student${count !== 1 ? 's' : ''} will be skipped and not imported. Are you sure?`, confirmLabel: 'Skip', withNote: isPrivileged });
+    if (!skipNote) return;
+    const skipped = csvNeedsInfo.filter((_, i) => csvIgnoreSelected.has(i));
+    await saveNote('people', `CSV import – skipped ${count} student${count !== 1 ? 's' : ''} with missing info (${skipped.map(r => `${r.firstName} ${r.lastName}`.trim() || r.email).join(', ')})`, skipNote);
     const next = csvNeedsInfo.filter((_, i) => !csvIgnoreSelected.has(i));
     setCsvNeedsInfo(next);
     setCsvIgnoreSelected(new Set());
@@ -544,11 +580,14 @@ export default function Students() {
 
   const handleBulkDelete = async () => {
     if (selectedStudents.length === 0) return;
-    if (!confirm(`Permanently delete ${selectedStudents.length} student${selectedStudents.length !== 1 ? 's' : ''}? This deletes their full accounts and cannot be undone.`)) return;
+    const bulkNote = await ask({ title: 'Delete students?', message: `Permanently delete ${selectedStudents.length} student${selectedStudents.length !== 1 ? 's' : ''}? This deletes their full accounts and cannot be undone.`, confirmLabel: 'Delete', withNote: isPrivileged });
+    if (!bulkNote) return;
     setBulkDeleting(true);
     const ids = [...selectedStudents];
     const results = await Promise.allSettled(ids.map(id => api.teacher.removeStudentAccount(id)));
     const failed = results.filter(r => r.status === 'rejected').length;
+    const deletedNames = ids.filter((_, i) => results[i].status === 'fulfilled').map(id => students.find(s => s.id === id)?.name || id);
+    if (deletedNames.length > 0) await saveNote('people', `Students deleted – ${deletedNames.join(', ')}`, bulkNote);
     setSelectedStudents([]);
     if (selectedStudentForPanel && ids.includes(selectedStudentForPanel.id)) setSelectedStudentForPanel(null);
     await loadStudents();
@@ -626,6 +665,8 @@ export default function Students() {
         ...toUnenroll.map(id => api.classes.unenrollStudent(id, editingStudent.id)),
       ]);
 
+      await saveNote('people', `Student edited – ${editForm.firstName.trim()} ${editForm.lastName.trim()}`, note);
+      if (editReturnId) { closeEdit(); return; }
       setEditingStudent(null);
       await loadStudents();
     } catch (err) {
@@ -636,10 +677,12 @@ export default function Students() {
   };
 
   const handleRemoveStudent = async (student: AdminStudent) => {
-    if (!confirm(`Remove ${student.name}? This will permanently delete the full student account.`)) return;
+    const removeNote = await ask({ title: 'Remove student?', message: `Remove ${student.name}? This will permanently delete the full student account.`, confirmLabel: 'Remove', withNote: isPrivileged });
+    if (!removeNote) return;
 
     try {
       await api.teacher.removeStudentAccount(student.id);
+      await saveNote('people', `Student deleted – ${student.name}`, removeNote);
       if (selectedStudentForPanel?.id === student.id) setSelectedStudentForPanel(null);
       await loadStudents();
     } catch (err) {
@@ -774,6 +817,7 @@ export default function Students() {
         age:              enrollAge.age,
         dateOfBirth:      enrollAge.date_of_birth,
       });
+      await saveNote('people', `Student enrolled – ${form.firstName.trim()} ${form.lastName.trim()}`, note);
       setEnrolledName(`${form.firstName.trim()} ${form.lastName.trim()}`);
       setForm(BLANK_FORM);
       setDocFile(null);
@@ -1021,6 +1065,8 @@ export default function Students() {
                 )}
               </div>
             </div>
+
+            {isPrivileged && <NoteField value={note} onChange={setNote} />}
 
             {/* Footer actions */}
             <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
@@ -1796,6 +1842,8 @@ export default function Students() {
                         </button>
                       )}
 
+                      {isPrivileged && <NoteField value={note} onChange={setNote} />}
+
                       <div className="flex gap-2 pt-1">
                         <button onClick={closeCsv} className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm hover:bg-white/5 transition-colors">
                           Cancel
@@ -1943,7 +1991,7 @@ export default function Students() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            onClick={() => setEditingStudent(null)}
+            onClick={closeEdit}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -1956,7 +2004,7 @@ export default function Students() {
               <div className="flex items-center justify-between mb-5">
                 <h3 className="font-display text-xl font-medium text-white">Edit Student</h3>
                 <button
-                  onClick={() => setEditingStudent(null)}
+                  onClick={closeEdit}
                   className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -2096,9 +2144,11 @@ export default function Students() {
                   </div>
                 </div>
 
+                {isPrivileged && <NoteField value={note} onChange={setNote} />}
+
                 <div className="flex justify-end gap-2 pt-2">
                   <button
-                    onClick={() => setEditingStudent(null)}
+                    onClick={closeEdit}
                     className="px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5 transition-colors"
                   >
                     Cancel
@@ -2300,6 +2350,7 @@ export default function Students() {
           </motion.div>
         </div>
       )}
+      {confirmEl}
     </motion.div>
   );
 }

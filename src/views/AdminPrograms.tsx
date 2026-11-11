@@ -7,6 +7,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { Class, ClassSession, ClassEnrollment, Program } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -67,6 +68,11 @@ export default function AdminPrograms() {
   const [createSelectedIds, setCreateSelectedIds] = useState<Set<string>>(new Set());
   const [createStudentSearch, setCreateStudentSearch] = useState('');
   const [createStudentsLoading, setCreateStudentsLoading] = useState(false);
+
+  // Optional admin note for the open degree/class form; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [showDegreeModal, showCreateClass, showClassEditModal, isInlineEditing]);
 
   useEffect(() => {
     loadPrograms();
@@ -196,6 +202,7 @@ export default function AdminPrograms() {
           capacity: degreeForm.capacity,
         });
       }
+      await saveNote('academics', `Degree ${editingDegree ? 'edited' : 'created'} – ${degreeForm.name.trim()}`, note);
       setShowDegreeModal(false);
       setEditingDegree(null);
       setDegreeForm({ name: '', description: '', duration: 12, price: 0, capacity: 30 });
@@ -209,10 +216,12 @@ export default function AdminPrograms() {
   };
 
   const handleDeleteDegree = async (programId: string, programName: string) => {
-    if (!confirm(`Are you sure you want to delete "${programName}"? This will deactivate the degree.`)) return;
+    const deleteNote = await ask({ title: 'Delete degree?', message: `Are you sure you want to delete "${programName}"? This will deactivate the degree.`, confirmLabel: 'Delete' });
+    if (!deleteNote) return;
     try {
       setLoading(true);
       await api.programs.delete(programId);
+      await saveNote('academics', `Degree deleted – ${programName}`, deleteNote);
       await loadPrograms();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete degree');
@@ -287,6 +296,7 @@ export default function AdminPrograms() {
           );
         }
       }
+      await saveNote('academics', `Class ${editingClassId ? 'edited' : 'created'} – ${newClass.title}${!editingClassId && createSelectedIds.size > 0 ? ` (${createSelectedIds.size} student${createSelectedIds.size !== 1 ? 's' : ''} enrolled)` : ''}`, note);
 
       setNewClass({
         title: '',
@@ -320,9 +330,14 @@ export default function AdminPrograms() {
 
   const handleAssignTeacher = async (teacherId: string) => {
     if (!selectedClass) return;
+    const teacher = teachers.find(t => t.id === teacherId);
+    const teacherName = teacher ? `${teacher.firstName} ${teacher.lastName}` : '';
+    const assignNote = await ask({ title: 'Assign teacher?', message: <>Assign <strong className="text-white/80">{teacherName}</strong> to {selectedClass.title}?</>, confirmLabel: 'Assign', danger: false });
+    if (!assignNote) return;
     try {
       setLoading(true);
       await api.classes.assignTeacher(selectedClass.id, teacherId);
+      await saveNote('academics', `Teacher assigned – ${teacherName} → ${selectedClass.title}`, assignNote);
       setSelectedClass({
         ...selectedClass,
         teacher_id: teacherId,
@@ -346,9 +361,16 @@ export default function AdminPrograms() {
       return;
     }
 
+    const st = [...availableStudents, ...modalAvailableStudents].find(s => s.id === studentId);
+    const studentName = st ? `${st.firstName} ${st.lastName}` : '';
+    const className = (classId && modalClass?.id === classId ? modalClass.title : selectedClass?.title) || '';
+    const enrollNote = await ask({ title: 'Enroll student?', message: <>Enroll <strong className="text-white/80">{studentName}</strong> in {className}?</>, confirmLabel: 'Enroll', danger: false });
+    if (!enrollNote) return;
+
     try {
       setLoading(true);
       await api.classes.enrollStudent(targetClassId, studentId);
+      await saveNote('academics', `Student enrolled in class – ${studentName} → ${className}`, enrollNote);
       await loadEnrollments(targetClassId);
       await loadAvailableStudents(targetClassId);
       if (showClassEditModal && modalClass) {
@@ -367,9 +389,15 @@ export default function AdminPrograms() {
   const handleRemoveStudent = async (enrollmentId: string, classId?: string) => {
     const targetClassId = classId || selectedClass?.id;
     if (!targetClassId) return;
+    const enr = [...enrollments, ...modalEnrollments].find(e => e.id === enrollmentId);
+    const studentName = enr?.student ? `${enr.student.firstName} ${enr.student.lastName}` : '';
+    const className = (classId && modalClass?.id === classId ? modalClass.title : selectedClass?.title) || '';
+    const removeNote = await ask({ title: 'Remove student?', message: <>Remove <strong className="text-white/80">{studentName}</strong> from {className}?</>, confirmLabel: 'Remove' });
+    if (!removeNote) return;
     try {
       setLoading(true);
       await api.classes.removeStudent(enrollmentId);
+      await saveNote('academics', `Student removed from class – ${studentName} ← ${className}`, removeNote);
       await loadEnrollments(targetClassId);
       await loadAvailableStudents(targetClassId);
       if (showClassEditModal && modalClass) {
@@ -384,10 +412,13 @@ export default function AdminPrograms() {
   };
 
   const handleDeleteClass = async (classId: string) => {
-    if (confirm('Are you sure you want to delete this class?')) {
+    const className = classes.find(c => c.id === classId)?.title || '';
+    const deleteNote = await ask({ title: 'Delete class?', message: 'Are you sure you want to delete this class?', confirmLabel: 'Delete' });
+    if (deleteNote) {
       try {
         setLoading(true);
         await api.classes.delete(classId);
+        await saveNote('academics', `Class deleted – ${className}`, deleteNote);
         setSelectedClass(null);
         await loadClasses();
       } catch (err) {
@@ -450,6 +481,7 @@ export default function AdminPrograms() {
     try {
       setLoading(true);
       await api.classes.update(selectedClass.id, inlineClassForm.title.trim(), inlineClassForm.teacherId, inlineClassForm.sessions);
+      await saveNote('academics', `Class edited – ${inlineClassForm.title.trim()}`, note);
       await loadClasses();
       const refreshed = await api.classes.getByProgram(selectedProgram!);
       const updatedClass = refreshed.find(c => c.id === selectedClass.id) || null;
@@ -646,6 +678,8 @@ export default function AdminPrograms() {
                       />
                     </div>
                   </div>
+
+                  <NoteField value={note} onChange={setNote} />
 
                   <button
                     type="submit"
@@ -865,6 +899,12 @@ export default function AdminPrograms() {
               )}
             </div>
           </div>
+
+          {isInlineEditing && (
+            <div className="glass-card rounded-2xl p-6">
+              <NoteField value={note} onChange={setNote} />
+            </div>
+          )}
 
           {/* Teacher Assignment */}
           <div className="glass-card rounded-2xl p-6">
@@ -1281,6 +1321,8 @@ export default function AdminPrograms() {
                     </div>
                   )}
 
+                  <NoteField value={note} onChange={setNote} />
+
                   <button
                     type="submit"
                     disabled={loading}
@@ -1487,6 +1529,8 @@ export default function AdminPrograms() {
                   </div>
                 </div>
 
+                <NoteField value={note} onChange={setNote} />
+
                 <button
                   type="submit"
                   disabled={loading}
@@ -1593,6 +1637,7 @@ export default function AdminPrograms() {
           </motion.div>
         )}
       </AnimatePresence>
+      {confirmEl}
     </motion.div>
   );
 }

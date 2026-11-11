@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { X, UserX, Loader2, Check, AlertCircle, UserPlus, RotateCcw } from 'lucide-react';
 import { api } from '../services/api';
+import { useUser } from '../context/UserContext';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from './NoteField';
 
 export interface UnmatchedStudent {
   name: string;
@@ -58,6 +60,12 @@ export function UnmatchedStudentsModal({ students, context, classId, onClose, on
     })
   );
   const [expanded, setExpanded] = useState<number | null>(null);
+  const { user } = useUser();
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  // Optional admin note for the open "add student" form; fresh for each row.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [expanded]);
 
   const addedCount = rows.filter(r => r.status === 'added').length;
   const pendingCount = rows.filter(r => r.status === 'pending').length;
@@ -90,6 +98,7 @@ export function UnmatchedStudentsModal({ students, context, classId, onClose, on
           try { await api.classes.enrollStudent(classId, created.id); } catch { /* non-critical */ }
         }
       }
+      await saveNote('people', `Student added from ${context} import – ${r.firstName.trim()} ${r.lastName.trim()}`, note);
       patch(idx, { saving: false, status: 'added' });
       setExpanded(null);
     } catch (e) {
@@ -100,9 +109,12 @@ export function UnmatchedStudentsModal({ students, context, classId, onClose, on
   async function unarchiveStudent(idx: number) {
     const r = rows[idx];
     if (!r.student.studentId) { patch(idx, { error: 'Missing student reference.' }); return; }
+    const unarchiveNote = await ask({ title: 'Unarchive student?', message: <strong className="text-white/80">{r.student.name}</strong>, confirmLabel: 'Unarchive', danger: false, withNote: isPrivileged });
+    if (!unarchiveNote) return;
     patch(idx, { saving: true, error: '' });
     try {
       await api.finance.unarchiveStudent(r.student.studentId);
+      await saveNote('people', `Student unarchived from ${context} import – ${r.student.name}`, unarchiveNote);
       patch(idx, { saving: false, status: 'added' });
     } catch (e) {
       patch(idx, { saving: false, error: e instanceof Error ? e.message : 'Failed to unarchive student' });
@@ -222,6 +234,7 @@ export function UnmatchedStudentsModal({ students, context, classId, onClose, on
                         <label className="block text-[10px] font-semibold uppercase tracking-widest mb-1 text-white/40">Phone</label>
                         <input value={r.phone} onChange={e => patch(idx, { phone: e.target.value })} className="glass-input w-full px-3 py-2 rounded-lg text-sm text-white" />
                       </div>
+                      {isPrivileged && <NoteField value={note} onChange={setNote} />}
                       {r.error && (
                         <div className="flex items-start gap-2 text-red-400 text-xs"><AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" /><span>{r.error}</span></div>
                       )}
@@ -260,6 +273,7 @@ export function UnmatchedStudentsModal({ students, context, classId, onClose, on
           </div>
         </div>
       </motion.div>
+      {confirmEl}
     </>
   );
 }
