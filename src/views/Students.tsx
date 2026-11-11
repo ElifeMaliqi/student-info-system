@@ -243,6 +243,28 @@ export default function Students() {
     }
   }, [searchParams]);
 
+  // Open the edit modal when navigated here from a student profile with ?edit=<id>.
+  // Closing or saving the modal then returns to that profile.
+  const [editReturnId, setEditReturnId] = useState<string | null>(null);
+  useEffect(() => {
+    const editId = searchParams?.get('edit');
+    if (!editId || loading) return;
+    router.replace('/students');
+    const target = students.find(s => s.id === editId);
+    if (target && isPrivileged && (!permOverridden || canEdit)) {
+      handleEditOpen(target);
+      setEditReturnId(target.id);
+    }
+  }, [searchParams, loading, students]);
+
+  const closeEdit = () => {
+    setEditingStudent(null);
+    if (editReturnId) {
+      router.push(`/students/${editReturnId}`);
+      setEditReturnId(null);
+    }
+  };
+
   const studentFilterOptions = useMemo(() => {
     const programs = [...new Set(students.flatMap(s => s.programs.map(p => p.programName)))].sort();
     const classes = [...new Set(students.flatMap(s => s.classes.map(c => c.className)))].sort();
@@ -626,6 +648,7 @@ export default function Students() {
         ...toUnenroll.map(id => api.classes.unenrollStudent(id, editingStudent.id)),
       ]);
 
+      if (editReturnId) { closeEdit(); return; }
       setEditingStudent(null);
       await loadStudents();
     } catch (err) {
@@ -1943,7 +1966,7 @@ export default function Students() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-            onClick={() => setEditingStudent(null)}
+            onClick={closeEdit}
           >
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
@@ -1956,7 +1979,7 @@ export default function Students() {
               <div className="flex items-center justify-between mb-5">
                 <h3 className="font-display text-xl font-medium text-white">Edit Student</h3>
                 <button
-                  onClick={() => setEditingStudent(null)}
+                  onClick={closeEdit}
                   className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -2098,7 +2121,7 @@ export default function Students() {
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button
-                    onClick={() => setEditingStudent(null)}
+                    onClick={closeEdit}
                     className="px-4 py-2 rounded-xl border border-white/10 text-sm hover:bg-white/5 transition-colors"
                   >
                     Cancel
