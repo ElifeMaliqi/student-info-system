@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 
 interface ProjectGrade {
@@ -69,6 +69,8 @@ export default function StudentProfile() {
   const [transferTo, setTransferTo] = useState('');
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState('');
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  const { isOverridden: permOverridden, canUpdate: canEdit } = useModulePermissions('users');
 
   useEffect(() => {
     if (!id) return;
@@ -200,10 +202,15 @@ export default function StudentProfile() {
         </button>
         {!isTeacher && (
           <div className="flex items-center gap-2">
-            <button className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-              <Edit2 className="w-4 h-4" />
-              {t('profile.edit')}
-            </button>
+            {isPrivileged && (!permOverridden || canEdit) && (
+              <button
+                onClick={() => router.push(`/students?edit=${id}`)}
+                className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+              >
+                <Edit2 className="w-4 h-4" />
+                {t('profile.edit')}
+              </button>
+            )}
             {classEnrollments.length > 0 && (
               <button
                 onClick={openTransfer}

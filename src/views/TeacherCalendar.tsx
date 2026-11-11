@@ -907,7 +907,15 @@ export default function TeacherCalendar() {
                 {dayEvs.map(ev => (
                   <button
                     key={ev.id}
-                    onClick={() => { setDayViewDay(null); setSelEvent(ev); setShowDetail(true); }}
+                    onClick={() => {
+                      setDayViewDay(null);
+                      if (ev.event_type === 'class' && ev.class_id) {
+                        setClassAttEvent(ev);
+                      } else {
+                        setSelEvent(ev);
+                        setShowDetail(true);
+                      }
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.06] transition-colors text-left group"
                   >
                     <div style={{ backgroundColor: ev.event_type === 'class' ? CLASS_COLOR : ev.color }} className="w-1 h-8 rounded-full shrink-0" />
