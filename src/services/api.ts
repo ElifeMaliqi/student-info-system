@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote } from '../types';
 import { supabase } from '../lib/supabase';
 import { effectiveAge, priceForAge, parseAgePrices } from '../utils/age';
 
@@ -1338,6 +1338,54 @@ export const api = {
     },
   },
 
+  notes: {
+    /** Notes visible to the signed-in admin/superadmin. `others` drops the caller's own notes (nav bell). */
+    getAll: async (others = false): Promise<AdminNote[]> => {
+      const res = await fetch(`/api/notes${others ? '?others=1' : ''}`, { headers: getAuthHeaders() });
+      const json = await res.json().catch(() => []);
+      if (!res.ok) throw new Error(json.error || 'Failed to load notes');
+      return (json as any[]).map(n => ({
+        id: n.id,
+        authorId: n.author_id,
+        author: n.first_name ? `${n.first_name} ${n.last_name ?? ''}`.trim() : 'Unknown',
+        area: n.area,
+        action: n.action,
+        note: n.note,
+        isPrivate: n.is_private,
+        date: formatDate(n.created_at),
+        createdAt: n.created_at,
+      }));
+    },
+
+    /** Saves a note for an action. Does nothing when the note is empty. */
+    create: async (area: string, action: string, note: { text: string; isPrivate: boolean }): Promise<void> => {
+      if (!note.text.trim()) return;
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ area, action, note: note.text, isPrivate: note.isPrivate }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to save note');
+    },
+
+    update: async (id: string, note: string, isPrivate: boolean): Promise<void> => {
+      const res = await fetch('/api/notes', {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id, note, isPrivate }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to update note');
+    },
+
+    delete: async (id: string): Promise<void> => {
+      const res = await fetch(`/api/notes?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to delete note');
+    },
+  },
+
   announcements: {
     getAll: async (role: Role, userId: string): Promise<Announcement[]> => {
       // Pre-fetch role-specific IDs for client-side audience filtering.
@@ -1405,6 +1453,7 @@ export const api = {
         author: ann.author ? `${ann.author.first_name} ${ann.author.last_name}` : 'System',
         authorRole: ann.author?.role,
         date: formatDate(ann.created_at),
+        createdAt: ann.created_at,
         startDate: ann.start_date,
         endDate: ann.end_date,
       }));

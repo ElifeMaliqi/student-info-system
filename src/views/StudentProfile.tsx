@@ -7,6 +7,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 interface ProjectGrade {
   tableName: string;
@@ -71,6 +72,9 @@ export default function StudentProfile() {
   const [transferError, setTransferError] = useState('');
   const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
   const { isOverridden: permOverridden, canUpdate: canEdit } = useModulePermissions('users');
+  // Optional admin note for the archive / transfer popup; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  useEffect(() => { setNote(EMPTY_NOTE); }, [archiveConfirm, transferOpen]);
 
   useEffect(() => {
     if (!id) return;
@@ -140,6 +144,7 @@ export default function StudentProfile() {
     setArchiving(true);
     try {
       await api.finance.archiveStudent(student.id);
+      await saveNote('people', `Student archived – ${student.name}`, note);
       router.push('/students');
     } catch (err) {
       console.error(err);
@@ -165,6 +170,9 @@ export default function StudentProfile() {
     setTransferError('');
     try {
       await api.classes.transferStudent(student.id, transferFrom, transferTo);
+      const fromName = classEnrollments.find(c => c.classId === transferFrom)?.className || '';
+      const toName = transferClasses.find(c => c.id === transferTo)?.title || '';
+      await saveNote('academics', `Student transferred – ${student.name}: ${fromName} → ${toName}`, note);
       const [attRecords, enrollments] = await Promise.all([
         api.classAttendance.getForStudent(student.id),
         loadClassEnrollments(student.id),
@@ -661,6 +669,7 @@ export default function StudentProfile() {
                   <p className="text-sm text-white/60 leading-relaxed">
                     This will archive <span className="text-white font-medium">{student?.name}</span>, remove them from all classes, and hide their account. They can be re-activated later through the Registrations page.
                   </p>
+                  {isPrivileged && <div className="mt-3"><NoteField value={note} onChange={setNote} /></div>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">
                   <button
@@ -748,6 +757,7 @@ export default function StudentProfile() {
                         ))}
                     </select>
                   </div>
+                  {isPrivileged && <NoteField value={note} onChange={setNote} />}
                   {transferError && <p className="text-xs text-red-400">{transferError}</p>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">

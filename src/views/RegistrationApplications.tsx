@@ -9,6 +9,7 @@ import { api } from '../services/api';
 import { RegistrationApplication, Class } from '../types';
 import { Skeleton } from '../components/Skeleton';
 import { effectiveAge } from '../utils/age';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 export default function RegistrationApplications() {
   const { t } = useLanguage();
@@ -27,10 +28,15 @@ export default function RegistrationApplications() {
   const [loadingClasses, setLoadingClasses] = useState(false);
   const [archivedClasses, setArchivedClasses] = useState<{ classId: string; classTitle: string; programId: string | null }[]>([]);
   const [selectedRestoreClassIds, setSelectedRestoreClassIds] = useState<Set<string>>(new Set());
+  // Optional admin note for the approve/reject step; fresh each time the step changes.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
 
   useEffect(() => {
     loadApplications();
   }, []);
+
+  useEffect(() => { setNote(EMPTY_NOTE); }, [confirmAction, selectedApp?.id]);
 
   const loadApplications = async () => {
     try {
@@ -105,6 +111,7 @@ export default function RegistrationApplications() {
         selectedClassId || undefined,
         Array.from(selectedRestoreClassIds),
       );
+      await saveNote('people', `Registration approved – ${selectedApp.firstName} ${selectedApp.lastName} (${selectedApp.role})`, note);
       await loadApplications();
       closeModal();
     } catch (error) {
@@ -119,6 +126,7 @@ export default function RegistrationApplications() {
     try {
       setProcessingId(selectedApp.id);
       await api.registrations.reject(selectedApp.id, rejectNotes);
+      await saveNote('people', `Registration rejected – ${selectedApp.firstName} ${selectedApp.lastName} (${selectedApp.role})`, note);
       await loadApplications();
       closeModal();
     } catch (error) {
@@ -130,9 +138,13 @@ export default function RegistrationApplications() {
 
   const doArchive = async (app: RegistrationApplication, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
+    const name = `${app.firstName} ${app.lastName}`;
+    const archiveNote = await ask({ title: `${t('registrations.archive')}?`, message: <strong className="text-white/80">{name}</strong>, confirmLabel: t('registrations.archive'), danger: false });
+    if (!archiveNote) return;
     try {
       setProcessingId(app.id);
       await api.registrations.archive(app.id);
+      await saveNote('people', `Registration archived – ${name} (${app.role})`, archiveNote);
       await loadApplications();
       if (selectedApp?.id === app.id) closeModal();
     } catch (error) {
@@ -144,9 +156,13 @@ export default function RegistrationApplications() {
 
   const doUnarchive = async (app: RegistrationApplication, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
+    const name = `${app.firstName} ${app.lastName}`;
+    const unarchiveNote = await ask({ title: `${t('registrations.unarchive')}?`, message: <strong className="text-white/80">{name}</strong>, confirmLabel: t('registrations.unarchive'), danger: false });
+    if (!unarchiveNote) return;
     try {
       setProcessingId(app.id);
       await api.registrations.unarchive(app.id);
+      await saveNote('people', `Registration unarchived – ${name} (${app.role})`, unarchiveNote);
       await loadApplications();
       if (selectedApp?.id === app.id) closeModal();
     } catch (error) {
@@ -158,10 +174,12 @@ export default function RegistrationApplications() {
 
   const doDelete = async (app: RegistrationApplication, e?: { stopPropagation: () => void }) => {
     e?.stopPropagation();
-    if (!confirm(t('registrations.delete_confirm').replace('{name}', `${app.firstName} ${app.lastName}`))) return;
+    const deleteNote = await ask({ title: `${t('notes.delete')}?`, message: t('registrations.delete_confirm').replace('{name}', `${app.firstName} ${app.lastName}`), confirmLabel: t('notes.delete') });
+    if (!deleteNote) return;
     try {
       setProcessingId(app.id);
       await api.registrations.deleteWithAccount(app);
+      await saveNote('people', `Registration and account deleted – ${app.firstName} ${app.lastName} (${app.role})`, deleteNote);
       await loadApplications();
       if (selectedApp?.id === app.id) closeModal();
     } catch (error) {
@@ -769,6 +787,8 @@ export default function RegistrationApplications() {
                     </div>
                   )}
 
+                  <NoteField value={note} onChange={setNote} />
+
                   <div className="flex gap-3">
                     <button
                       onClick={doApprove}
@@ -811,6 +831,7 @@ export default function RegistrationApplications() {
                       className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20 h-24 resize-none"
                     />
                   </div>
+                  <NoteField value={note} onChange={setNote} />
                   <div className="flex gap-3">
                     <button
                       onClick={doReject}
@@ -843,6 +864,7 @@ export default function RegistrationApplications() {
           </motion.div>
         </div>
       )}
+      {confirmEl}
     </div>
   );
 }

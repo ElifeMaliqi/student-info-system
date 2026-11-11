@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, Check, CheckCircle2, ChevronRight, Edit2, FileDown, GraduationCap, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Upload, UserCog, UserPlus, Users, X } from 'lucide-react';
 import { api } from '../services/api';
 import { UserWithRole } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 type ImportedUser = { id: string; firstName: string; lastName: string; email: string };
 
@@ -58,6 +59,11 @@ export const SuperAdminUsers: React.FC = () => {
   const [newClassProgram, setNewClassProgram] = useState('');
   const [newClassCode, setNewClassCode] = useState('');
 
+  // Optional admin note for the open user form / CSV import / class assign; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [showModal, createStep, showCSVModal, showAssignModal]);
+
   useEffect(() => {
     loadUsers();
   }, []);
@@ -110,6 +116,7 @@ export const SuperAdminUsers: React.FC = () => {
           lastName: formData.lastName.trim(),
           role: formData.role,
         });
+        await saveNote('people', `User edited – ${formData.firstName.trim()} ${formData.lastName.trim()} (${formData.role})`, note);
         try { const bc = new BroadcastChannel('sis_permissions_update'); bc.postMessage({ type: 'user_updated' }); bc.close(); } catch {}
         setSuccess('User updated successfully');
         handleCloseModal();
@@ -117,6 +124,8 @@ export const SuperAdminUsers: React.FC = () => {
       } else {
         if (!formData.password) { setError('Password is required for new users'); return; }
         await api.users.create(formData.email.trim(), formData.firstName.trim(), formData.lastName.trim(), formData.role, formData.password);
+        await saveNote('people', `User created – ${formData.firstName.trim()} ${formData.lastName.trim()} (${formData.role})`, note);
+        setNote(EMPTY_NOTE);
         setCreateSuccess(`${formData.role.charAt(0).toUpperCase() + formData.role.slice(1)} account created successfully.`);
         await loadUsers();
       }
@@ -128,10 +137,12 @@ export const SuperAdminUsers: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string, name: string) => {
-    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+    const deleteNote = await ask({ title: 'Delete user?', message: `Delete ${name}? This cannot be undone.`, confirmLabel: 'Delete' });
+    if (!deleteNote) return;
     try {
       setError('');
       await api.users.delete(userId);
+      await saveNote('people', `User deleted – ${name}`, deleteNote);
       setSuccess('User deleted');
       await loadUsers();
     } catch (err: any) {
@@ -184,6 +195,10 @@ export const SuperAdminUsers: React.FC = () => {
         }
       }
 
+      if (created.length > 0) {
+        await saveNote('people', `Users imported from CSV – ${created.length} ${csvRole}${created.length !== 1 ? 's' : ''} created`, note);
+        setNote(EMPTY_NOTE);
+      }
       setImportedUsers(created);
       setRemainingIds(new Set(created.map(u => u.id)));
       setSelectedIds(new Set(created.map(u => u.id)));
@@ -230,6 +245,8 @@ export const SuperAdminUsers: React.FC = () => {
       }
       const toEnroll = [...selectedIds].filter(id => remainingIds.has(id));
       await Promise.allSettled(toEnroll.map(id => api.classes.enrollStudent(classId, id)));
+      const className = assignMode === 'create' ? newClassName.trim() : (assignClasses.find(c => c.id === classId)?.title || '');
+      await saveNote('academics', `Imported students assigned to class – ${toEnroll.length} → ${className}${assignMode === 'create' ? ' (new class)' : ''}`, note);
       setRemainingIds(prev => { const next = new Set(prev); toEnroll.forEach(id => next.delete(id)); return next; });
       setSelectedIds(new Set());
       setShowAssignModal(false);
@@ -385,6 +402,7 @@ export const SuperAdminUsers: React.FC = () => {
                       {roleOptions.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
                     </select>
                   </div>
+                  <NoteField value={note} onChange={setNote} />
                 </div>
                 <div className="p-6 border-t border-white/10 flex gap-3 justify-end">
                   <button onClick={handleCloseModal} className="px-4 py-2.5 rounded-xl border border-white/10 text-white/60 hover:text-white hover:bg-white/5 text-sm font-medium transition-colors">Cancel</button>
@@ -488,6 +506,7 @@ export const SuperAdminUsers: React.FC = () => {
                       <label className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Password *</label>
                       <input type="text" value={formData.password || ''} onChange={e => setFormData({ ...formData, password: e.target.value })} className="glass-input w-full px-3 py-2.5 rounded-xl text-sm text-white font-mono" placeholder="Initial password" />
                     </div>
+                    <NoteField value={note} onChange={setNote} />
                     <button
                       onClick={handleSaveUser}
                       disabled={saving}
@@ -591,6 +610,7 @@ export const SuperAdminUsers: React.FC = () => {
                     </label>
                     <p className="text-[11px] text-white/30 mt-1.5">Download the template first to get the correct column order.</p>
                   </div>
+                  <NoteField value={note} onChange={setNote} />
                   <button
                     onClick={handleImportCSV}
                     disabled={csvImporting || !csvContent.trim()}
@@ -806,7 +826,8 @@ export const SuperAdminUsers: React.FC = () => {
               )}
             </div>
 
-            <div className="p-5 border-t border-white/10 shrink-0">
+            <div className="p-5 border-t border-white/10 shrink-0 space-y-4">
+              <NoteField value={note} onChange={setNote} />
               <button
                 onClick={handleAssign}
                 disabled={assigning || (assignMode === 'existing' ? !assignClassId : !newClassName.trim() || !newClassTeacherId || !newClassProgram)}
@@ -821,6 +842,7 @@ export const SuperAdminUsers: React.FC = () => {
           </div>
         </div>
       )}
+      {confirmEl}
     </div>
   );
 };

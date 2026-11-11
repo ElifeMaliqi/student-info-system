@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import type { Program, Class, ClassEnrollment } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -71,6 +72,11 @@ export const AdminClasses: React.FC = () => {
 
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Optional admin note for the class form / delete popup; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  const [confirmEl, ask] = useConfirm();
+  useEffect(() => { setNote(EMPTY_NOTE); }, [showModal, editingClass, deleteId]);
 
   // Read-only "who's in this class" view, opened by clicking a class card
   const [viewClass, setViewClass] = useState<ClassWithProgram | null>(null);
@@ -224,6 +230,8 @@ export const AdminClasses: React.FC = () => {
           form.sessions,
           form.meetLink || null,
         );
+        await saveNote('academics', `Class edited – ${form.title.trim()}`, note);
+        setNote(EMPTY_NOTE);
         await loadAll();
         setModalTab('students');
       } else {
@@ -241,6 +249,8 @@ export const AdminClasses: React.FC = () => {
             [...selectedStudentIds].map(id => api.classes.enrollStudent(created.id, id))
           );
         }
+        await saveNote('academics', `Class created – ${form.title.trim()}${selectedStudentIds.size > 0 ? ` (${selectedStudentIds.size} student${selectedStudentIds.size !== 1 ? 's' : ''} enrolled)` : ''}`, note);
+        setNote(EMPTY_NOTE);
         setCreatedClass(created);
         await loadAll();
         setModalTab('students');
@@ -258,6 +268,7 @@ export const AdminClasses: React.FC = () => {
     setDeleting(true);
     try {
       await api.classes.delete(deleteId);
+      await saveNote('academics', `Class deleted – ${classes.find(c => c.id === deleteId)?.title || ''}`, note);
       setClasses(prev => prev.filter(c => c.id !== deleteId));
       setDeleteId(null);
     } catch (e: any) {
@@ -271,10 +282,16 @@ export const AdminClasses: React.FC = () => {
   const handleEnroll = async (studentId: string) => {
     const classId = editingClass?.id || createdClass?.id;
     if (!classId) return;
+    const st = availableStudents.find(s => s.id === studentId);
+    const studentName = st ? `${st.firstName} ${st.lastName}` : '';
+    const className = editingClass?.title || createdClass?.title || '';
+    const enrollNote = await ask({ title: 'Enroll student?', message: <>Enroll <strong className="text-white/80">{studentName}</strong> in {className}?</>, confirmLabel: 'Enroll', danger: false });
+    if (!enrollNote) return;
     setEnrolling(studentId);
     setError('');
     try {
       await api.classes.enrollStudent(classId, studentId);
+      await saveNote('academics', `Student enrolled in class – ${studentName} → ${className}`, enrollNote);
       await loadEnrollments(classId);
     } catch (e: any) {
       setError(e.message || 'Failed to enroll student');
@@ -285,9 +302,15 @@ export const AdminClasses: React.FC = () => {
 
   const handleRemove = async (enrollmentId: string) => {
     const classId = editingClass?.id || createdClass?.id;
+    const enr = enrollments.find(e => e.id === enrollmentId);
+    const studentName = enr?.student ? `${enr.student.firstName} ${enr.student.lastName}` : '';
+    const className = editingClass?.title || createdClass?.title || '';
+    const removeNote = await ask({ title: 'Remove student?', message: <>Remove <strong className="text-white/80">{studentName}</strong> from {className}?</>, confirmLabel: 'Remove' });
+    if (!removeNote) return;
     setRemoving(enrollmentId);
     try {
       await api.classes.removeStudent(enrollmentId);
+      await saveNote('academics', `Student removed from class – ${studentName} ← ${className}`, removeNote);
       setEnrollments(prev => prev.filter(e => e.id !== enrollmentId));
       if (classId) {
         const avail = await api.classes.getAvailableStudents(classId);
@@ -742,6 +765,12 @@ export const AdminClasses: React.FC = () => {
               )}
             </div>
 
+            {modalTab === 'details' && (isCreating || editingClass) && (
+              <div className="px-6 pb-4 shrink-0">
+                <NoteField value={note} onChange={setNote} />
+              </div>
+            )}
+
             {/* Footer */}
             <div className="p-6 border-t border-white/10 flex gap-3 justify-end shrink-0">
               {/* Creating — not yet saved */}
@@ -817,6 +846,7 @@ export const AdminClasses: React.FC = () => {
             <p className="text-sm text-white/50">
               This will permanently remove the class, all its sessions, and all enrollments.
             </p>
+            <NoteField value={note} onChange={setNote} />
             <div className="flex gap-3 justify-end pt-2">
               <button
                 onClick={() => setDeleteId(null)}
@@ -901,6 +931,7 @@ export const AdminClasses: React.FC = () => {
           </div>
         </div>
       )}
+      {confirmEl}
     </div>
   );
 };

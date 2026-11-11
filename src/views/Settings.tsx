@@ -8,6 +8,7 @@ import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
 import { exportCsv } from '../utils/csv';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 interface AppSettings {
   id: string;
@@ -67,6 +68,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [issueRules, setIssueRules] = useState({ enrollmentCutoffDay: '3', issueStartDay: '1', issueEndDay: '7' });
   const [invoiceLoaded, setInvoiceLoaded] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
+
+  // Optional admin notes, one per save button ('platform', 'invoices', 'sms:<type>', 'email:<type>').
+  const [notes, setNotes] = useState<Record<string, NoteValue>>({});
+  const noteFor = (key: string) => notes[key] ?? EMPTY_NOTE;
+  const setNoteFor = (key: string) => (v: NoteValue) => setNotes(prev => ({ ...prev, [key]: v }));
+  const clearNote = (key: string) => setNotes(prev => { const next = { ...prev }; delete next[key]; return next; });
 
   // UI state
   const [saving, setSaving] = useState(false);
@@ -252,6 +259,8 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           updated_at: new Date().toISOString(),
         }).eq('id', appSettings.id);
         if (error) throw error;
+        await saveNote('system', 'Platform settings saved', noteFor('platform'));
+        clearNote('platform');
         showToast('success', t('settings.platform_saved'));
       }
     } catch (err: any) {
@@ -270,6 +279,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         .eq('type', type);
       if (error) throw error;
       setSmsTemplates(prev => prev.map(t => t.type === type ? { ...t, sms_body: editedBodies[type] } : t));
+      const label = smsTemplates.find(tpl => tpl.type === type)?.label || type;
+      await saveNote('system', `SMS template saved – ${label}`, noteFor(`sms:${type}`));
+      clearNote(`sms:${type}`);
       showToast('success', t('settings.template_saved'));
     } catch (err: any) {
       showToast('error', err.message || t('settings.save_failed'));
@@ -292,6 +304,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         .eq('type', type);
       if (error) throw error;
       setEmailTemplates(prev => prev.map(t => t.type === type ? { ...t, subject: edit.subject, body: edit.body } : t));
+      const label = emailTemplates.find(tpl => tpl.type === type)?.label || type;
+      await saveNote('system', `Email template saved – ${label}`, noteFor(`email:${type}`));
+      clearNote(`email:${type}`);
       showToast('success', t('settings.template_saved'));
     } catch (err: any) {
       showToast('error', err.message || t('settings.save_failed'));
@@ -331,6 +346,8 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         issueStartDay: Number(issueRules.issueStartDay),
         issueEndDay: Number(issueRules.issueEndDay),
       });
+      await saveNote('finance', 'Invoice settings saved (prices / issue rules)', noteFor('invoices'));
+      clearNote('invoices');
       showToast('success', t('settings.invoice_settings_saved'));
     } catch (err: any) {
       showToast('error', err.message || t('settings.save_failed'));
@@ -586,6 +603,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                     <input type="text" className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20" placeholder="Street, City, Country" value={platAddress} onChange={e => setPlatAddress(e.target.value)} />
                   </div>
                 </div>
+                <NoteField value={noteFor('platform')} onChange={setNoteFor('platform')} />
               </div>
             </>
           )}
@@ -648,6 +666,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                             </div>
                           </div>
                         )}
+                        <NoteField value={noteFor(`sms:${tpl.type}`)} onChange={setNoteFor(`sms:${tpl.type}`)} />
                       </div>
                     ))}
                   </div>
@@ -727,6 +746,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                               </div>
                             </div>
                           )}
+                          <NoteField value={noteFor(`email:${tpl.type}`)} onChange={setNoteFor(`email:${tpl.type}`)} />
                         </div>
                       );
                     })}
@@ -838,6 +858,8 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                       </div>
                       <p className="text-[11px] text-white/35 ml-1">{t('settings.issue_rules_hint')}</p>
                     </div>
+
+                    <NoteField value={noteFor('invoices')} onChange={setNoteFor('invoices')} />
                   </div>
                 )}
               </div>
