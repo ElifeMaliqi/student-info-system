@@ -17,7 +17,7 @@ import { exportCsv } from '../utils/csv';
 import { api } from '../services/api';
 import { useModulePermissions, useUser } from '../context/UserContext';
 import { AgeInput } from '../components/AgeInput';
-import { ageFields, effectiveAge, validateAgeInput } from '../utils/age';
+import { ageFields, effectiveAge, priceForAge, studentMonthlyPrice, validateAgeInput, type Pricing } from '../utils/age';
 import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
 type AdminStudent = {
@@ -48,6 +48,7 @@ interface EditStudentForm {
   location: string;
   age: string;
   dateOfBirth: string;
+  monthlyPrice: string; // custom price; '' = automatic price from Settings
 }
 
 type CsvStudentRow = {
@@ -100,7 +101,6 @@ const BLANK_FORM: EnrollForm = {
   age: '', dateOfBirth: '',
 };
 
-const LOCATION_OPTIONS = ['FMA Kids (Dardani)', 'FMA (Rruga Qarkore)'];
 
 export default function Students() {
   const { isOverridden: permOverridden, canCreate: canEnroll, canUpdate: canEdit, canDelete: canRemove } = useModulePermissions('users');
@@ -143,6 +143,7 @@ export default function Students() {
     location: '',
     age: '',
     dateOfBirth: '',
+    monthlyPrice: '',
   });
   const [savingEdit, setSavingEdit] = useState(false);
   // Edit form: degree + class enrollment
@@ -211,13 +212,19 @@ export default function Students() {
   useEffect(() => { void loadStudents(); }, []);
   const [programNames, setProgramNames] = useState<string[]>([]);
   const [payStatuses, setPayStatuses] = useState<Record<string, 'paid' | 'pending'>>({});
+  const [pricing, setPricing] = useState<Pricing | null>(null);
   useEffect(() => { api.programs.getNames().then(setProgramNames).catch(() => setProgramNames([])); }, []);
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  useEffect(() => { api.locations.getNames().then(setLocationOptions).catch(() => setLocationOptions([])); }, []);
 
   async function loadStudents() {
     setLoading(true);
     try { setStudents(await api.teacher.getStudentsWithDetails()); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
+
+    try { setPricing(await api.finance.getPricing()); }
+    catch (e) { console.error(e); }
 
     // Current-month payment status per student (same rule as the teacher's list).
     try {
@@ -618,6 +625,7 @@ export default function Students() {
       location: student.location || '',
       age: student.age != null ? String(student.age) : '',
       dateOfBirth: student.dateOfBirth || '',
+      monthlyPrice: pricing?.customAmounts[student.id] != null ? String(pricing.customAmounts[student.id]) : '',
     });
     setEditClasses(student.classes.map(c => ({ classId: c.classId, className: c.className })));
     loadEditClasses(student.programs[0]?.programName || student.classes[0]?.programName || '');
@@ -632,6 +640,12 @@ export default function Students() {
     const editAgeError = validateAgeInput(editForm.age, editForm.dateOfBirth);
     if (editAgeError) {
       alert(editAgeError);
+      return;
+    }
+    const priceText = editForm.monthlyPrice.trim();
+    const customPrice = priceText === '' ? null : Number(priceText);
+    if (customPrice != null && (!Number.isFinite(customPrice) || customPrice < 0)) {
+      alert('Please enter a valid monthly price.');
       return;
     }
 
@@ -650,6 +664,11 @@ export default function Students() {
         age: editAge.age,
         dateOfBirth: editAge.date_of_birth,
       });
+
+      // Custom monthly price (empty = automatic price from Settings).
+      if (customPrice !== (pricing?.customAmounts[editingStudent.id] ?? null)) {
+        await api.finance.setCustomPrice(editingStudent.id, customPrice);
+      }
 
       // Degree on the registration record.
       await api.registrations.updateStudentProgram(editingStudent.id, editProgram);
@@ -939,6 +958,7 @@ export default function Students() {
                 dateOfBirth={form.dateOfBirth}
                 onChange={({ age, dateOfBirth }) => setForm(f => ({ ...f, age, dateOfBirth }))}
                 className={inp}
+                dobFirst
               />
             </div>
 
@@ -980,7 +1000,7 @@ export default function Students() {
                   className="glass-select w-full px-4 py-3 rounded-xl text-sm appearance-none"
                 >
                   <option value="">{t('students.select_location')}</option>
-                  {LOCATION_OPTIONS.map(loc => (
+                  {locationOptions.map(loc => (
                     <option key={loc} value={loc}>{loc}</option>
                   ))}
                 </select>
@@ -1218,6 +1238,7 @@ export default function Students() {
                   <th className="pb-3 font-medium">Degree</th>
                   <th className="pb-3 font-medium">Class</th>
                   <th className="pb-3 font-medium">Enrollment Date</th>
+                  <th className="pb-3 font-medium">{t('price.monthly')}</th>
                   <th className="pb-3 font-medium">Payment</th>
                   <th className="pb-3 font-medium">Attendance</th>
                   <th className="pb-3 font-medium">Action</th>
@@ -1294,6 +1315,9 @@ export default function Students() {
                           ) : <span className="text-white/30">–</span>}
                         </td>
                         <td className="py-4 text-white/40 text-xs">{enrollDate}</td>
+                        <td className="py-4 font-medium text-white/90">
+                          {pricing ? `€${studentMonthlyPrice(pricing, student.id, student.age, student.dateOfBirth).toFixed(2)}` : <span className="text-white/30">–</span>}
+                        </td>
                         <td className="py-4">
                           {!payStatuses[student.id] ? <span className="text-white/30">–</span>
                             : payStatuses[student.id] === 'paid' ? (
@@ -1433,6 +1457,15 @@ export default function Students() {
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('age.label')}</div>
                 <div className="text-sm text-white/90">{effectiveAge(selectedStudentForPanel.age, selectedStudentForPanel.dateOfBirth) ?? '—'}</div>
+              </div>
+              <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">{t('price.monthly')}</div>
+                <div className="text-sm text-white/90">
+                  {pricing ? `€${studentMonthlyPrice(pricing, selectedStudentForPanel.id, selectedStudentForPanel.age, selectedStudentForPanel.dateOfBirth).toFixed(2)}` : '—'}
+                  {pricing?.customAmounts[selectedStudentForPanel.id] != null && (
+                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">{t('price.custom')}</span>
+                  )}
+                </div>
               </div>
               <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
                 <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest mb-1">Phone</div>
@@ -2042,7 +2075,23 @@ export default function Students() {
                   dateOfBirth={editForm.dateOfBirth}
                   onChange={({ age, dateOfBirth }) => setEditForm((f) => ({ ...f, age, dateOfBirth }))}
                   className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
+                  dobFirst
                 />
+
+                <div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.monthlyPrice}
+                    onChange={(e) => setEditForm((f) => ({ ...f, monthlyPrice: e.target.value }))}
+                    placeholder={pricing
+                      ? `${t('price.placeholder')}: ${priceForAge(effectiveAge(editForm.age, editForm.dateOfBirth), pricing.agePrices, pricing.defaultAmount).toFixed(2)}`
+                      : t('price.placeholder')}
+                    className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
+                  />
+                  <p className="text-[10px] text-white/30 mt-1 ml-1">{t('price.auto_hint')}</p>
+                </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
@@ -2078,7 +2127,7 @@ export default function Students() {
                     className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
                   >
                     <option value="">{t('students.select_location')}</option>
-                    {LOCATION_OPTIONS.map(loc => (
+                    {locationOptions.map(loc => (
                       <option key={loc} value={loc}>{loc}</option>
                     ))}
                   </select>

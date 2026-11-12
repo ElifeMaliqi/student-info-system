@@ -69,6 +69,11 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
   const [invoiceLoaded, setInvoiceLoaded] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
 
+  // Locations offered in the student location dropdowns
+  const [locationRows, setLocationRows] = useState<string[]>([]);
+  const [locationsLoaded, setLocationsLoaded] = useState(false);
+  const [savingLocations, setSavingLocations] = useState(false);
+
   // Optional admin notes, one per save button ('platform', 'invoices', 'sms:<type>', 'email:<type>').
   const [notes, setNotes] = useState<Record<string, NoteValue>>({});
   const noteFor = (key: string) => notes[key] ?? EMPTY_NOTE;
@@ -88,6 +93,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'messages', label: t('settings.messages'), icon: MessageSquare },
     { id: 'emails', label: t('settings.emails'), icon: Mail },
     { id: 'invoices', label: t('settings.invoices'), icon: Receipt },
+    { id: 'locations', label: t('settings.locations'), icon: MapPin },
     { id: 'data', label: t('settings.data'), icon: Database },
   ];
 
@@ -125,6 +131,11 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
         }
         setInvoiceLoaded(true);
       });
+
+      api.locations.getNames()
+        .then(setLocationRows)
+        .catch(() => setLocationRows([]))
+        .finally(() => setLocationsLoaded(true));
 
       supabase.from('email_templates').select('type, label, subject, body, variables').order('label').then(({ data }) => {
         if (data) {
@@ -353,6 +364,26 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       showToast('error', err.message || t('settings.save_failed'));
     } finally {
       setSavingInvoice(false);
+    }
+  };
+
+  const handleSaveLocations = async () => {
+    const names = locationRows.map(n => n.trim());
+    if (names.some(n => !n) || new Set(names.map(n => n.toLowerCase())).size !== names.length) {
+      showToast('error', t('settings.invalid_locations'));
+      return;
+    }
+    setSavingLocations(true);
+    try {
+      await api.locations.save(names);
+      setLocationRows(names);
+      await saveNote('people', `Locations saved – ${names.join(', ') || 'none'}`, noteFor('locations'));
+      clearNote('locations');
+      showToast('success', t('settings.locations_saved'));
+    } catch (err: any) {
+      showToast('error', err.message || t('settings.save_failed'));
+    } finally {
+      setSavingLocations(false);
     }
   };
 
@@ -860,6 +891,69 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
                     </div>
 
                     <NoteField value={noteFor('invoices')} onChange={setNoteFor('invoices')} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ===== LOCATIONS (admin only) ===== */}
+          {activeSection === 'locations' && isAdminRole && (
+            <div className="space-y-6">
+              <div className="glass-card rounded-3xl p-6 lg:p-8">
+                <div className="flex items-start justify-between gap-4 mb-1">
+                  <h2 className="font-display text-xl font-medium">
+                    <MapPin className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                    {t('settings.locations')}
+                  </h2>
+                  <button
+                    onClick={handleSaveLocations}
+                    disabled={savingLocations || !locationsLoaded}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30"
+                  >
+                    {savingLocations ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    {t('settings.save')}
+                  </button>
+                </div>
+                <p className="text-white/40 text-sm mb-6">{t('settings.locations_desc')}</p>
+
+                {!locationsLoaded ? (
+                  <div className="flex items-center justify-center py-10 text-white/30 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    {t('layout.loading')}
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    <div className="space-y-3">
+                      {locationRows.map((name, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_auto] gap-3 items-end">
+                          <input
+                            type="text"
+                            placeholder={t('settings.location_name')}
+                            className="glass-input w-full px-4 py-3 rounded-xl text-sm text-white placeholder:text-white/20"
+                            value={name}
+                            onChange={e => setLocationRows(rows => rows.map((r, j) => j === i ? e.target.value : r))}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setLocationRows(rows => rows.filter((_, j) => j !== i))}
+                            className="p-3 rounded-xl text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setLocationRows(rows => [...rows, ''])}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 text-xs font-medium hover:bg-white/5 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        {t('settings.add_location')}
+                      </button>
+                    </div>
+
+                    <NoteField value={noteFor('locations')} onChange={setNoteFor('locations')} />
                   </div>
                 )}
               </div>
