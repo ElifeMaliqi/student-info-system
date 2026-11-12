@@ -113,6 +113,9 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
 
   if (!table || typeof table !== 'string') return DENY;
 
+  // Admin notes carry per-author private visibility, enforced only in /api/notes.
+  if (table === 'admin_notes') return DENY;
+
   // Admin-only tables are off-limits to everyone else, for any action.
   if (PRIVILEGED_ONLY_TABLES.has(table) && !PRIVILEGED_ROLES.has(role)) {
     return DENY;

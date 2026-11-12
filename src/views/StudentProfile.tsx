@@ -5,8 +5,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowLeft, Mail, Phone, MapPin, BookOpen, CreditCard, Edit2, CheckCircle, XCircle, Loader2, X, Clock, BarChart2, GraduationCap, FileText, CheckCircle2, Calendar, Archive, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useLanguage } from '../context/LanguageContext';
-import { useUser } from '../context/UserContext';
+import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
+import { studentMonthlyPrice } from '../utils/age';
 
 interface ProjectGrade {
   tableName: string;
@@ -43,6 +45,8 @@ interface StudentData {
   date: string;
   avatar: string;
   attendance: number | null;
+  age: number | null;
+  dateOfBirth: string | null;
 }
 
 export default function StudentProfile() {
@@ -58,6 +62,7 @@ export default function StudentProfile() {
   const [classEnrollments, setClassEnrollments] = useState<ClassEnrollmentInfo[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | null>(null);
+  const [monthlyPrice, setMonthlyPrice] = useState<{ amount: number; custom: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailModal, setDetailModal] = useState<{ type: string; title: string; content: Record<string, string> } | null>(null);
   const [gradeModal, setGradeModal] = useState<ProjectGrade | null>(null);
@@ -69,6 +74,11 @@ export default function StudentProfile() {
   const [transferTo, setTransferTo] = useState('');
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState('');
+  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  const { isOverridden: permOverridden, canUpdate: canEdit } = useModulePermissions('users');
+  // Optional admin note for the archive / transfer popup; fresh each time one opens.
+  const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
+  useEffect(() => { setNote(EMPTY_NOTE); }, [archiveConfirm, transferOpen]);
 
   useEffect(() => {
     if (!id) return;
@@ -104,6 +114,19 @@ export default function StudentProfile() {
         } catch {
           setPaymentStatus(null);
         }
+
+        // Monthly price (admins only): custom price, else the age-based / default price from Settings.
+        if (!isTeacher) {
+          try {
+            const pricing = await api.finance.getPricing();
+            setMonthlyPrice({
+              amount: studentMonthlyPrice(pricing, id, profile.age, profile.dateOfBirth),
+              custom: pricing.customAmounts[id] != null,
+            });
+          } catch {
+            setMonthlyPrice(null);
+          }
+        }
       } catch (err) {
         console.error('Failed to load student profile:', err);
       } finally {
@@ -138,6 +161,7 @@ export default function StudentProfile() {
     setArchiving(true);
     try {
       await api.finance.archiveStudent(student.id);
+      await saveNote('people', `Student archived – ${student.name}`, note);
       router.push('/students');
     } catch (err) {
       console.error(err);
@@ -163,6 +187,9 @@ export default function StudentProfile() {
     setTransferError('');
     try {
       await api.classes.transferStudent(student.id, transferFrom, transferTo);
+      const fromName = classEnrollments.find(c => c.classId === transferFrom)?.className || '';
+      const toName = transferClasses.find(c => c.id === transferTo)?.title || '';
+      await saveNote('academics', `Student transferred – ${student.name}: ${fromName} → ${toName}`, note);
       const [attRecords, enrollments] = await Promise.all([
         api.classAttendance.getForStudent(student.id),
         loadClassEnrollments(student.id),
@@ -200,10 +227,15 @@ export default function StudentProfile() {
         </button>
         {!isTeacher && (
           <div className="flex items-center gap-2">
-            <button className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
-              <Edit2 className="w-4 h-4" />
-              {t('profile.edit')}
-            </button>
+            {isPrivileged && (!permOverridden || canEdit) && (
+              <button
+                onClick={() => router.push(`/students?edit=${id}`)}
+                className="px-4 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2"
+              >
+                <Edit2 className="w-4 h-4" />
+                {t('profile.edit')}
+              </button>
+            )}
             {classEnrollments.length > 0 && (
               <button
                 onClick={openTransfer}
@@ -452,6 +484,17 @@ export default function StudentProfile() {
             ) : (
               <p className="text-white/30 text-sm text-center py-2">No payment data available</p>
             )}
+            {monthlyPrice && (
+              <div className="flex items-center justify-between px-3 py-2.5 mt-3 rounded-xl bg-white/[0.04] border border-white/8">
+                <span className="text-sm text-white/60">{t('price.monthly')}</span>
+                <span className="text-sm font-medium text-white/90 flex items-center gap-2">
+                  {monthlyPrice.custom && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">{t('price.custom')}</span>
+                  )}
+                  €{monthlyPrice.amount.toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Quick Stats */}
@@ -654,6 +697,7 @@ export default function StudentProfile() {
                   <p className="text-sm text-white/60 leading-relaxed">
                     This will archive <span className="text-white font-medium">{student?.name}</span>, remove them from all classes, and hide their account. They can be re-activated later through the Registrations page.
                   </p>
+                  {isPrivileged && <div className="mt-3"><NoteField value={note} onChange={setNote} /></div>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">
                   <button
@@ -741,6 +785,7 @@ export default function StudentProfile() {
                         ))}
                     </select>
                   </div>
+                  {isPrivileged && <NoteField value={note} onChange={setNote} />}
                   {transferError && <p className="text-xs text-red-400">{transferError}</p>}
                 </div>
                 <div className="flex items-center gap-2 px-6 pb-5">
@@ -775,7 +820,7 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email, phone, location, avatar_url, role')
+    .select('id, first_name, last_name, email, phone, location, avatar_url, role, age, date_of_birth')
     .eq('id', profileId)
     .maybeSingle();
 
@@ -825,6 +870,8 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
     date: enrollment?.enrolled_at ? formatDate(enrollment.enrolled_at) : 'N/A',
     avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profileId}`,
     attendance: attendanceRate,
+    age: profile.age ?? null,
+    dateOfBirth: profile.date_of_birth ?? null,
   };
 }
 

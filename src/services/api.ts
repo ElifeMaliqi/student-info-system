@@ -1,6 +1,6 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote } from '../types';
 import { supabase } from '../lib/supabase';
-import { effectiveAge, priceForAge, parseAgePrices } from '../utils/age';
+import { effectiveAge, priceForAge, parseAgePrices, type AgePrice } from '../utils/age';
 
 const formatDate = (date: string) => {
   return new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -378,6 +378,36 @@ export const api = {
       if (updates.issueEndDay != null) payload.issue_end_day = updates.issueEndDay;
       payload.updated_at = new Date().toISOString();
       const { error } = await supabase.from('invoice_settings').update(payload).not('id', 'is', null);
+      if (error) throw new Error(error.message);
+    },
+
+    /* ─── Monthly price per student ─── */
+    // Same rule as invoice sync: the student's custom price, else the price for their age, else the default.
+    getPricing: async (): Promise<{ defaultAmount: number; agePrices: AgePrice[]; customAmounts: Record<string, number> }> => {
+      const settings = await api.finance.getSettings();
+      const { data: overrides } = await supabase.from('student_invoice_overrides').select('student_id, custom_amount');
+      const customAmounts: Record<string, number> = {};
+      for (const o of (overrides || []) as any[]) {
+        if (o.custom_amount != null) customAmounts[o.student_id] = parseFloat(o.custom_amount);
+      }
+      return { defaultAmount: settings?.defaultAmount ?? 60, agePrices: settings?.agePrices ?? [], customAmounts };
+    },
+
+    /** Sets (or with null, clears) one student's custom monthly price; their other invoice overrides are kept. */
+    setCustomPrice: async (studentId: string, amount: number | null): Promise<void> => {
+      if (amount != null) {
+        const { error } = await supabase
+          .from('student_invoice_overrides')
+          .upsert({ student_id: studentId, custom_amount: amount, updated_at: new Date().toISOString() }, { onConflict: 'student_id' });
+        if (error) throw new Error(error.message);
+        return;
+      }
+      const { data: row } = await supabase.from('student_invoice_overrides').select('*').eq('student_id', studentId).maybeSingle();
+      if (!row || row.custom_amount == null) return;
+      const othersSet = row.custom_discount_percent != null || row.custom_due_day != null || row.custom_title_template != null;
+      const { error } = othersSet
+        ? await supabase.from('student_invoice_overrides').update({ custom_amount: null, updated_at: new Date().toISOString() }).eq('student_id', studentId)
+        : await supabase.from('student_invoice_overrides').delete().eq('student_id', studentId);
       if (error) throw new Error(error.message);
     },
 
@@ -1338,6 +1368,54 @@ export const api = {
     },
   },
 
+  notes: {
+    /** Notes visible to the signed-in admin/superadmin. `others` drops the caller's own notes (nav bell). */
+    getAll: async (others = false): Promise<AdminNote[]> => {
+      const res = await fetch(`/api/notes${others ? '?others=1' : ''}`, { headers: getAuthHeaders() });
+      const json = await res.json().catch(() => []);
+      if (!res.ok) throw new Error(json.error || 'Failed to load notes');
+      return (json as any[]).map(n => ({
+        id: n.id,
+        authorId: n.author_id,
+        author: n.first_name ? `${n.first_name} ${n.last_name ?? ''}`.trim() : 'Unknown',
+        area: n.area,
+        action: n.action,
+        note: n.note,
+        isPrivate: n.is_private,
+        date: formatDate(n.created_at),
+        createdAt: n.created_at,
+      }));
+    },
+
+    /** Saves a note for an action. Does nothing when the note is empty. */
+    create: async (area: string, action: string, note: { text: string; isPrivate: boolean }): Promise<void> => {
+      if (!note.text.trim()) return;
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ area, action, note: note.text, isPrivate: note.isPrivate }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to save note');
+    },
+
+    update: async (id: string, note: string, isPrivate: boolean): Promise<void> => {
+      const res = await fetch('/api/notes', {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id, note, isPrivate }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to update note');
+    },
+
+    delete: async (id: string): Promise<void> => {
+      const res = await fetch(`/api/notes?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to delete note');
+    },
+  },
+
   announcements: {
     getAll: async (role: Role, userId: string): Promise<Announcement[]> => {
       // Pre-fetch role-specific IDs for client-side audience filtering.
@@ -1405,6 +1483,7 @@ export const api = {
         author: ann.author ? `${ann.author.first_name} ${ann.author.last_name}` : 'System',
         authorRole: ann.author?.role,
         date: formatDate(ann.created_at),
+        createdAt: ann.created_at,
         startDate: ann.start_date,
         endDate: ann.end_date,
       }));
@@ -1899,6 +1978,31 @@ export const api = {
       });
       if (error) throw new Error(error.message);
       if (!data?.success) throw new Error(data?.message || 'Failed to delete student account.');
+    },
+  },
+
+  /* ─── Locations (student location dropdowns; managed in Settings > Locations) ─── */
+  locations: {
+    // Works signed out too (public application form).
+    getNames: async (): Promise<string[]> => {
+      const { data, error } = await supabase.from('locations').select('name').order('name');
+      if (error) throw new Error(error.message);
+      return (data || []).map((l: { name: string }) => l.name);
+    },
+
+    /** Saves the full list: adds new names, removes the ones no longer in it. */
+    save: async (names: string[]): Promise<void> => {
+      const current = await api.locations.getNames();
+      const toAdd = names.filter(n => !current.includes(n));
+      const toRemove = current.filter(n => !names.includes(n));
+      if (toAdd.length > 0) {
+        const { error } = await supabase.from('locations').insert(toAdd.map(name => ({ name })));
+        if (error) throw new Error(error.message);
+      }
+      if (toRemove.length > 0) {
+        const { error } = await supabase.from('locations').delete().in('name', toRemove);
+        if (error) throw new Error(error.message);
+      }
     },
   },
 

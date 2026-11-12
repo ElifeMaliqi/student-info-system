@@ -59,11 +59,18 @@ export async function POST(req: NextRequest) {
   // Degree names for the public application form's dropdown.
   const isProgramList = body.action === 'select' && body.table === 'programs';
 
+  // Location names for the public application form's dropdown.
+  const isLocationList = body.action === 'select' && body.table === 'locations';
+
   if (!user) {
     if (isProgramList) {
       // Names of active degrees only — nothing else about them.
       body.select = 'name';
       body.filters = [{ op: 'eq', column: 'is_active', value: true }];
+      body.or = undefined;
+    } else if (isLocationList) {
+      body.select = 'name';
+      body.filters = [];
       body.or = undefined;
     } else if (isPublicInsert) {
       // Force a safe shape: students only, pending status, no review/identity fields.

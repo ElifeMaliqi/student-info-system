@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
   Globe, Moon, Sun, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
-  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle, Presentation
+  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle, Presentation, StickyNote
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -15,7 +15,8 @@ import { CommandPalette } from '../components/CommandPalette';
 import { SlideOver } from '../components/SlideOver';
 import { playPopSound } from '../utils/sound';
 import { api } from '../services/api';
-import type { Announcement } from '../types';
+import type { Announcement, AdminNote } from '../types';
+import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -32,6 +33,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const [notifications, setNotifications] = useState<Announcement[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifSeen, setNotifSeen] = useState(false);
+  // Admin notes from other admins (incl. private ones a superadmin may see) shown in the bell.
+  const [noteNotifs, setNoteNotifs] = useState<AdminNote[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -47,12 +50,14 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const [staffSaving, setStaffSaving] = useState(false);
   const [staffError, setStaffError] = useState('');
   const [staffSuccess, setStaffSuccess] = useState('');
+  const [staffNote, setStaffNote] = useState<NoteValue>(EMPTY_NOTE);
 
   const openEnrollModal = () => {
     setEnrollStep('pick');
     setStaffForm({ firstName: '', lastName: '', email: '', password: 'FMA#2026' });
     setStaffError('');
     setStaffSuccess('');
+    setStaffNote(EMPTY_NOTE);
     setEnrollOpen(true);
   };
 
@@ -66,6 +71,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     setStaffError('');
     try {
       await api.users.create(email.trim().toLowerCase(), firstName.trim(), lastName.trim(), accountRole, password);
+      await saveNote('people', `${accountRole === 'teacher' ? 'Teacher' : 'Admin'} account created – ${firstName.trim()} ${lastName.trim()}`, staffNote);
+      setStaffNote(EMPTY_NOTE);
       setStaffSuccess(`${accountRole === 'teacher' ? 'Teacher' : 'Admin'} account created. Temporary password: ${password}`);
     } catch (e: any) {
       setStaffError(e.message || 'Failed to create account.');
@@ -101,7 +108,18 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
       .then(data => setNotifications(data.slice(0, 20)))
       .catch(() => {})
       .finally(() => setNotifLoading(false));
+    if (role === 'admin' || role === 'superadmin') {
+      api.notes.getAll(true)
+        .then(data => setNoteNotifs(data.slice(0, 20)))
+        .catch(() => {});
+    }
   }, [role, user]);
+
+  // Announcements and admin notes in one list, newest first.
+  const bellItems = [
+    ...notifications.map(n => ({ kind: 'announcement' as const, at: n.createdAt ?? '', item: n })),
+    ...noteNotifs.map(n => ({ kind: 'note' as const, at: n.createdAt, item: n })),
+  ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 
   // Close notif panel on outside click
   useEffect(() => {
@@ -463,7 +481,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                 title={t('layout.notifications')}
               >
                 <Bell className="w-4 h-4" />
-                {!notifSeen && notifications.length > 0 && (
+                {!notifSeen && bellItems.length > 0 && (
                   <span className="absolute top-2 right-2 w-2 h-2 bg-[#fc0ce4] rounded-full border-2 border-[#050505]" />
                 )}
               </button>
@@ -479,7 +497,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                   >
                     <div className={`px-4 py-3 border-b flex items-center justify-between ${theme === 'dark' ? 'border-white/10' : 'border-gray-100'}`}>
                       <span className="text-sm font-semibold">{t('layout.notifications')}</span>
-                      <span className="text-[11px] text-white/40">{notifications.length} {t('layout.notifications').toLowerCase()}</span>
+                      <span className="text-[11px] text-white/40">{bellItems.length} {t('layout.notifications').toLowerCase()}</span>
                     </div>
                     <div className="max-h-96 overflow-y-auto custom-scrollbar">
                       {notifLoading ? (
@@ -487,13 +505,33 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                           <span className="w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin" />
                           {t('layout.loading')}
                         </div>
-                      ) : notifications.length === 0 ? (
+                      ) : bellItems.length === 0 ? (
                         <div className="flex flex-col items-center py-10 text-white/30 gap-2">
                           <Bell className="w-6 h-6 opacity-40" />
                           <p className="text-sm">{t('layout.no_announcements')}</p>
                         </div>
                       ) : (
-                        notifications.map(n => {
+                        bellItems.map(entry => {
+                          if (entry.kind === 'note') {
+                            const nt = entry.item;
+                            return (
+                              <button
+                                key={`note-${nt.id}`}
+                                onClick={() => { setIsNotifOpen(false); router.push('/announcements?tab=notes'); }}
+                                className={`w-full text-left px-4 py-3 border-b transition-colors ${theme === 'dark' ? 'border-white/5 hover:bg-white/5' : 'border-gray-50 hover:bg-gray-50'}`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <StickyNote className="mt-0.5 w-3.5 h-3.5 flex-shrink-0 text-[#949ce4]" />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium truncate">{nt.action}</p>
+                                    <p className={`text-xs truncate mt-0.5 ${theme === 'dark' ? 'text-white/40' : 'text-gray-400'}`}>{nt.note}</p>
+                                    <p className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-white/25' : 'text-gray-300'}`}>{nt.date} · {nt.author}{nt.isPrivate ? ` · ${t('notes.private_badge')}` : ''}</p>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          }
+                          const n = entry.item;
                           const priorityColor: Record<string, string> = {
                             urgent: 'bg-red-500',
                             high: 'bg-amber-500',
@@ -749,6 +787,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                           />
                           <p className="text-[11px] text-white/35">User will be prompted to change on first login.</p>
                         </div>
+                        <NoteField value={staffNote} onChange={setStaffNote} />
                         <button
                           onClick={() => handleStaffCreate(enrollStep)}
                           disabled={staffSaving}
