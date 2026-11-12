@@ -57,3 +57,12 @@ export function ageFields(age: string, dob: string): { age: number | null; date_
   if (dob) return { age: ageFromDob(dob), date_of_birth: dob };
   return { age: age === '' ? null : Number(age), date_of_birth: null };
 }
+
+export type Pricing = { defaultAmount: number; agePrices: AgePrice[]; customAmounts: Record<string, number> };
+
+/** A student's monthly price: their custom price, else the price for their age, else the default. */
+export function studentMonthlyPrice(pricing: Pricing, studentId: string, age?: number | string | null, dob?: string | null): number {
+  const custom = pricing.customAmounts[studentId];
+  if (custom != null) return custom;
+  return priceForAge(effectiveAge(age, dob), pricing.agePrices, pricing.defaultAmount);
+}

@@ -55,10 +55,10 @@ export default function PublicRegistration({ onBack }: PublicRegistrationProps) 
     api.programs.getNames().then(setPrograms).catch(() => setPrograms([]));
   }, []);
 
-  const locations = [
-    'FMA Kids (Dardani)',
-    'FMA (Rruga Qarkore)',
-  ];
+  const [locations, setLocations] = useState<string[]>([]);
+  useEffect(() => {
+    api.locations.getNames().then(setLocations).catch(() => setLocations([]));
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;

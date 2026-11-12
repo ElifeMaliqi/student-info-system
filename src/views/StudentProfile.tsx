@@ -8,6 +8,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
 import { api } from '../services/api';
 import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
+import { studentMonthlyPrice } from '../utils/age';
 
 interface ProjectGrade {
   tableName: string;
@@ -44,6 +45,8 @@ interface StudentData {
   date: string;
   avatar: string;
   attendance: number | null;
+  age: number | null;
+  dateOfBirth: string | null;
 }
 
 export default function StudentProfile() {
@@ -59,6 +62,7 @@ export default function StudentProfile() {
   const [classEnrollments, setClassEnrollments] = useState<ClassEnrollmentInfo[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'pending' | null>(null);
+  const [monthlyPrice, setMonthlyPrice] = useState<{ amount: number; custom: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailModal, setDetailModal] = useState<{ type: string; title: string; content: Record<string, string> } | null>(null);
   const [gradeModal, setGradeModal] = useState<ProjectGrade | null>(null);
@@ -109,6 +113,19 @@ export default function StudentProfile() {
           }
         } catch {
           setPaymentStatus(null);
+        }
+
+        // Monthly price (admins only): custom price, else the age-based / default price from Settings.
+        if (!isTeacher) {
+          try {
+            const pricing = await api.finance.getPricing();
+            setMonthlyPrice({
+              amount: studentMonthlyPrice(pricing, id, profile.age, profile.dateOfBirth),
+              custom: pricing.customAmounts[id] != null,
+            });
+          } catch {
+            setMonthlyPrice(null);
+          }
         }
       } catch (err) {
         console.error('Failed to load student profile:', err);
@@ -467,6 +484,17 @@ export default function StudentProfile() {
             ) : (
               <p className="text-white/30 text-sm text-center py-2">No payment data available</p>
             )}
+            {monthlyPrice && (
+              <div className="flex items-center justify-between px-3 py-2.5 mt-3 rounded-xl bg-white/[0.04] border border-white/8">
+                <span className="text-sm text-white/60">{t('price.monthly')}</span>
+                <span className="text-sm font-medium text-white/90 flex items-center gap-2">
+                  {monthlyPrice.custom && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#fc0ce4]/10 text-[#fc0ce4] border border-[#fc0ce4]/20">{t('price.custom')}</span>
+                  )}
+                  €{monthlyPrice.amount.toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Quick Stats */}
@@ -792,7 +820,7 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email, phone, location, avatar_url, role')
+    .select('id, first_name, last_name, email, phone, location, avatar_url, role, age, date_of_birth')
     .eq('id', profileId)
     .maybeSingle();
 
@@ -842,6 +870,8 @@ async function loadStudentProfile(profileId: string): Promise<StudentData> {
     date: enrollment?.enrolled_at ? formatDate(enrollment.enrolled_at) : 'N/A',
     avatar: profile.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profileId}`,
     attendance: attendanceRate,
+    age: profile.age ?? null,
+    dateOfBirth: profile.date_of_birth ?? null,
   };
 }
 
