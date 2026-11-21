@@ -211,6 +211,10 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
     if (rows.some((r) => r.role === 'superadmin')) return DENY;
     if (role !== 'superadmin' && rows.some((r) => 'role' in r || 'system_role_id' in r)) return DENY;
   }
+  // ID document links are opened by admins, so only documents this app stored.
+  if ((table === 'registration_applications' || table === 'profiles') && isWrite(action)) {
+    if (bodyRows(req).some((r) => r.id_document_url != null && r.id_document_url !== '' && !isStoredIdDocumentUrl(r.id_document_url))) return DENY;
+  }
   // Approving a registration creates an account with its role.
   if (table === 'registration_applications' && isWrite(action)) {
     if (bodyRows(req).some((r) => 'role' in r && r.role !== 'student' && r.role !== 'teacher')) return DENY;
@@ -319,8 +323,18 @@ export function sanitizePublicRegistration(
     // Public applicants are always students with a pending application.
     clean.role = 'student';
     clean.status = 'pending';
+    // Only a document this app stored. Admins open this URL, so anything else
+    // (e.g. a javascript: link) would run in an admin's session.
+    if (clean.id_document_url != null && !isStoredIdDocumentUrl(clean.id_document_url)) {
+      clean.id_document_url = null;
+    }
     return clean;
   });
+}
+
+/** An ID document URL as returned by POST /api/upload/id-document. */
+export function isStoredIdDocumentUrl(url: unknown): boolean {
+  return typeof url === 'string' && /^\/api\/upload\/id-document\?file=[0-9a-f-]{36}\.(jpg|png|pdf)$/.test(url);
 }
 
 // Columns the unauthenticated email-existence lookup may return, per table.

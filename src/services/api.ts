@@ -66,7 +66,13 @@ export const api = {
     // Our stored ID documents need the admin's token, which a plain link can't send.
     // The tab is opened before the fetch so popup blockers don't stop it.
     openIdDocument: async (url: string): Promise<void> => {
-      if (!url.startsWith('/api/upload/id-document')) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
+      if (!/^\/api\/upload\/id-document\?file=[0-9a-f-]{36}\.(jpg|png|pdf)$/.test(url)) {
+        // Older documents may be plain https links; never open anything else
+        // (a javascript: link would run inside this admin session).
+        if (!/^https:\/\//i.test(url)) throw new Error('Invalid document link');
+        window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       const tab = window.open('', '_blank');
       const res = await fetch(url, { headers: getAuthHeaders() });
       if (!res.ok) { tab?.close(); throw new Error('Failed to open ID document'); }
