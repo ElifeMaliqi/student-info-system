@@ -99,7 +99,11 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
     const id = payload.sub as string;
     if (!id) return null;
 
-    if ((payload as { purpose?: string }).purpose === IMPERSONATION_PURPOSE) {
+    const purpose = (payload as { purpose?: string }).purpose;
+    // A password-reset link is not a sign-in.
+    if (purpose === 'password-reset') return null;
+
+    if (purpose === IMPERSONATION_PURPOSE) {
       // Valid only while the impersonator is still a superadmin and the target
       // is not one (superadmins can't be impersonated).
       const byId = (payload as { imp?: unknown }).imp;
