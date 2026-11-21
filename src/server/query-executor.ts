@@ -5,6 +5,25 @@ export type { DbQueryRequest };
 
 type Row = Record<string, unknown>;
 
+/**
+ * Columns never returned to the browser. Applicants' password hashes become
+ * their login passwords on approval; only the database functions read them.
+ */
+export const SECRET_COLUMNS: Record<string, readonly string[]> = {
+  registration_applications: ['password_hash'],
+};
+
+function stripSecrets<T>(table: string, data: T): T {
+  const secret = SECRET_COLUMNS[table];
+  if (!secret) return data;
+  const strip = (r: unknown) => {
+    if (r && typeof r === 'object') for (const c of secret) delete (r as Row)[c];
+  };
+  if (Array.isArray(data)) data.forEach(strip);
+  else strip(data);
+  return data;
+}
+
 const TABLE_COLUMNS: Record<string, string[]> = {};
 
 function localKeyFromConstraint(parentTable: string, constraint: string): string {
@@ -373,6 +392,7 @@ export async function executeQuery(
       }
 
       const { rows } = await client.query(sql, params);
+      stripSecrets(req.table, rows);
       let data: unknown = await attachEmbeds(client, rows as Row[], req.table, embeds, policy);
 
       if (req.count === 'exact') {
@@ -413,6 +433,7 @@ export async function executeQuery(
       }
       sql += ' RETURNING *';
       const { rows: inserted } = await client.query(sql, values);
+      stripSecrets(req.table, inserted);
       return { data: req.single || req.maybeSingle ? inserted[0] : inserted, error: null };
     }
 
@@ -424,6 +445,7 @@ export async function executeQuery(
       let idx = keys.length + 1;
       const { sql: whereSql, nextIdx } = buildWhere(req.filters, undefined, vals, idx);
       const { rows } = await client.query(`UPDATE ${table} SET ${sets}${whereSql} RETURNING *`, vals);
+      stripSecrets(req.table, rows);
       // `count` lets callers tell "matched nothing" apart from "worked", which an
       // empty `data` alone does not express for single/maybeSingle reads.
       return { data: req.single || req.maybeSingle ? rows[0] : rows, error: null, count: rows.length };

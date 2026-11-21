@@ -2416,12 +2416,6 @@ export const api = {
 
       if (!userId) {
         // New user — create via RPC
-        const { data: appForPass } = await supabase
-          .from('registration_applications')
-          .select('email, password_hash')
-          .eq('id', applicationId)
-          .maybeSingle();
-
         const { data, error } = await supabase.rpc('approve_registration_application', {
           application_id: applicationId,
         });
@@ -2432,15 +2426,15 @@ export const api = {
 
         // Ensure auth_users (public schema) has the correct password.
         // The RPC may have written to a different table or double-hashed the password.
-        // If password_hash is already bcrypt (starts with $2a/$2b/$2y$) use it directly;
-        // otherwise hash it now.
-        if (userId && appForPass?.email && appForPass?.password_hash) {
+        // The server copies the application's password onto the login itself, so the
+        // password hash never reaches the browser.
+        if (userId) {
           await fetch('/api/db', {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({
               queryName: 'registrations.syncLoginPassword',
-              params: [userId, appForPass.email, appForPass.password_hash],
+              params: [userId, applicationId],
             }),
           });
         }

@@ -15,7 +15,7 @@
  */
 
 import type { DbQueryRequest } from '../types/db-query';
-import { embeddedTablesOf, type EmbedPolicy } from './query-executor';
+import { embeddedTablesOf, SECRET_COLUMNS, type EmbedPolicy } from './query-executor';
 
 export interface AuthzUser {
   id: string;
@@ -196,6 +196,18 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
     return DENY;
   }
   if (embedded.some((t) => !EMBED_ALLOWED_TABLES.has(t))) return DENY;
+
+  // Secret columns can't be filtered or sorted on either: a filter like
+  // `password_hash ILIKE '$2a$10$a%'` would reveal the hash one character at a time.
+  const secret = SECRET_COLUMNS[table];
+  if (secret) {
+    const touched = [
+      ...(req.filters || []).map((f) => f.column),
+      ...(req.order || []).map((o) => o.column),
+    ];
+    if (touched.some((c) => secret.includes(c))) return DENY;
+    if (req.or && secret.some((c) => req.or!.includes(c))) return DENY;
+  }
 
   // Admin notes carry per-author private visibility, enforced only in /api/notes.
   if (table === 'admin_notes') return DENY;

@@ -60,14 +60,19 @@ export const NAMED_QUERIES: Record<string, NamedQuery> = {
       WHERE p.email IS NOT NULL`,
   },
   // After approving an application: copy its password onto the login record.
-  // $3 is the application's password_hash (already bcrypt, or plain → hashed here).
+  // $1 = new profile id, $2 = application id. The hash is read here and never sent
+  // to the browser (already bcrypt, or plain → hashed here), and only onto the
+  // profile created from that same application (matching email).
   'registrations.syncLoginPassword': {
     roles: ADMINS,
+    validate: (p) => (isUuid(p[0]) && isUuid(p[1]) ? null : 'Invalid ids'),
     sql: `
       INSERT INTO auth_users (id, email, encrypted_password)
-      SELECT $1, lower(trim($2)),
-             CASE WHEN $3 ~ '^\\$2[aby]\\$' THEN $3 ELSE crypt($3, gen_salt('bf')) END
-      WHERE NOT EXISTS (SELECT 1 FROM profiles WHERE id = $1 AND role = 'superadmin')
+      SELECT p.id, lower(trim(a.email)),
+             CASE WHEN a.password_hash ~ '^\\$2[aby]\\$' THEN a.password_hash ELSE crypt(a.password_hash, gen_salt('bf')) END
+      FROM registration_applications a
+      JOIN profiles p ON p.id = $1::uuid AND lower(p.email) = lower(trim(a.email)) AND p.role <> 'superadmin'
+      WHERE a.id = $2::uuid AND a.password_hash IS NOT NULL
       ON CONFLICT (id) DO UPDATE SET
         encrypted_password = EXCLUDED.encrypted_password,
         updated_at = NOW()`,
