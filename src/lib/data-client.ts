@@ -4,6 +4,8 @@
 import type { DbQueryRequest } from '../types/db-query';
 
 const TOKEN_KEY = 'fma_sis_token';
+// The superadmin's own token, kept aside while they impersonate another user.
+const IMPERSONATOR_KEY = 'fma_sis_impersonator_token';
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -216,7 +218,10 @@ export const db = {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
-      if (res.data?.session?.access_token) setToken(res.data.session.access_token);
+      if (res.data?.session?.access_token) {
+        setToken(res.data.session.access_token);
+        localStorage.removeItem(IMPERSONATOR_KEY);
+      }
       return {
         data: res.data
           ? { user: res.data.user, session: res.data.session }
@@ -270,7 +275,34 @@ export const db = {
 
     signOut: async (_options?: { scope?: string }): Promise<{ error: { message: string } | null }> => {
       setToken(null);
+      localStorage.removeItem(IMPERSONATOR_KEY);
       return { error: null };
+    },
+
+    /** Superadmin only: switch this browser's session to another user. */
+    startImpersonation: async (target: { userId?: string; email?: string }): Promise<{ error: { message: string } | null }> => {
+      const ownToken = getToken();
+      if (!ownToken) return { error: { message: 'Not authenticated' } };
+      const res = await apiFetch<{ data: { token: string } | null; error: { message: string } | null }>('/api/auth/impersonate', {
+        method: 'POST',
+        body: JSON.stringify(target),
+      });
+      if (res.error || !res.data?.token) return { error: res.error ?? { message: 'Could not impersonate this user.' } };
+      localStorage.setItem(IMPERSONATOR_KEY, ownToken);
+      setToken(res.data.token);
+      return { error: null };
+    },
+
+    /** Switch back to the superadmin's own session. */
+    stopImpersonation: async (): Promise<void> => {
+      const ownToken = localStorage.getItem(IMPERSONATOR_KEY);
+      try {
+        await apiFetch('/api/auth/stop-impersonation', { method: 'POST' });
+      } catch {
+        // Logging the switch back is best-effort; the switch itself must happen.
+      }
+      setToken(ownToken);
+      localStorage.removeItem(IMPERSONATOR_KEY);
     },
 
     onAuthStateChange(

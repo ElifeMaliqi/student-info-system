@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore, Trash2, VenetianMask } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useModulePermissions, useUser } from '../context/UserContext';
 import { api } from '../services/api';
@@ -10,6 +10,7 @@ import { RegistrationApplication, Class, UserWithRole } from '../types';
 import { Skeleton } from '../components/Skeleton';
 import { effectiveAge } from '../utils/age';
 import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
+import { supabase } from '../lib/supabase';
 
 export default function RegistrationApplications() {
   const { t } = useLanguage();
@@ -202,6 +203,29 @@ export default function RegistrationApplications() {
     }
   };
 
+  // Superadmin only: switch this browser to the user's account (the server checks
+  // the role too). Logged on the server; full reload so nothing stays loaded as
+  // the superadmin.
+  const doImpersonate = async (key: string, target: { userId?: string; email?: string }, name: string, e?: { stopPropagation: () => void }) => {
+    e?.stopPropagation();
+    const confirmed = await ask({
+      title: t('impersonate.confirm_title').replace('{name}', name),
+      message: t('impersonate.confirm_msg'),
+      confirmLabel: t('impersonate.button'),
+      danger: false,
+      withNote: false,
+    });
+    if (!confirmed) return;
+    setProcessingId(key);
+    const { error } = await supabase.auth.startImpersonation(target);
+    if (error) {
+      setProcessingId(null);
+      alert(error.message);
+      return;
+    }
+    window.location.assign('/dashboard');
+  };
+
   // Students and teachers are listed separately; every filter works within the chosen group.
   const roleApps = applications.filter(a => a.role === roleTab);
 
@@ -337,6 +361,16 @@ export default function RegistrationApplications() {
                       </div>
                     )}
                   </div>
+                  {isSuperadmin && (
+                    <button
+                      onClick={(e) => doImpersonate(a.id, { userId: a.id }, `${a.firstName} ${a.lastName}`, e)}
+                      disabled={!!processingId}
+                      className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                      title={t('impersonate.button')}
+                    >
+                      {processingId === a.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <VenetianMask className="w-5 h-5" />}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -433,6 +467,16 @@ export default function RegistrationApplications() {
                 </div>
 
                 <div className="flex gap-2">
+                {isSuperadmin && app.status === 'approved' && (
+                  <button
+                    onClick={(e) => doImpersonate(app.id, { email: app.email }, `${app.firstName} ${app.lastName}`, e)}
+                    disabled={!!processingId}
+                    className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                    title={t('impersonate.button')}
+                  >
+                    {processingId === app.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <VenetianMask className="w-5 h-5" />}
+                  </button>
+                )}
                 {app.status === 'pending' && !app.isArchived && (
                   <div className="flex gap-2">
                     {(!permOverridden || canUpdate) && (

@@ -4,6 +4,8 @@ import { createContext, useContext, useEffect, useState, useRef, useCallback, Re
 import { User, Role, SystemRole } from '../types';
 
 const TOKEN_KEY = 'fma_sis_token';
+// The superadmin's own token while they impersonate someone (see data-client).
+const IMPERSONATOR_KEY = 'fma_sis_impersonator_token';
 
 function getToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -11,7 +13,23 @@ function getToken(): string | null {
 }
 
 function removeToken() {
-  if (typeof window !== 'undefined') localStorage.removeItem(TOKEN_KEY);
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(IMPERSONATOR_KEY);
+}
+
+/**
+ * An impersonation session that is no longer valid (expired after 1 hour, or the
+ * user was removed) falls back to the superadmin's own session instead of
+ * logging them out. Returns true when a saved token was put back.
+ */
+function restoreImpersonator(): boolean {
+  if (typeof window === 'undefined') return false;
+  const own = localStorage.getItem(IMPERSONATOR_KEY);
+  if (!own) return false;
+  localStorage.setItem(TOKEN_KEY, own);
+  localStorage.removeItem(IMPERSONATOR_KEY);
+  return true;
 }
 
 function authHeaders(): Record<string, string> {
@@ -79,9 +97,16 @@ async function fetchUserData(_userId: string): Promise<User | null> {
   };
 }
 
-async function validateSession(): Promise<{ id: string; email: string } | null> {
-  const token = getToken();
-  if (!token) return null;
+export interface Impersonator {
+  id: string;
+  name: string;
+}
+
+type SessionInfo = { user: { id: string; email: string }; impersonator: Impersonator | null };
+
+/** 'invalid' = the server answered that the token is not (or no longer) valid. */
+async function fetchSession(token: string | null): Promise<SessionInfo | 'invalid' | null> {
+  if (!token) return 'invalid';
   try {
     const resp = await fetch('/api/auth/session', {
       method: 'POST',
@@ -89,14 +114,35 @@ async function validateSession(): Promise<{ id: string; email: string } | null> 
     });
     if (!resp.ok) return null;
     const json = await resp.json();
-    return json?.data?.session?.user ?? null;
+    const user = json?.data?.session?.user;
+    if (!user) return 'invalid';
+    return { user, impersonator: json?.data?.impersonator ?? null };
   } catch {
     return null;
   }
 }
 
+async function validateSession(): Promise<SessionInfo | null> {
+  let token = getToken();
+  let session = await fetchSession(token);
+  if (session === 'invalid' && restoreImpersonator()) {
+    token = getToken();
+    session = await fetchSession(token);
+  }
+  if (!session || session === 'invalid') return null;
+  // A saved superadmin token with no impersonation running is left over
+  // (e.g. someone else signed in on this browser); drop it. Skipped if the token
+  // changed meanwhile (an impersonation was just started).
+  if (!session.impersonator && getToken() === token && typeof window !== 'undefined') {
+    localStorage.removeItem(IMPERSONATOR_KEY);
+  }
+  return session;
+}
+
 interface UserContextType {
   user: User | null;
+  /** The superadmin behind this session while they impersonate `user`. */
+  impersonator: Impersonator | null;
   ready: boolean;
   setUser: (user: User | null) => void;
   reloadUser: () => Promise<void>;
@@ -104,6 +150,7 @@ interface UserContextType {
 
 const UserContext = createContext<UserContextType>({
   user: null,
+  impersonator: null,
   ready: false,
   setUser: () => {},
   reloadUser: async () => {},
@@ -111,19 +158,22 @@ const UserContext = createContext<UserContextType>({
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [impersonator, setImpersonator] = useState<Impersonator | null>(null);
   const [ready, setReady] = useState(false);
   const userRef = useRef<User | null>(null);
 
   useEffect(() => { userRef.current = user; }, [user]);
 
   const reloadUser = useCallback(async () => {
-    const sessionUser = await validateSession();
-    if (!sessionUser) {
+    const session = await validateSession();
+    if (!session) {
       removeToken();
+      setImpersonator(null);
       setUser(null);
       return;
     }
-    const appUser = await fetchUserData(sessionUser.id);
+    const appUser = await fetchUserData(session.user.id);
+    setImpersonator(session.impersonator);
     setUser(appUser);
   }, []);
 
@@ -131,18 +181,20 @@ export function UserProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function boot() {
-      const sessionUser = await validateSession();
+      const session = await validateSession();
       if (cancelled) return;
 
-      if (!sessionUser) {
+      if (!session) {
         removeToken();
+        setImpersonator(null);
         setUser(null);
         setReady(true);
         return;
       }
 
-      const appUser = await fetchUserData(sessionUser.id);
+      const appUser = await fetchUserData(session.user.id);
       if (cancelled) return;
+      setImpersonator(session.impersonator);
       setUser(appUser);
       setReady(true);
     }
@@ -168,7 +220,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
   }, [reloadUser]);
 
   return (
-    <UserContext.Provider value={{ user, ready, setUser, reloadUser }}>
+    <UserContext.Provider value={{ user, impersonator, ready, setUser, reloadUser }}>
       {children}
     </UserContext.Provider>
   );

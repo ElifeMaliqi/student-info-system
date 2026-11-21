@@ -8,7 +8,7 @@ import ForcePasswordChange from '../../views/ForcePasswordChange';
 import { supabase } from '../../lib/supabase';
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  const { user, ready, setUser, reloadUser } = useUser();
+  const { user, impersonator, ready, setUser, reloadUser } = useUser();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -34,7 +34,8 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
   if (!user) return null;
 
-  if (user.mustChangePassword) {
+  // A superadmin impersonating someone must not be asked to set that user's password.
+  if (user.mustChangePassword && !impersonator) {
     return <ForcePasswordChange />;
   }
 
