@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../server/auth';
 import { withUserContext } from '../../../server/db';
-import { executeQuery } from '../../../server/query-executor';
+import { executeQuery, type EmbedPolicy } from '../../../server/query-executor';
 import {
   authorizeDbRequest,
   publicLookupColumns,
@@ -74,6 +74,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result, { status });
   }
 
+  let embedPolicy: EmbedPolicy | undefined;
+
   // ── Unauthenticated public surface (registration screen only) ──────────────
   const isPublicInsert =
     body.action === 'insert' && body.table === 'registration_applications';
@@ -118,6 +120,7 @@ export async function POST(req: NextRequest) {
   } else {
     // Authenticated: enforce role-based access (may inject ownership filters).
     const decision = authorizeDbRequest(user, body);
+    embedPolicy = decision.embedPolicy;
     if (!decision.allowed) {
       return NextResponse.json(
         { data: null, error: { message: decision.message || 'Forbidden' } },
@@ -127,7 +130,7 @@ export async function POST(req: NextRequest) {
   }
 
   const result = await withUserContext(user?.id ?? null, async (client) =>
-    executeQuery(client, body)
+    executeQuery(client, body, embedPolicy)
   );
 
   const writeActivity = writeActivityOf(body.action);

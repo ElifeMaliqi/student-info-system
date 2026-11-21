@@ -15,6 +15,7 @@
  */
 
 import type { DbQueryRequest } from '../types/db-query';
+import { embeddedTablesOf, type EmbedPolicy } from './query-executor';
 
 export interface AuthzUser {
   id: string;
@@ -73,6 +74,25 @@ const NO_GENERIC_ACCESS_TABLES = new Set(['auth_users', 'password_reset_tokens']
 // Role definitions: superadmin only (Superadmin > Roles).
 const SUPERADMIN_ONLY_TABLES = new Set(['system_roles', 'role_permissions']);
 
+// The only tables a `select` may embed (e.g. `teacher:profiles!fk(...)`). Embedded
+// rows used to skip every rule above, so `auth_users!profiles_id_fkey(encrypted_password)`
+// returned password hashes. These are the tables the app actually embeds.
+const EMBED_ALLOWED_TABLES = new Set([
+  'profiles',
+  'classes',
+  'class_sessions',
+  'class_enrollments',
+  'grade_tables',
+  'grade_table_entries',
+  'programs',
+  'students',
+  'calendar_event_participants',
+]);
+
+// Other people's profiles embedded in a student's query keep only these columns
+// (names on classes, calendar events, announcements). Their own profile is whole.
+const STUDENT_VISIBLE_PROFILE_COLUMNS = ['id', 'first_name', 'last_name', 'email', 'avatar_url', 'role'] as const;
+
 const bodyRows = (req: DbQueryRequest): Record<string, unknown>[] =>
   !req.body ? [] : (Array.isArray(req.body) ? req.body : [req.body]).filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
 
@@ -80,6 +100,8 @@ export interface AuthzDecision {
   allowed: boolean;
   status?: number;
   message?: string;
+  /** Limits on embedded rows, passed to executeQuery. */
+  embedPolicy?: EmbedPolicy;
 }
 
 const DENY: AuthzDecision = { allowed: false, status: 403, message: 'Forbidden' };
@@ -119,6 +141,15 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
   const action = req.action || 'select';
 
   if (!table || typeof table !== 'string') return DENY;
+
+  // Embedded tables: only the known ones, for every role.
+  let embedded: string[];
+  try {
+    embedded = action === 'select' ? embeddedTablesOf(req.select, table) : [];
+  } catch {
+    return DENY;
+  }
+  if (embedded.some((t) => !EMBED_ALLOWED_TABLES.has(t))) return DENY;
 
   // Admin notes carry per-author private visibility, enforced only in /api/notes.
   if (table === 'admin_notes') return DENY;
@@ -178,9 +209,18 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
 
     // SELECT
     if (STUDENT_READ_DENY.has(table)) return DENY;
+    if (embedded.some((t) => STUDENT_READ_DENY.has(t))) return DENY;
     const ownColumn = STUDENT_OWNED_TABLES[table];
     if (ownColumn) injectEqFilter(req, ownColumn, user.id);
-    return { allowed: true };
+    // Embedded rows follow the same ownership rules as top-level ones.
+    const scope: NonNullable<EmbedPolicy['scope']> = {};
+    for (const [t, column] of Object.entries(STUDENT_OWNED_TABLES)) {
+      if (t !== 'profiles') scope[t] = { column, value: user.id };
+    }
+    return {
+      allowed: true,
+      embedPolicy: { scope, profileColumns: { selfId: user.id, allowed: STUDENT_VISIBLE_PROFILE_COLUMNS } },
+    };
   }
 
   // Unknown / unexpected role: deny by default.

@@ -137,6 +137,38 @@ function parseSelectSpec(select: string, parentTable: string): { columns: string
   return { columns: columns.length ? columns : ['*'], embeds };
 }
 
+/** Every table a `select` string embeds, at any depth (e.g. `teacher:profiles!fk(...)`). */
+export function embeddedTablesOf(select: string | undefined, table: string): string[] {
+  const out: string[] = [];
+  const walk = (embeds: EmbedSpec[]) => {
+    for (const e of embeds) {
+      out.push(e.table);
+      if (e.nested?.length) walk(e.nested);
+    }
+  };
+  walk(parseSelectSpec(select || '*', table).embeds);
+  return out;
+}
+
+/**
+ * Limits on embedded rows, set by authorization for roles that may only see
+ * part of the data (students). Top-level rows are scoped by filters instead.
+ */
+export interface EmbedPolicy {
+  /** Embedded rows of these tables are limited to `column = value` (counts are not). */
+  scope?: Record<string, { column: string; value: unknown }>;
+  /** Embedded profiles of anyone but `selfId` keep only the `allowed` columns. */
+  profileColumns?: { selfId: string; allowed: readonly string[] };
+}
+
+function limitProfile(row: Row, fkVal: unknown, policy: EmbedPolicy | undefined): Row {
+  const pc = policy?.profileColumns;
+  if (!pc || fkVal === pc.selfId) return row;
+  const out: Row = {};
+  for (const k of Object.keys(row)) if (pc.allowed.includes(k)) out[k] = row[k];
+  return out;
+}
+
 function quoteIdent(name: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error(`Invalid identifier: ${name}`);
   return `"${name}"`;
@@ -242,7 +274,8 @@ async function attachEmbeds(
   client: pg.PoolClient,
   rows: Row[],
   parentTable: string,
-  embeds: EmbedSpec[]
+  embeds: EmbedSpec[],
+  policy?: EmbedPolicy
 ): Promise<Row[]> {
   if (!rows.length || !embeds.length) return rows;
 
@@ -267,23 +300,29 @@ async function attachEmbeds(
 
           const cols = emb.columns === '*' ? '*' : emb.columns;
           assertSafeColumnList(cols);
-          const { rows: childRows } = await client.query(
-            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1`,
-            [fkVal]
+          const scope = policy?.scope?.[emb.table];
+          const { rows: fetched } = await client.query(
+            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1${scope ? ` AND ${quoteIdent(scope.column)} = $2` : ''}`,
+            scope ? [fkVal, scope.value] : [fkVal]
           );
+          // A list of profiles is never the caller's own row alone, so it is always limited.
+          const childRows = emb.table === 'profiles' ? (fetched as Row[]).map((r) => limitProfile(r, undefined, policy)) : fetched;
           out[emb.alias] = emb.nested?.length
-            ? await attachEmbeds(client, childRows as Row[], emb.table, emb.nested)
+            ? await attachEmbeds(client, childRows as Row[], emb.table, emb.nested, policy)
             : childRows;
         } else {
           const cols = emb.columns === '*' ? '*' : emb.columns;
           assertSafeColumnList(cols);
+          const scope = policy?.scope?.[emb.table];
           const { rows: childRows } = await client.query(
-            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1 LIMIT 1`,
-            [fkVal]
+            `SELECT ${cols} FROM ${quoteIdent(emb.table)} WHERE ${quoteIdent(emb.remoteKey)} = $1${scope ? ` AND ${quoteIdent(scope.column)} = $2` : ''} LIMIT 1`,
+            scope ? [fkVal, scope.value] : [fkVal]
           );
           let child = childRows[0] as Row | undefined;
+          // Single embeds join on the profile's own id (remoteKey), so fkVal is that id.
+          if (child && emb.table === 'profiles') child = limitProfile(child, emb.remoteKey === 'id' ? fkVal : undefined, policy);
           if (child && emb.nested?.length) {
-            [child] = await attachEmbeds(client, [child], emb.table, emb.nested);
+            [child] = await attachEmbeds(client, [child], emb.table, emb.nested, policy);
           }
           out[emb.alias] = child ?? null;
         }
@@ -295,7 +334,8 @@ async function attachEmbeds(
 
 export async function executeQuery(
   client: pg.PoolClient,
-  req: DbQueryRequest
+  req: DbQueryRequest,
+  policy?: EmbedPolicy
 ): Promise<{ data: unknown; error: { message: string } | null; count?: number | null }> {
   try {
     const table = quoteIdent(req.table);
@@ -333,7 +373,7 @@ export async function executeQuery(
       }
 
       const { rows } = await client.query(sql, params);
-      let data: unknown = await attachEmbeds(client, rows as Row[], req.table, embeds);
+      let data: unknown = await attachEmbeds(client, rows as Row[], req.table, embeds, policy);
 
       if (req.count === 'exact') {
         const { sql: w, nextIdx: ni } = buildWhere(req.filters, req.or, [], 1);
