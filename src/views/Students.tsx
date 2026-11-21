@@ -810,7 +810,6 @@ export default function Students() {
 
     if (!form.firstName.trim())  { setEnrollError(t('students.err_first_name')); return; }
     if (!form.lastName.trim())   { setEnrollError(t('students.err_last_name')); return; }
-    if (!form.parentFirstName.trim()) { setEnrollError(t('students.err_parent')); return; }
     if (!form.age && !form.dateOfBirth) { setEnrollError('Age is required.'); return; }
     const enrollAgeError = validateAgeInput(form.age, form.dateOfBirth);
     if (enrollAgeError) { setEnrollError(enrollAgeError); return; }
@@ -828,7 +827,7 @@ export default function Students() {
         email:            form.email.trim().toLowerCase(),
         firstName:        form.firstName.trim(),
         lastName:         form.lastName.trim(),
-        parentFirstName:  form.parentFirstName.trim(),
+        parentFirstName:  form.parentFirstName.trim() || undefined,
         phone:            form.phone.trim(),
         secondaryPhone:   form.secondaryPhone.trim() || undefined,
         location:         form.location,
@@ -911,17 +910,6 @@ export default function Students() {
         <div className="glass-card rounded-3xl p-6 lg:p-8">
           <form className="space-y-6" onSubmit={handleAdminEnroll}>
 
-            {enrollError && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                {enrollError}
-              </motion.div>
-            )}
-
             {/* Name row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -944,7 +932,7 @@ export default function Students() {
 
             {/* Parent name */}
             <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name *</label>
+              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name</label>
               <input
                 type="text" value={form.parentFirstName}
                 onChange={e => setField('parentFirstName', e.target.value)}
@@ -1090,8 +1078,18 @@ export default function Students() {
 
             {isPrivileged && <NoteField value={note} onChange={setNote} />}
 
-            {/* Footer actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
+            {/* Footer actions — validation/enrollment errors show here, next to Cancel */}
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-white/5">
+              {enrollError && (
+                <motion.div
+                  initial={{ opacity: 0, x: 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-start gap-2 mr-auto sm:mr-0 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  {enrollError}
+                </motion.div>
+              )}
               <button
                 type="button"
                 onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); setDocFile(null); }}

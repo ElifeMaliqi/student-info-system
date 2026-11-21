@@ -2501,7 +2501,7 @@ export const api = {
       email: string;
       firstName: string;
       lastName: string;
-      parentFirstName: string;
+      parentFirstName?: string;
       phone: string;
       secondaryPhone?: string;
       location: string;
@@ -2550,7 +2550,7 @@ export const api = {
         email:             enrollData.email,
         first_name:        enrollData.firstName,
         last_name:         enrollData.lastName,
-        parent_first_name: enrollData.parentFirstName,
+        parent_first_name: enrollData.parentFirstName || null,
         password_hash:     tempPassword,
         role:              'student',
         program:           enrollData.program,
@@ -2574,7 +2574,7 @@ export const api = {
           email:             enrollData.email,
           first_name:        enrollData.firstName,
           last_name:         enrollData.lastName,
-          parent_first_name: enrollData.parentFirstName,
+          parent_first_name: enrollData.parentFirstName || null,
           password_hash:     tempPassword,
           role:              'student',
           program:           enrollData.program,
