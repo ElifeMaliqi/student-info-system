@@ -77,6 +77,12 @@ export interface Invoice {
   discountPercent: number;
   status: 'paid' | 'partial' | 'not_paid' | 'overdue';
   isManual?: boolean;
+  /** Student's age (from date of birth, else the stored age); null if unknown. */
+  studentAge?: number | null;
+  /** When the status was last changed; null if never changed since creation. */
+  statusChangedAt?: string | null;
+  /** Who last changed the status, as "E. Maliqi"; null = automatic (System) or never changed. */
+  statusChangedBy?: string | null;
 }
 
 export interface InvoiceSettings {

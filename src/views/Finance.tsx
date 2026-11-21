@@ -1098,7 +1098,10 @@ export default function Finance() {
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
                   <div>
                     <h2 className="text-sm font-bold text-white">Invoice Status</h2>
-                    <p className="text-[11px] text-white/40 mt-0.5">{statusInvoice.title} - {statusInvoice.studentName}</p>
+                    <p className="text-[11px] text-white/40 mt-0.5">
+                      {statusInvoice.title} - {statusInvoice.studentName}
+                      {statusInvoice.studentAge != null && ` (${t('finance.age_yrs').replace('{age}', String(statusInvoice.studentAge))})`}
+                    </p>
                   </div>
                   <button onClick={() => setStatusInvoice(null)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"><X className="w-4 h-4" /></button>
                 </div>
@@ -1107,6 +1110,13 @@ export default function Finance() {
                     <span className="text-sm text-white/60">Current Status</span>
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[statusInvoice.status]}`}>{t(STATUS_LABEL[statusInvoice.status])}</span>
                   </div>
+                  {statusInvoice.statusChangedAt && (
+                    <p className="text-[11px] text-white/40 -mt-2 px-1">
+                      {t('finance.status_changed_by')
+                        .replace('{name}', statusInvoice.statusChangedBy || t('finance.system'))
+                        .replace('{date}', new Date(statusInvoice.statusChangedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}
+                    </p>
+                  )}
                   <NoteField value={note} onChange={setNote} />
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Mark Status As:</label>

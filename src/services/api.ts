@@ -712,7 +712,7 @@ export const api = {
         .from('invoices')
         .select(`
           *,
-          student:profiles!invoices_student_id_fkey(first_name, last_name),
+          student:profiles!invoices_student_id_fkey(first_name, last_name, age, date_of_birth),
           class:classes!invoices_class_id_fkey(
             title,
             teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
@@ -728,6 +728,19 @@ export const api = {
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
+
+      // Who last changed each status, as "E. Maliqi". Staff views only; students never see it.
+      const changerNames: Record<string, string> = {};
+      const changerIds = studentUserId
+        ? []
+        : [...new Set((data || []).map((inv: any) => inv.status_changed_by).filter(Boolean))] as string[];
+      if (changerIds.length > 0) {
+        const { data: changers } = await supabase.from('profiles').select('id, first_name, last_name').in('id', changerIds);
+        for (const p of (changers || []) as any[]) {
+          const first = (p.first_name || '').trim();
+          changerNames[p.id] = `${first ? `${first[0].toUpperCase()}. ` : ''}${(p.last_name || '').trim()}`.trim();
+        }
+      }
 
       return (data || []).map((inv: any) => ({
         id: inv.id,
@@ -746,6 +759,9 @@ export const api = {
         discountPercent: parseFloat(inv.discount_percent || '0'),
         status: inv.status as Invoice['status'],
         isManual: inv.is_manual === true,
+        studentAge: inv.student ? effectiveAge(inv.student.age, inv.student.date_of_birth) : null,
+        statusChangedAt: inv.status_changed_at ?? null,
+        statusChangedBy: inv.status_changed_by ? changerNames[inv.status_changed_by] ?? null : null,
       }));
     },
 
