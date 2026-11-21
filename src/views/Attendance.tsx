@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { SortIcon } from '../components/SortHeader';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Calendar as CalendarIcon, CheckCircle2, XCircle, Clock, AlertTriangle,
   Search, Download, X, Loader2, Upload, FileSpreadsheet,
-  GraduationCap, ArrowUpDown,
+  GraduationCap,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
@@ -208,7 +209,7 @@ export default function Attendance() {
         className={`flex items-center gap-1 transition-colors ${active ? 'text-[#fc0ce4]' : 'hover:text-white'}`}
       >
         {label}
-        <ArrowUpDown className={`w-3 h-3 ${active ? 'opacity-100' : 'opacity-40'}`} />
+        <SortIcon active={active} dir={sortDir} />
       </button>
     );
   }

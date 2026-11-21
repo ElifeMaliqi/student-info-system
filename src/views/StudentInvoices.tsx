@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { SortHeader, type SortDir } from '../components/SortHeader';
 import { motion } from 'motion/react';
 import {
   CreditCard, CheckCircle, Clock, AlertCircle,
@@ -78,6 +79,8 @@ export default function StudentInvoices() {
     return { months, years };
   }, [invoices]);
 
+  const [dueSort, setDueSort] = useState<SortDir | null>(null);
+
   const filtered = useMemo(() => {
     let list = invoices;
     if (statusFilter !== 'all') list = list.filter(i => i.status === statusFilter);
@@ -91,8 +94,17 @@ export default function StudentInvoices() {
         (i.teacherName || '').toLowerCase().includes(q)
       );
     }
+    // Due-date sort from the table header; null keeps the default (newest month first).
+    if (dueSort) {
+      const dir = dueSort === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        if (!a.dueDate) return 1;   // invoices without a due date always go last
+        if (!b.dueDate) return -1;
+        return dir * a.dueDate.localeCompare(b.dueDate);
+      });
+    }
     return list;
-  }, [invoices, statusFilter, filterMonth, filterYear, search]);
+  }, [invoices, statusFilter, filterMonth, filterYear, search, dueSort]);
 
   const hasFilters = statusFilter !== 'all' || !!filterMonth || !!filterYear || !!search.trim();
 
@@ -204,7 +216,14 @@ export default function StudentInvoices() {
                   <th className="pb-3 font-medium">{t('table.teacher')}</th>
                   <th className="pb-3 font-medium">{t('finance.col_month')}</th>
                   <th className="pb-3 font-medium">{t('finance.col_year')}</th>
-                  <th className="pb-3 font-medium">{t('finance.due_date')}</th>
+                  <th className="pb-3 font-medium">
+                    <SortHeader
+                      label={t('finance.due_date')}
+                      active={dueSort !== null}
+                      dir={dueSort ?? 'asc'}
+                      onClick={() => setDueSort(d => (d === 'asc' ? 'desc' : 'asc'))}
+                    />
+                  </th>
                   <th className="pb-3 font-medium">{t('finance.amount')}</th>
                   <th className="pb-3 font-medium">{t('table.status')}</th>
                 </tr>
