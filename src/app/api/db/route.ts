@@ -4,37 +4,52 @@ import { withUserContext } from '../../../server/db';
 import { executeQuery } from '../../../server/query-executor';
 import {
   authorizeDbRequest,
-  PRIVILEGED_ROLES,
   publicLookupColumns,
   sanitizePublicRegistration,
 } from '../../../server/authz';
 import type { DbQueryRequest } from '../../../types/db-query';
+import { NAMED_QUERIES } from '../../../server/named-queries';
 
 export async function POST(req: NextRequest) {
   const token = getBearerToken(req.headers.get('authorization'));
   const user = token ? await verifyToken(token) : null;
-  const body = (await req.json()) as DbQueryRequest & { query?: string; params?: any[] };
+  const body = (await req.json()) as DbQueryRequest & { query?: unknown; queryName?: string; params?: unknown[] };
 
-  // Raw SQL passthrough — used by privileged admin tooling (role management,
-  // invoice creation, account provisioning). Restricted to admins/superadmins so
-  // a logged-in student or teacher can't run arbitrary SQL.
-  if (body.query) {
+  // Raw SQL from the browser is no longer accepted (it allowed SQL injection by
+  // design: any admin session could run any statement). Use a named query.
+  if (body.query !== undefined) {
+    return NextResponse.json({ data: null, error: { message: 'Raw SQL is not accepted' } }, { status: 400 });
+  }
+
+  // Named queries: fixed SQL kept on the server (src/server/named-queries.ts);
+  // the client only picks one by name and supplies bind parameters.
+  if (body.queryName !== undefined) {
     if (!user) {
       return NextResponse.json({ data: null, error: { message: 'Not authenticated' } }, { status: 401 });
     }
-    if (!PRIVILEGED_ROLES.has(user.role)) {
+    const named = typeof body.queryName === 'string' && Object.prototype.hasOwnProperty.call(NAMED_QUERIES, body.queryName)
+      ? NAMED_QUERIES[body.queryName]
+      : null;
+    if (!named) {
+      return NextResponse.json({ data: null, error: { message: 'Unknown query' } }, { status: 400 });
+    }
+    if (!(named.roles as readonly string[]).includes(user.role)) {
       return NextResponse.json({ data: null, error: { message: 'Forbidden' } }, { status: 403 });
+    }
+    const params = Array.isArray(body.params) ? body.params : [];
+    const invalid = named.validate?.(params);
+    if (invalid) {
+      return NextResponse.json({ data: null, error: { message: invalid } }, { status: 400 });
     }
 
     const result = await withUserContext(user.id, async (client) => {
       try {
-        const queryResult = await client.query(body.query!, body.params || []);
+        const queryResult = await client.query(named.sql, params);
         return { rows: queryResult.rows, error: null };
       } catch (e: any) {
-        console.error('[/api/db] Query error:', e.message);
-        // This path is admin-only and already accepts arbitrary SQL, so the real
-        // Postgres message reveals nothing new — while a bare "Query failed" left
-        // every failure here (account creation included) impossible to diagnose.
+        console.error(`[/api/db] Named query ${body.queryName} failed:`, e.message);
+        // Admin-only queries: the Postgres message (e.g. duplicate email) is what
+        // the admin needs to see, and the SQL itself is fixed.
         const message = e.detail ? `${e.message} (${e.detail})` : e.message;
         return { rows: [], error: { message: message || 'Query failed' } };
       }
