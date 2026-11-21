@@ -107,6 +107,8 @@ export default function Students() {
   const { user } = useUser();
   // Only admins/superadmins may edit or delete student records.
   const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  // Only superadmins may change a student's monthly price; admins see it disabled.
+  const isSuperadmin = user?.role === 'superadmin';
   const [view, setView] = useState<'list' | 'add' | 'success'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -2088,9 +2090,11 @@ export default function Students() {
                     placeholder={pricing
                       ? `${t('price.placeholder')}: ${priceForAge(effectiveAge(editForm.age, editForm.dateOfBirth), pricing.agePrices, pricing.defaultAmount).toFixed(2)}`
                       : t('price.placeholder')}
-                    className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
+                    disabled={!isSuperadmin}
+                    title={isSuperadmin ? undefined : t('price.superadmin_only')}
+                    className={`glass-input w-full px-3 py-2.5 rounded-xl text-sm ${isSuperadmin ? '' : 'opacity-50 cursor-not-allowed'}`}
                   />
-                  <p className="text-[10px] text-white/30 mt-1 ml-1">{t('price.auto_hint')}</p>
+                  <p className="text-[10px] text-white/30 mt-1 ml-1">{isSuperadmin ? t('price.auto_hint') : t('price.superadmin_only')}</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

@@ -53,6 +53,8 @@ export default function Finance() {
 
   // Only admins/superadmins may import payment documents.
   const canImportDocs = user?.role === 'admin' || user?.role === 'superadmin';
+  // Admins don't get Invoice Settings or the totals cards; superadmins do.
+  const isAdmin = user?.role === 'admin';
 
   // Optional admin note for whichever popup/form is open.
   const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
@@ -738,7 +740,7 @@ export default function Finance() {
               Import Document
             </button>
           )}
-          {(!permOverridden || canCreate) && (
+          {!isAdmin && (!permOverridden || canCreate) && (
             <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
               <Settings2 className="w-4 h-4" />
               Invoice Settings
@@ -747,7 +749,7 @@ export default function Finance() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {!isAdmin && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20"><CreditCard className="w-6 h-6 text-emerald-400" /></div>
           <div>
@@ -769,7 +771,7 @@ export default function Finance() {
             <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.overdue_amount')}</div>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
         <div className="flex flex-col gap-4 mb-6 shrink-0">

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BookOpen, Plus, X, Clock, Users, ChevronDown, Trash2, UserPlus, GraduationCap, Edit2, Loader2, RefreshCw, Link2, Search, Check } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useModulePermissions } from '../context/UserContext';
+import { useModulePermissions, useUser } from '../context/UserContext';
 import { api } from '../services/api';
 import { Class, ClassSession, ClassEnrollment, Program } from '../types';
 import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
@@ -18,7 +18,14 @@ function generateCode(): string {
 
 export default function AdminPrograms() {
   const { t } = useLanguage();
-  const { isOverridden: permOverridden, canCreate, canUpdate, canDelete } = useModulePermissions('programs');
+  const perms = useModulePermissions('programs');
+  // Admins see degrees and classes read-only; only superadmins add, edit or delete.
+  const { user } = useUser();
+  const readOnly = user?.role === 'admin';
+  const permOverridden = perms.isOverridden || readOnly;
+  const canCreate = perms.canCreate && !readOnly;
+  const canUpdate = perms.canUpdate && !readOnly;
+  const canDelete = perms.canDelete && !readOnly;
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -804,7 +811,7 @@ export default function AdminPrograms() {
                     <td className="py-3 px-3 text-white/70 max-w-[280px] truncate" title={formatSchedule(cls.sessions)}>{formatSchedule(cls.sessions)}</td>
                     <td className="py-3 px-3 text-white/70">{selectedProgram}</td>
                     <td className="py-3 px-3">
-                      <div className="flex items-center gap-2">
+                      {!readOnly && <div className="flex items-center gap-2">
                         <button
                           onClick={() => { void openClassEditModal(cls); }}
                           className="px-2 py-1 text-xs rounded-lg border border-white/15 hover:bg-white/10 transition-colors"
@@ -817,7 +824,7 @@ export default function AdminPrograms() {
                         >
                           {t('programs.remove')}
                         </button>
-                      </div>
+                      </div>}
                     </td>
                   </motion.tr>
                 ))}
@@ -910,7 +917,7 @@ export default function AdminPrograms() {
           <div className="glass-card rounded-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-white">{t('programs.col_teacher')}</h3>
-              {!isInlineEditing && (
+              {!isInlineEditing && !readOnly && (
                 <button
                   onClick={() => {
                     loadTeachers();
@@ -1034,7 +1041,7 @@ export default function AdminPrograms() {
                   Enrolled Students ({enrollments.length}/40)
                 </h3>
               </div>
-              {enrollments.length < 40 && (
+              {enrollments.length < 40 && !readOnly && (
                 <button
                   onClick={() => {
                     loadAvailableStudents();
@@ -1063,13 +1070,15 @@ export default function AdminPrograms() {
                         <p className="text-xs text-white/60 truncate">{enrollment.student?.email}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleRemoveStudent(enrollment.id)}
-                      className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors ml-2"
-                      title="Remove student"
-                    >
-                      <X size={16} />
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => handleRemoveStudent(enrollment.id)}
+                        className="p-1 rounded hover:bg-red-500/20 text-red-400 transition-colors ml-2"
+                        title="Remove student"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

@@ -24,6 +24,8 @@ interface AppSettings {
 
 export default function Settings({ role }: { role: 'admin' | 'teacher' | 'student' | 'superadmin' }) {
   const isAdminRole = role === 'admin' || role === 'superadmin';
+  // Platform, message/email templates, invoices, locations and data tabs are superadmin-only.
+  const isSuperadmin = role === 'superadmin';
   const [activeSection, setActiveSection] = useState('profile');
   const { t } = useLanguage();
   const { user, setUser } = useUser();
@@ -101,7 +103,12 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'profile', label: t('settings.profile'), icon: User },
   ];
 
-  const sections = isAdminRole ? adminSections : userSections;
+  const SUPERADMIN_ONLY_SECTIONS = new Set(['platform', 'messages', 'emails', 'invoices', 'locations', 'data']);
+  const sections = isSuperadmin
+    ? adminSections
+    : isAdminRole
+      ? adminSections.filter(s => !SUPERADMIN_ONLY_SECTIONS.has(s.id))
+      : userSections;
 
   // Load data
   useEffect(() => {
@@ -553,7 +560,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== PLATFORM SETTINGS (admin only) ===== */}
-          {activeSection === 'platform' && isAdminRole && (
+          {activeSection === 'platform' && isSuperadmin && (
             <>
               {/* Contact Info */}
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
@@ -640,7 +647,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== MESSAGE TEMPLATES (admin only) ===== */}
-          {activeSection === 'messages' && isAdminRole && (
+          {activeSection === 'messages' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <h2 className="font-display text-xl font-medium mb-1">
@@ -707,7 +714,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== EMAIL TEMPLATES (admin only) ===== */}
-          {activeSection === 'emails' && isAdminRole && (
+          {activeSection === 'emails' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <h2 className="font-display text-xl font-medium mb-1">
@@ -788,7 +795,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== INVOICE PRICING (admin only) ===== */}
-          {activeSection === 'invoices' && isAdminRole && (
+          {activeSection === 'invoices' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <div className="flex items-start justify-between gap-4 mb-1">
@@ -898,7 +905,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== LOCATIONS (admin only) ===== */}
-          {activeSection === 'locations' && isAdminRole && (
+          {activeSection === 'locations' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <div className="flex items-start justify-between gap-4 mb-1">
@@ -961,7 +968,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== DATA EXPORT (admin only) ===== */}
-          {activeSection === 'data' && isAdminRole && (
+          {activeSection === 'data' && isSuperadmin && (
             <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
               <div>
                 <h2 className="font-display text-xl font-medium mb-2">

@@ -5,6 +5,7 @@ import {
   Clock, X, Search, Loader2, Check,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useUser } from '../context/UserContext';
 import type { Program, Class, ClassEnrollment } from '../types';
 import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
 
@@ -43,6 +44,9 @@ type StudentOption = { id: string; firstName: string; lastName: string; email: s
 export type ClassWithProgram = Class & { programName: string };
 
 export const AdminClasses: React.FC = () => {
+  // Admins see classes read-only; only superadmins add, edit or delete.
+  const { user } = useUser();
+  const canManage = user?.role === 'superadmin';
   const [programs, setPrograms] = useState<Program[]>([]);
   const [classes, setClasses] = useState<ClassWithProgram[]>([]);
   const [teachers, setTeachers] = useState<StudentOption[]>([]);
@@ -356,12 +360,14 @@ export const AdminClasses: React.FC = () => {
             {programsWithClasses.length} degree{programsWithClasses.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all"
-        >
-          <Plus size={16} /> New Class
-        </button>
+        {canManage && (
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white text-sm font-semibold hover:opacity-90 transition-all"
+          >
+            <Plus size={16} /> New Class
+          </button>
+        )}
       </div>
 
       {error && !showModal && (
@@ -397,8 +403,8 @@ export const AdminClasses: React.FC = () => {
                       key={cls.id}
                       cls={cls}
                       onOpen={() => openView(cls)}
-                      onEdit={() => openEdit(cls)}
-                      onDelete={() => setDeleteId(cls.id)}
+                      onEdit={canManage ? () => openEdit(cls) : undefined}
+                      onDelete={canManage ? () => setDeleteId(cls.id) : undefined}
                     />
                   ))}
                 </div>
