@@ -701,6 +701,8 @@ export default function AdminPrograms() {
             </motion.div>
           )}
         </AnimatePresence>
+        {/* Delete-degree confirmation; without it "Delete degree" waited forever. */}
+        {confirmEl}
       </motion.div>
     );
   }
