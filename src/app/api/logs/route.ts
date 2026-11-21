@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../server/auth';
 import { query } from '../../../server/db';
 import { PRIVILEGED_ROLES } from '../../../server/authz';
+import { logImpersonatedAction } from '../../../server/impersonation';
 
 /**
  * Activity log of admin/superadmin actions (Settings > Logs, superadmin only).
@@ -53,6 +54,12 @@ export async function POST(req: NextRequest) {
   const description = typeof body?.description === 'string' ? body.description.trim().slice(0, 2000) : '';
   if (!area || !description) {
     return NextResponse.json({ error: 'area and description are required' }, { status: 400 });
+  }
+
+  // While impersonating, record it under the superadmin, not the impersonated user.
+  if (user.impersonation) {
+    await logImpersonatedAction(user, classify(description), description, area);
+    return NextResponse.json({ ok: true });
   }
 
   await query(

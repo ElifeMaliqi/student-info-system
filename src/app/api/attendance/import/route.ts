@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../../server/auth';
+import { logImpersonatedAction } from '../../../../server/impersonation';
 import { withUserContext } from '../../../../server/db';
 import { PRIVILEGED_ROLES } from '../../../../server/authz';
 import { parseAttendanceWorkbook } from '../../../../server/xlsx-attendance';
@@ -247,6 +248,7 @@ export async function POST(req: NextRequest) {
       };
     });
 
+    if (result.http === 200) await logImpersonatedAction(user, 'add', 'Attendance imported while impersonating');
     return NextResponse.json(result.body, { status: result.http });
   } catch (e) {
     console.error('[/api/attendance/import]', e);

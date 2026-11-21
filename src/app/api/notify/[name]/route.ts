@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken, updatePassword } from '../../../../server/auth';
 import { query } from '../../../../server/db';
 import { rateLimit, clientIp } from '../../../../server/rate-limit';
+import { logImpersonatedAction } from '../../../../server/impersonation';
 import { appUrl } from '../../../../server/app-url';
 import {
   resend, getFromEmail, esc, interpolate, normalizePhone, sendSms, getSmsTemplate, getEmailTemplate,
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
   }
 
   try {
-    switch (name) {
+    const res = await (async () => { switch (name) {
       case 'send-reset-access-code':          return await handleSendResetCode(body);
       case 'verify-identity-reset-password':  return await handleVerifyIdentity(body);
       case 'send-password-reset-email':       return await handlePasswordResetEmail(body);
@@ -61,7 +62,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
       case 'send-class-update-sms':           return await handleClassUpdateSms(body, user!);
       default:
         return NextResponse.json({ error: `Unknown function: ${name}` }, { status: 404 });
+    } })();
+    if (user && res.ok && !publicFns.includes(name)) {
+      await logImpersonatedAction(user, 'add', `Message sent while impersonating – ${name}`);
     }
+    return res;
   } catch (err) {
     console.error(`[notify/${name}]`, err);
     return NextResponse.json({ success: false, error: 'An error occurred. Please try again.' }, { status: 500 });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../../server/auth';
+import { logImpersonatedAction } from '../../../../server/impersonation';
 import { withUserContext } from '../../../../server/db';
 import { PRIVILEGED_ROLES } from '../../../../server/authz';
 import type { PoolClient } from 'pg';
@@ -141,6 +142,7 @@ export async function POST(req: NextRequest) {
         throw e;
       }
     });
+    if (result.http === 200) await logImpersonatedAction(user, 'edit', 'Student transferred to another class while impersonating');
     return NextResponse.json(result.body, { status: result.http });
   } catch (e) {
     console.error('Student transfer failed:', e);

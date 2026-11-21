@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../server/auth';
 import { query } from '../../../server/db';
 import { PRIVILEGED_ROLES } from '../../../server/authz';
+import { logImpersonatedAction } from '../../../server/impersonation';
 
 /**
  * Admin notes attached to admin actions. Admins and superadmins only.
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest) {
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
     [user.id, user.role, area, action, note, body?.isPrivate === true]
   );
+  await logImpersonatedAction(user, 'add', `Note added while impersonating – ${action}`);
   return NextResponse.json(rows[0]);
 }
 
@@ -85,6 +87,7 @@ export async function PATCH(req: NextRequest) {
     [note, body?.isPrivate === true, id, user.id]
   );
   if (result.rowCount === 0) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+  await logImpersonatedAction(user, 'edit', 'Note edited while impersonating');
   return NextResponse.json({ ok: true });
 }
 
@@ -97,5 +100,6 @@ export async function DELETE(req: NextRequest) {
 
   const result = await query(`DELETE FROM admin_notes WHERE id = $1 AND author_id = $2`, [id, user.id]);
   if (result.rowCount === 0) return NextResponse.json({ error: 'Note not found' }, { status: 404 });
+  await logImpersonatedAction(user, 'delete', 'Note deleted while impersonating');
   return NextResponse.json({ ok: true });
 }

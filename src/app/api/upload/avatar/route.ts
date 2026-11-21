@@ -3,6 +3,7 @@ import { join } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../../server/auth';
 import { query } from '../../../../server/db';
+import { logImpersonatedAction } from '../../../../server/impersonation';
 
 // `next start` only serves files that were in public/ at build time, so avatars
 // uploaded after a deploy 404'd. They're still stored here (keeps existing
@@ -50,6 +51,7 @@ export async function POST(req: NextRequest) {
 
   const publicUrl = `/uploads/avatars/${filename}`;
   await query('UPDATE profiles SET avatar_url = $1, updated_at = now() WHERE id = $2', [publicUrl, user.id]);
+  await logImpersonatedAction(user, 'edit', 'Profile photo changed while impersonating');
 
   return NextResponse.json({ publicUrl });
 }

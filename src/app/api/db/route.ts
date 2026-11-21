@@ -9,6 +9,16 @@ import {
 } from '../../../server/authz';
 import type { DbQueryRequest } from '../../../types/db-query';
 import { NAMED_QUERIES } from '../../../server/named-queries';
+import { logImpersonatedAction, sqlActivity } from '../../../server/impersonation';
+
+// Structured actions that change data, for the impersonation activity log.
+function writeActivityOf(action: unknown): 'add' | 'edit' | 'delete' | null {
+  if (action === 'insert') return 'add';
+  if (action === 'upsert' || action === 'update') return 'edit';
+  if (action === 'delete') return 'delete';
+  return null;
+}
+const ACTIVITY_VERB = { add: 'Added', edit: 'Updated', delete: 'Deleted' } as const;
 
 export async function POST(req: NextRequest) {
   const token = getBearerToken(req.headers.get('authorization'));
@@ -54,6 +64,11 @@ export async function POST(req: NextRequest) {
         return { rows: [], error: { message: message || 'Query failed' } };
       }
     });
+
+    const namedActivity = sqlActivity(named.sql);
+    if (!result.error && namedActivity) {
+      await logImpersonatedAction(user, namedActivity, `${ACTIVITY_VERB[namedActivity]} while impersonating – ${body.queryName}`);
+    }
 
     const status = result.error ? 400 : 200;
     return NextResponse.json(result, { status });
@@ -114,6 +129,11 @@ export async function POST(req: NextRequest) {
   const result = await withUserContext(user?.id ?? null, async (client) =>
     executeQuery(client, body)
   );
+
+  const writeActivity = writeActivityOf(body.action);
+  if (user && !result.error && writeActivity) {
+    await logImpersonatedAction(user, writeActivity, `${ACTIVITY_VERB[writeActivity]} while impersonating – ${body.table}`);
+  }
 
   const status = result.error ? 400 : 200;
   return NextResponse.json(result, { status });
