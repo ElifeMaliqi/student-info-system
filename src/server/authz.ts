@@ -93,6 +93,26 @@ const EMBED_ALLOWED_TABLES = new Set([
 // (names on classes, calendar events, announcements). Their own profile is whole.
 const STUDENT_VISIBLE_PROFILE_COLUMNS = ['id', 'first_name', 'last_name', 'email', 'avatar_url', 'role'] as const;
 
+// Tables a teacher may write to (grading, attendance, notes on students, calendar,
+// announcements, their own profile). Everything else is admin work.
+const TEACHER_WRITE_TABLES = new Set([
+  'grade_tables',
+  'grade_table_entries',
+  'teacher_student_notes',
+  'calendar_events',
+  'calendar_event_participants',
+  'class_attendance',
+  'announcements',
+  'profiles', // own row only (see below)
+]);
+
+// Tables a teacher has no reason to read: applicants' personal details and ID
+// documents, and per-student pricing.
+const TEACHER_READ_DENY = new Set([
+  'registration_applications',
+  'student_invoice_overrides',
+]);
+
 const bodyRows = (req: DbQueryRequest): Record<string, unknown>[] =>
   !req.body ? [] : (Array.isArray(req.body) ? req.body : [req.body]).filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
 
@@ -188,8 +208,29 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
   }
 
   if (role === 'teacher') {
-    // Teachers legitimately manage academic data across their classes. Only the
-    // escalation columns and admin-only tables (handled above) are restricted.
+    if (isWrite(action)) {
+      if (!TEACHER_WRITE_TABLES.has(table)) return DENY;
+      if (table === 'profiles') {
+        // Inserting a profile is account creation (admin work); edits are own-row only.
+        if (action !== 'update') return DENY;
+        injectEqFilter(req, 'id', user.id);
+      } else if (table === 'calendar_events' && (action === 'update' || action === 'delete')) {
+        injectEqFilter(req, 'created_by', user.id);
+      } else if (table === 'calendar_event_participants' && action === 'update') {
+        // Their own RSVP only.
+        injectEqFilter(req, 'user_id', user.id);
+      } else if (table === 'announcements') {
+        // Post in their own name; editing or removing announcements is admin work.
+        if (action !== 'insert') return DENY;
+        if (bodyRows(req).some((r) => r.author_id !== user.id)) return DENY;
+      } else if (table === 'teacher_student_notes') {
+        // Their own notes only.
+        if (bodyRows(req).some((r) => 'teacher_id' in r && r.teacher_id !== user.id)) return DENY;
+        if (action === 'update' || action === 'delete') injectEqFilter(req, 'teacher_id', user.id);
+      }
+      return { allowed: true };
+    }
+    if (TEACHER_READ_DENY.has(table)) return DENY;
     return { allowed: true };
   }
 
