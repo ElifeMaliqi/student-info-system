@@ -159,7 +159,7 @@ export default function AdminGrades() {
           <select
             value={filterTeacher}
             onChange={e => setFilterTeacher(e.target.value)}
-            className="glass-select px-4 py-2.5 rounded-xl text-sm"
+            className="glass-select select-auto"
           >
             <option value="">{t('grades.all_teachers')}</option>
             {teachers.map(t => (
@@ -171,7 +171,7 @@ export default function AdminGrades() {
           <select
             value={filterDegree}
             onChange={e => setFilterDegree(e.target.value)}
-            className="glass-select px-4 py-2.5 rounded-xl text-sm"
+            className="glass-select select-auto"
           >
             <option value="">{t('grades.all_degrees')}</option>
             {degrees.map(d => (

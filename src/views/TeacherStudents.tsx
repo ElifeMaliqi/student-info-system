@@ -216,7 +216,7 @@ export default function TeacherStudents() {
 
             {/* Class dropdown */}
             {classOptions.length > 0 && (
-              <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select bg-white/5 border border-white/5 text-white/70 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-[#fc0ce4]/40">
+              <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select select-auto select-compact">
                 <option value="">{t('teacher.all_classes_filter')}</option>
                 {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
               </select>

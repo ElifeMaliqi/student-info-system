@@ -360,7 +360,7 @@ export default function Attendance() {
             <select
               value={filterMonth}
               onChange={e => { setFilterMonth(e.target.value); setFilterDate(''); }}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_months')}</option>
               {MONTH_KEYS.map((mk, i) => (
@@ -374,7 +374,7 @@ export default function Attendance() {
             <select
               value={filterYear}
               onChange={e => { setFilterYear(e.target.value); setFilterDate(''); }}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_years')}</option>
               {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
@@ -386,7 +386,7 @@ export default function Attendance() {
             <select
               value={filterClass}
               onChange={e => setFilterClass(e.target.value)}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_classes')}</option>
               {classOptions.map(c => <option key={c} value={c}>{c}</option>)}

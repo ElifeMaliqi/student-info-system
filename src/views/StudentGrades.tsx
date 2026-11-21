@@ -131,13 +131,27 @@ export default function StudentGrades() {
 
       {/* Table */}
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
-        <div className="flex flex-col gap-4 mb-6 shrink-0">
-          <div className="flex flex-col md:flex-row gap-4 justify-between">
-            <div className="relative w-full md:w-96 group">
+        {/* Filters: search + dropdowns + export on one row, result pills below. */}
+        <div className="flex flex-col gap-3 mb-5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72 group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-              <input type="text" placeholder={t('student.grades_search')} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
+              <input type="text" placeholder={t('student.grades_search')} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
             </div>
-            <button onClick={handleExportGrades} disabled={filtered.length === 0} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start">
+            <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('student.grade_filter_all_classes')}</option>
+              {gradeFilterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('student.grade_filter_all_teachers')}</option>
+              {gradeFilterOptions.teachers.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {hasGradeFilters && (
+              <button onClick={() => { setSearch(''); setFilterClass(''); setFilterTeacher(''); setFilterResult(''); }} className="text-xs text-white/30 hover:text-white transition-colors px-1">
+                Clear all
+              </button>
+            )}
+            <button onClick={handleExportGrades} disabled={filtered.length === 0} className="ml-auto px-3.5 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30">
               <Download className="w-4 h-4" />
               {t('common.export_csv')}
             </button>
@@ -149,23 +163,6 @@ export default function StudentGrades() {
                 {opt.label}
               </button>
             ))}
-
-            <div className="w-px h-5 bg-white/10 mx-1" />
-
-            <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('student.grade_filter_all_classes')}</option>
-              {gradeFilterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('student.grade_filter_all_teachers')}</option>
-              {gradeFilterOptions.teachers.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-
-            {hasGradeFilters && (
-              <button onClick={() => { setSearch(''); setFilterClass(''); setFilterTeacher(''); setFilterResult(''); }} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
-                Clear all
-              </button>
-            )}
           </div>
         </div>
 
