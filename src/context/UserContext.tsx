@@ -122,14 +122,19 @@ async function fetchSession(token: string | null): Promise<SessionInfo | 'invali
   }
 }
 
-async function validateSession(): Promise<SessionInfo | null> {
+/**
+ * The current session, 'invalid' when the server says there is none, or null
+ * when the check itself failed (network error, server error, or the request was
+ * cut off by a page reload). Only 'invalid' may sign the user out.
+ */
+async function validateSession(): Promise<SessionInfo | 'invalid' | null> {
   let token = getToken();
   let session = await fetchSession(token);
   if (session === 'invalid' && restoreImpersonator()) {
     token = getToken();
     session = await fetchSession(token);
   }
-  if (!session || session === 'invalid') return null;
+  if (!session || session === 'invalid') return session;
   // A saved superadmin token with no impersonation running is left over
   // (e.g. someone else signed in on this browser); drop it. Skipped if the token
   // changed meanwhile (an impersonation was just started).
@@ -166,13 +171,16 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   const reloadUser = useCallback(async () => {
     const session = await validateSession();
-    if (!session) {
+    if (session === 'invalid') {
       removeToken();
       setImpersonator(null);
       setUser(null);
       return;
     }
-    const appUser = await fetchUserData(session.user.id);
+    // The check failed (e.g. cut off by navigation): keep the current state.
+    if (!session) return;
+    const appUser = await fetchUserData(session.user.id).catch(() => null);
+    if (!appUser) return;
     setImpersonator(session.impersonator);
     setUser(appUser);
   }, []);
@@ -181,18 +189,32 @@ export function UserProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function boot() {
-      const session = await validateSession();
+      let session = await validateSession();
       if (cancelled) return;
+      // One retry when the check itself failed, before showing the login page.
+      if (session === null) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (cancelled) return;
+        session = await validateSession();
+        if (cancelled) return;
+      }
 
-      if (!session) {
+      if (session === 'invalid') {
         removeToken();
         setImpersonator(null);
         setUser(null);
         setReady(true);
         return;
       }
+      if (!session) {
+        // Still couldn't check: show the login page but keep the token, so the
+        // next load signs the user straight back in.
+        setUser(null);
+        setReady(true);
+        return;
+      }
 
-      const appUser = await fetchUserData(session.user.id);
+      const appUser = await fetchUserData(session.user.id).catch(() => null);
       if (cancelled) return;
       setImpersonator(session.impersonator);
       setUser(appUser);
