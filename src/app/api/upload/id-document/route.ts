@@ -4,6 +4,7 @@ import { join } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../../server/auth';
 import { PRIVILEGED_ROLES } from '../../../../server/authz';
+import { rateLimit, clientIp } from '../../../../server/rate-limit';
 
 // ID documents are personal data, so they live outside public/ and are only
 // served back to admins through GET below.
@@ -23,6 +24,21 @@ const MAX_BYTES = 5 * 1024 * 1024;
 
 // Public on purpose: applicants upload their ID before they have an account.
 export async function POST(req: NextRequest) {
+  // Anyone can call this, so cap it per IP: otherwise a script could fill the
+  // server's disk with 5MB files. An applicant needs one upload (a few retries).
+  // Signed-in admins (manual enrollment from the school office, which shares one
+  // IP with applicants) are not limited.
+  const token = getBearerToken(req.headers.get('authorization'));
+  const staff = token ? await verifyToken(token) : null;
+  const limit = staff && PRIVILEGED_ROLES.has(staff.role)
+    ? { ok: true, retryAfterSec: 0 }
+    : rateLimit(`id-upload:ip:${clientIp(req)}`, 20, 60 * 60_000);
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: 'Too many uploads. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(limit.retryAfterSec) } }
+    );
+  }
   const form = await req.formData();
   const file = form.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });

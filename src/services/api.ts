@@ -57,7 +57,13 @@ export const api = {
     uploadIdDocument: async (file: File): Promise<string> => {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/upload/id-document', { method: 'POST', body: form });
+      // Signed-in staff (manual enrollment) aren't held to the public upload limit.
+      const token = typeof window !== 'undefined' ? localStorage.getItem('fma_sis_token') : null;
+      const res = await fetch('/api/upload/id-document', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body.url) throw new Error(body.error || 'Failed to upload ID document');
       return body.url as string;
