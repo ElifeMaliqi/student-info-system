@@ -320,6 +320,25 @@ export default function Finance() {
     return list;
   }, [invoices, statusFilter, filterMonth, filterYear, filterClass, filterTeacher, search, dueSort]);
 
+  // Totals cards: all invoices by default; when a month is picked in the table filter,
+  // only that month (and that year too, if a year is picked). Same rules as getStats.
+  const shownStats = useMemo(() => {
+    if (!filterMonth) return stats;
+    let totalPaid = 0, pending = 0, overdue = 0, invoiceCount = 0;
+    for (const inv of invoices) {
+      if (inv.month !== Number(filterMonth)) continue;
+      if (filterYear && inv.year !== Number(filterYear)) continue;
+      invoiceCount++;
+      if (inv.status === 'paid') totalPaid += inv.amount;
+      else if (inv.status === 'overdue') overdue += inv.amount;
+      else pending += inv.amount;
+    }
+    return { totalPaid, pending, overdue, invoiceCount };
+  }, [stats, invoices, filterMonth, filterYear]);
+  const statsPeriod = filterMonth
+    ? ` · ${t(`months.${MONTH_KEYS[Number(filterMonth) - 1]}`)}${filterYear ? ` ${filterYear}` : ''}`
+    : '';
+
   const hasActiveFilters = statusFilter !== 'all' || !!filterMonth || !!filterYear || !!filterClass || !!filterTeacher || !!search.trim();
 
   function clearAllFilters() {
@@ -761,22 +780,22 @@ export default function Finance() {
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20"><CreditCard className="w-6 h-6 text-emerald-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.totalPaid)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.total_collected')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.totalPaid)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.total_collected')}{statsPeriod}</div>
           </div>
         </div>
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20"><Clock className="w-6 h-6 text-amber-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.pending)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.pending_payments')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.pending)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.pending_payments')}{statsPeriod}</div>
           </div>
         </div>
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center border border-red-500/20"><AlertCircle className="w-6 h-6 text-red-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.overdue)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.overdue_amount')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.overdue)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.overdue_amount')}{statsPeriod}</div>
           </div>
         </div>
       </div>}
