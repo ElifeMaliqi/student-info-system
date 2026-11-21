@@ -3,7 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { config } from 'dotenv';
 
-config({ path: '.env.local' });
+// Usage: node scripts/apply-rds-auth-functions.mjs [--env .env.development.local]
+// Defaults to .env.local (live RDS).
+const envArg = process.argv.indexOf('--env');
+config({ path: envArg !== -1 ? process.argv[envArg + 1] : '.env.local', override: true });
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`,

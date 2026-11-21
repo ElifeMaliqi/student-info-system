@@ -34,7 +34,7 @@ DECLARE
 BEGIN
   v_caller := COALESCE(caller_id, current_app_user_id());
 
-  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_caller AND role = 'admin') THEN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_caller AND role IN ('admin', 'superadmin')) THEN
     RAISE EXCEPTION 'Only admins can approve registrations';
   END IF;
 
