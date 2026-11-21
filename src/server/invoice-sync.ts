@@ -30,8 +30,11 @@ function generateInvoiceId(year: number, month: number): string {
 
 /**
  * Auto-generate missing invoices. Only the current month is issued: a month is issued
- * between issue_start_day and issue_end_day; the joining month is issued only when the
- * student joined on or before enrollment_cutoff_day. Then marks overdue invoices.
+ * between issue_start_day and issue_end_day. A NEW student (this is their first month in
+ * any class and they have never been invoiced) is never invoiced for that first month,
+ * whatever the day; their first invoice comes the next month. For an existing student
+ * added to another class, that class's joining month is issued only when they joined on
+ * or before enrollment_cutoff_day. Then marks overdue invoices.
  */
 export async function syncInvoices(): Promise<void> {
   const client = await getPool().connect();
@@ -71,7 +74,7 @@ async function runSync(client: PoolClient): Promise<void> {
   // 4. All existing invoices — the DB unique constraint covers all, so skip any month that already has one.
   //    Soft-deleted rows are included on purpose: their key must keep this slot
   //    occupied, otherwise sync would resurrect every invoice an admin removes.
-  const { rows: existing } = await client.query('SELECT enrollment_id, month, year FROM invoices');
+  const { rows: existing } = await client.query('SELECT enrollment_id, student_id, month, year FROM invoices');
   const existingKeys = new Set(existing.map((r: any) => `${r.enrollment_id}-${r.month}-${r.year}`));
 
   // 5. Compute missing invoices for the current month.
@@ -81,6 +84,24 @@ async function runSync(client: PoolClient): Promise<void> {
   const cutoffDay = s.enrollment_cutoff_day ?? 3;
   const inIssueWindow = today.day >= (s.issue_start_day ?? 1) && today.day <= (s.issue_end_day ?? 7);
 
+  const curIdx = curYear * 12 + curMonth - 1;
+  const monthIdx = (d: Date) => { const sd = schoolDate(d); return sd.y * 12 + sd.m - 1; };
+
+  // New students: this month is their first month in any class, and they have never
+  // had an invoice for an earlier month (that rules out returning / re-activated students).
+  const firstClassMonth = new Map<string, number>();
+  for (const enr of enrollments) {
+    if (!enr.enrolled_at || !enr.student_id) continue;
+    const idx = monthIdx(new Date(enr.enrolled_at));
+    const prev = firstClassMonth.get(enr.student_id);
+    if (prev === undefined || idx < prev) firstClassMonth.set(enr.student_id, idx);
+  }
+  const invoicedBefore = new Set(
+    existing.filter((r: any) => r.year * 12 + r.month - 1 < curIdx).map((r: any) => r.student_id)
+  );
+  const isNewStudentThisMonth = (studentId: string) =>
+    firstClassMonth.get(studentId) === curIdx && !invoicedBefore.has(studentId);
+
   const toInsert: any[] = [];
   const pendingInvoiceEmails: Record<string, unknown>[] = [];
   const pendingInvoiceSms: Record<string, unknown>[] = [];
@@ -88,9 +109,14 @@ async function runSync(client: PoolClient): Promise<void> {
     if (!enr.enrolled_at) continue;
     const enrolled = schoolDate(new Date(enr.enrolled_at));
     const enrolledIdx = enrolled.y * 12 + enrolled.m - 1;
-    const curIdx = curYear * 12 + curMonth - 1;
     if (enrolledIdx > curIdx) continue;
-    if (enrolledIdx === curIdx ? enrolled.day > cutoffDay : !inIssueWindow) continue;
+    if (enrolledIdx === curIdx) {
+      // Joining month: never for a new student (no invoice, no email/SMS);
+      // for an existing student's extra class, only up to the cut-off day.
+      if (isNewStudentThisMonth(enr.student_id) || enrolled.day > cutoffDay) continue;
+    } else if (!inIssueWindow) {
+      continue;
+    }
     const y = curYear;
     const m = curMonth;
     if (existingKeys.has(`${enr.id}-${m}-${y}`)) continue;
