@@ -62,12 +62,19 @@ const STUDENT_READ_DENY = new Set([
 
 // Tables only admins/superadmins may touch under any action.
 const PRIVILEGED_ONLY_TABLES = new Set([
-  'auth_users',
-  'system_roles',
-  'role_permissions',
-  'password_reset_tokens',
   'email_templates', // admin-editable email content (incl. password reset)
 ]);
+
+// Never reachable through the generic data API, for anyone: login records
+// (password hashes) and reset tokens are only handled by server routes and
+// fixed named queries.
+const NO_GENERIC_ACCESS_TABLES = new Set(['auth_users', 'password_reset_tokens']);
+
+// Role definitions: superadmin only (Superadmin > Roles).
+const SUPERADMIN_ONLY_TABLES = new Set(['system_roles', 'role_permissions']);
+
+const bodyRows = (req: DbQueryRequest): Record<string, unknown>[] =>
+  !req.body ? [] : (Array.isArray(req.body) ? req.body : [req.body]).filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
 
 export interface AuthzDecision {
   allowed: boolean;
@@ -117,6 +124,20 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
   if (table === 'admin_notes') return DENY;
   // The activity log is written and read only through /api/logs (superadmin read).
   if (table === 'activity_logs') return DENY;
+  if (NO_GENERIC_ACCESS_TABLES.has(table)) return DENY;
+  if (SUPERADMIN_ONLY_TABLES.has(table) && role !== 'superadmin') return DENY;
+
+  // Nobody can make an account a superadmin from the app (also enforced by DB
+  // triggers), and only superadmins may change roles at all.
+  if (table === 'profiles' && isWrite(action)) {
+    const rows = bodyRows(req);
+    if (rows.some((r) => r.role === 'superadmin')) return DENY;
+    if (role !== 'superadmin' && rows.some((r) => 'role' in r || 'system_role_id' in r)) return DENY;
+  }
+  // Approving a registration creates an account with its role.
+  if (table === 'registration_applications' && isWrite(action)) {
+    if (bodyRows(req).some((r) => 'role' in r && r.role !== 'student' && r.role !== 'teacher')) return DENY;
+  }
 
   // Admin-only tables are off-limits to everyone else, for any action.
   if (PRIVILEGED_ONLY_TABLES.has(table) && !PRIVILEGED_ROLES.has(role)) {
