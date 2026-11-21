@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Users, CalendarCheck, CreditCard,
   Settings, Bell, Search, Plus, LogOut, Menu, X,
   Globe, Moon, Sun, Megaphone, BookOpen, HelpCircle, UserPlus, CalendarDays, ClipboardList,
-  ShieldCheck, UserCog, GraduationCap, ChevronRight, Loader2, AlertCircle, Presentation, StickyNote
+  ShieldCheck, GraduationCap, ChevronRight, Loader2, AlertCircle, Presentation, StickyNote
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
@@ -139,7 +139,8 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'teachers', label: t('nav.teachers'), icon: Presentation },
     { id: 'programs', label: t('nav.programs'), icon: BookOpen },
     { id: 'classes', label: t('nav.classes'), icon: GraduationCap },
-    { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
+    // The Users page (/users, formerly /registrations) is superadmin-only; admins don't get it.
+    ...(role === 'superadmin' ? [{ id: 'users', label: t('nav.users'), icon: UserPlus }] : []),
     { id: 'calendar', label: t('nav.calendar'), icon: CalendarDays },
     { id: 'attendance', label: t('nav.attendance'), icon: CalendarCheck },
     { id: 'grades', label: t('nav.grades'), icon: ClipboardList },
@@ -175,7 +176,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     analytics:     { id: 'analytics',     label: 'Analytics',            icon: LayoutDashboard },
     users:         { id: 'students',      label: t('nav.students'),      icon: Users },
     attendance:    { id: 'attendance',    label: t('nav.attendance'),    icon: CalendarCheck },
-    registrations: { id: 'registrations', label: t('nav.registrations'), icon: UserPlus },
+    registrations: { id: 'users', label: t('nav.registrations'), icon: UserPlus },
     calendar:      { id: 'calendar',      label: t('nav.calendar'),      icon: CalendarDays },
     invoices:      { id: 'invoices',      label: t('nav.invoices'),      icon: CreditCard },
   };
@@ -192,7 +193,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     analytics:     'analytics',
     finance:       'finance',
     attendance:    'attendance',
-    registrations: 'registrations',
+    users:         'registrations',
     calendar:      'calendar',
     invoices:      'invoices',
     ...(role === 'admin' ? { settings: 'settings' } : {}),
@@ -236,6 +237,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   const extraNavItems = role !== 'superadmin' && rolePermMap
     ? (user!.systemRole!.permissions as Array<{ module: string; actions: string[] }>)
         .filter(p => !p.actions.includes('deactivate') && p.actions.length > 0 && !coveredModules.has(p.module))
+        .filter(p => !(role === 'admin' && p.module === 'registrations'))
         .map(p => MODULE_NAV[p.module])
         .filter((item): item is NonNullable<typeof item> =>
           !!item && !filteredBaseNavItems.some(b => b.id === item.id)
@@ -248,7 +250,6 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
   ];
   const superadminSystemItems = [
     { id: 'analytics', label: 'Analytics', icon: LayoutDashboard, path: '/analytics' },
-    { id: 'users', label: t('nav.users'), icon: UserCog, path: '/superadmin/users' },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
   ];
   const isNavActive = (item: { id: string; path?: string }) =>
@@ -574,7 +575,7 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
                 className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2 rounded-full text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)]"
               >
                 <Plus className="w-4 h-4 hidden sm:block" />
-                <span className="hidden sm:block">{t('header.new_enrollment')}</span>
+                <span className="hidden sm:block">{t('header.new_user')}</span>
                 <span className="sm:hidden">{t('header.new')}</span>
               </button>
             )}

@@ -14,6 +14,12 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'api.dicebear.com' },
     ],
   },
+  // The Registrations page became the superadmin "Users" page; keep old links working.
+  async redirects() {
+    return [
+      { source: '/registrations', destination: '/users', permanent: false },
+    ];
+  },
   async headers() {
     return [
       {

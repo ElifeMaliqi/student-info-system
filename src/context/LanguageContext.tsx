@@ -32,7 +32,7 @@ const translations = {
     
     // Header
     'header.search': 'Search students, degrees, or invoices...',
-    'header.new_enrollment': 'New Enrollment',
+    'header.new_user': 'New User',
     'header.new': 'New',
     
     // Roles
@@ -722,6 +722,9 @@ const translations = {
     'registrations.approved_filter': 'Approved',
     'registrations.rejected_filter': 'Rejected',
     'registrations.archived': 'Archived',
+    'registrations.admins': 'Admins',
+    'registrations.no_admins': 'No admin accounts.',
+    'registrations.created': 'Created',
     'registrations.missing_info': 'Missing Information',
     'registrations.missing_degree': 'No degree',
     'registrations.missing_location': 'No location',
@@ -858,7 +861,7 @@ const translations = {
     
     // Header
     'header.search': 'Kërko studentë, diploma, ose fatura...',
-    'header.new_enrollment': 'Regjistrim i Ri',
+    'header.new_user': 'Përdorues i Ri',
     'header.new': 'I Ri',
     
     // Roles
@@ -1548,6 +1551,9 @@ const translations = {
     'registrations.approved_filter': 'Miratuar',
     'registrations.rejected_filter': 'Refuzuar',
     'registrations.archived': 'Arkivuar',
+    'registrations.admins': 'Adminët',
+    'registrations.no_admins': 'Nuk ka llogari admini.',
+    'registrations.created': 'Krijuar më',
     'registrations.missing_info': 'Informacion që Mungon',
     'registrations.missing_degree': 'Pa diplomë',
     'registrations.missing_location': 'Pa vendndodhje',
