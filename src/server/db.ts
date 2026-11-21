@@ -38,11 +38,23 @@ export async function withUserContext<T>(
   fn: (client: pg.PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await getPool().connect();
+  // Session-level (is_local = false): set_app_user() uses a transaction-local
+  // setting, which vanished as soon as its own autocommit statement ended, so
+  // current_app_user_id() was always NULL in the queries that followed. The
+  // value is cleared again before the connection returns to the pool so it
+  // can't leak into a later query from another user or the background sync.
   try {
-    await client.query('SELECT set_app_user($1)', [userId]);
+    await client.query(`SELECT set_config('app.user_id', $1, false)`, [userId ?? '']);
     return await fn(client);
   } finally {
-    client.release();
+    try {
+      await client.query(`SELECT set_config('app.user_id', '', false)`);
+      client.release();
+    } catch (err) {
+      // e.g. fn left an aborted transaction open: drop this connection instead
+      // of returning it to the pool with the user id still set.
+      client.release(err as Error);
+    }
   }
 }
 
