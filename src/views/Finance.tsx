@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, type FormEvent } from 'react';
+import { SearchSelect } from '../components/SearchSelect';
 import { SortHeader, type SortDir } from '../components/SortHeader';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -356,13 +357,8 @@ export default function Finance() {
     try {
       const options = await api.finance.getActiveEnrollmentOptions();
       setEnrollmentOptions(options);
-
-      const first = options[0];
-      setCreateForm(prev => {
-        if (!first) return { ...prev, enrollmentId: '' };
-        const title = prev.title || `${first.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}`;
-        return { ...prev, enrollmentId: first.enrollmentId, title };
-      });
+      // Nothing preselected: the admin searches for the student and picks one.
+      setCreateForm(prev => ({ ...prev, enrollmentId: '', title: '' }));
     } catch (err) {
       console.error(err);
     } finally {
@@ -1031,26 +1027,24 @@ export default function Finance() {
                     <>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Student / Class</label>
-                        <select
+                        <SearchSelect
+                          options={enrollmentOptions.map(opt => ({
+                            value: opt.enrollmentId,
+                            label: opt.studentName,
+                            sublabel: [opt.className, opt.studentEmail].filter(Boolean).join(' · '),
+                          }))}
                           value={createForm.enrollmentId}
-                          onChange={e => {
-                            const enrollmentId = e.target.value;
+                          onChange={enrollmentId => {
                             const selected = enrollmentOptions.find(opt => opt.enrollmentId === enrollmentId);
                             setCreateForm(prev => ({
                               ...prev,
                               enrollmentId,
-                              title: selected ? `${selected.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}` : prev.title,
+                              title: selected ? `${selected.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}` : '',
                             }));
                           }}
-                          className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
-                        >
-                          {enrollmentOptions.length === 0 && <option value="">No active enrollments</option>}
-                          {enrollmentOptions.map(opt => (
-                            <option key={opt.enrollmentId} value={opt.enrollmentId}>
-                              {opt.studentName} - {opt.className}
-                            </option>
-                          ))}
-                        </select>
+                          placeholder={enrollmentOptions.length === 0 ? 'No active enrollments' : 'Search student by name, class or email…'}
+                          emptyText="No student matches"
+                        />
                       </div>
 
                       <div className="space-y-1.5">
@@ -1094,7 +1088,7 @@ export default function Finance() {
 
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
                   <button onClick={() => setShowCreateInvoice(false)} disabled={creatingInvoice} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50">Cancel</button>
-                  <button onClick={createManualInvoice} disabled={creatingInvoice || loadingCreateOptions || enrollmentOptions.length === 0} className="flex-1 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  <button onClick={createManualInvoice} disabled={creatingInvoice || loadingCreateOptions || !createForm.enrollmentId} className="flex-1 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                     {creatingInvoice && <Loader2 className="w-4 h-4 animate-spin" />}
                     Create Invoice
                   </button>
