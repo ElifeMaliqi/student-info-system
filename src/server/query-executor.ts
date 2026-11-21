@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { publicErrorMessage } from './db';
 import type { DbQueryRequest } from '../types/db-query';
 
 export type { DbQueryRequest };
@@ -462,7 +463,7 @@ export async function executeQuery(
 
     return { data: null, error: { message: 'Unknown action' } };
   } catch (e) {
-    return { data: null, error: { message: e instanceof Error ? e.message : String(e) } };
+    return { data: null, error: { message: publicErrorMessage(e) } };
   }
 }
 
@@ -539,6 +540,6 @@ export async function executeRpc(
     }
     return { data: null, error: { message: `Unknown function: ${fn}` } };
   } catch (e) {
-    return { data: null, error: { message: e instanceof Error ? e.message : String(e) } };
+    return { data: null, error: { message: publicErrorMessage(e) } };
   }
 }

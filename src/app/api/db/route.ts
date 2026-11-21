@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../server/auth';
-import { query, withUserContext } from '../../../server/db';
+import { publicErrorMessage, query, withUserContext } from '../../../server/db';
 import { executeQuery, type EmbedPolicy } from '../../../server/query-executor';
 import {
   authorizeDbRequest,
@@ -58,10 +58,9 @@ export async function POST(req: NextRequest) {
         return { rows: queryResult.rows, error: null };
       } catch (e: any) {
         console.error(`[/api/db] Named query ${body.queryName} failed:`, e.message);
-        // Admin-only queries: the Postgres message (e.g. duplicate email) is what
-        // the admin needs to see, and the SQL itself is fixed.
-        const message = e.detail ? `${e.message} (${e.detail})` : e.message;
-        return { rows: [], error: { message: message || 'Query failed' } };
+        // Duplicate-key and our own exception messages are what the admin needs
+        // to see (e.g. duplicate email); other database errors stay on the server.
+        return { rows: [], error: { message: publicErrorMessage(e, 'Query failed') } };
       }
     });
 

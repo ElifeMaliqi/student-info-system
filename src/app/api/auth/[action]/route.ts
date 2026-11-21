@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, generateImpersonationToken, generateResetToken, loginWithPassword, updatePassword, verifyResetToken, verifyToken } from '../../../../server/auth';
-import { query } from '../../../../server/db';
+import { publicErrorMessage, query } from '../../../../server/db';
 import { rateLimit, clientIp } from '../../../../server/rate-limit';
 import { appUrl } from '../../../../server/app-url';
 import { Resend } from 'resend';
@@ -97,7 +97,7 @@ export async function POST(
       });
     } catch (e) {
       return NextResponse.json(
-        { data: null, error: { message: e instanceof Error ? e.message : 'Login failed' } },
+        { data: null, error: { message: publicErrorMessage(e, 'Login failed') } },
         { status: 401 }
       );
     }
@@ -204,7 +204,7 @@ export async function POST(
       return NextResponse.json({ data: { user: { id: authUser.id } }, error: null });
     } catch (e) {
       return NextResponse.json(
-        { data: null, error: { message: e instanceof Error ? e.message : 'Update failed' } },
+        { data: null, error: { message: publicErrorMessage(e, 'Update failed') } },
         { status: 400 }
       );
     }
