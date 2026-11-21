@@ -173,7 +173,6 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     announcements: { id: 'announcements', label: t('nav.announcements'), icon: Megaphone },
     grades:        { id: 'grades',        label: t('nav.grades'),        icon: ClipboardList },
     finance:       { id: 'finance',       label: t('nav.finance'),       icon: CreditCard },
-    analytics:     { id: 'analytics',     label: 'Analytics',            icon: LayoutDashboard },
     users:         { id: 'students',      label: t('nav.students'),      icon: Users },
     attendance:    { id: 'attendance',    label: t('nav.attendance'),    icon: CalendarCheck },
     registrations: { id: 'users', label: t('nav.registrations'), icon: UserPlus },
@@ -190,7 +189,6 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     announcements: 'announcements',
     students:      'users',
     teachers:      'users',
-    analytics:     'analytics',
     finance:       'finance',
     attendance:    'attendance',
     users:         'registrations',
@@ -249,7 +247,6 @@ export default function AdminLayout({ children, onLogout, role }: AdminLayoutPro
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
   ];
   const superadminSystemItems = [
-    { id: 'analytics', label: 'Analytics', icon: LayoutDashboard, path: '/analytics' },
     { id: 'settings', label: t('nav.settings'), icon: Settings, path: '/settings' },
   ];
   const isNavActive = (item: { id: string; path?: string }) =>

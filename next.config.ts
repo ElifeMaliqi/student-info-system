@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: '/registrations', destination: '/users', permanent: false },
+      // The Analytics page (a copy of the Dashboard) was removed.
+      { source: '/analytics', destination: '/dashboard', permanent: false },
     ];
   },
   // Avatars uploaded after the last build aren't in the static public/ file list,
