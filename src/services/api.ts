@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote, ActivityLog } from '../types';
 import { supabase } from '../lib/supabase';
 import { effectiveAge, priceForAge, parseAgePrices, type AgePrice } from '../utils/age';
 
@@ -1381,6 +1381,51 @@ export const api = {
         gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
         note: e.note || null,
       }));
+    },
+  },
+
+  logs: {
+    /** Records an admin action in the activity log. The server adds the user and Add/Edit/Delete. */
+    create: async (area: string, description: string): Promise<void> => {
+      const res = await fetch('/api/logs', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ area, description }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Failed to log activity');
+      }
+    },
+
+    /** One page of the activity log, newest first (superadmins only), with optional filters. */
+    getPage: async (opts: { page?: number; user?: string; activity?: string; from?: string; to?: string } = {}): Promise<{
+      rows: ActivityLog[]; total: number; page: number; pageSize: number; users: string[];
+    }> => {
+      const qs = new URLSearchParams();
+      if (opts.page && opts.page > 1) qs.set('page', String(opts.page));
+      if (opts.user) qs.set('user', opts.user);
+      if (opts.activity) qs.set('activity', opts.activity);
+      if (opts.from) qs.set('from', opts.from);
+      if (opts.to) qs.set('to', opts.to);
+      const res = await fetch(`/api/logs${qs.toString() ? `?${qs}` : ''}`, { headers: getAuthHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to load logs');
+      return {
+        rows: (json.rows as any[]).map(r => ({
+          id: r.id,
+          userName: r.user_name,
+          userRole: r.user_role,
+          activity: r.activity,
+          area: r.area,
+          description: r.description,
+          createdAt: r.created_at,
+        })),
+        total: json.total ?? 0,
+        page: json.page ?? 1,
+        pageSize: json.pageSize ?? 25,
+        users: json.users ?? [],
+      };
     },
   },
 

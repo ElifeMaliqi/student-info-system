@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail, Receipt, Plus, Trash2 } from 'lucide-react';
+import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail, Receipt, Plus, Trash2, History } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
 import { exportCsv } from '../utils/csv';
 import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
+import { ActivityLogTable } from '../components/ActivityLogTable';
 
 interface AppSettings {
   id: string;
@@ -97,13 +98,14 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'invoices', label: t('settings.invoices'), icon: Receipt },
     { id: 'locations', label: t('settings.locations'), icon: MapPin },
     { id: 'data', label: t('settings.data'), icon: Database },
+    { id: 'logs', label: t('settings.logs'), icon: History },
   ];
 
   const userSections = [
     { id: 'profile', label: t('settings.profile'), icon: User },
   ];
 
-  const SUPERADMIN_ONLY_SECTIONS = new Set(['platform', 'messages', 'emails', 'invoices', 'locations', 'data']);
+  const SUPERADMIN_ONLY_SECTIONS = new Set(['platform', 'messages', 'emails', 'invoices', 'locations', 'data', 'logs']);
   const sections = isSuperadmin
     ? adminSections
     : isAdminRole
@@ -1005,6 +1007,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               </div>
             </div>
           )}
+
+          {/* ===== LOGS (superadmin only) ===== */}
+          {activeSection === 'logs' && isSuperadmin && <ActivityLogTable />}
         </div>
       </div>
     </motion.div>

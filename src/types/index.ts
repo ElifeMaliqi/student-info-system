@@ -389,3 +389,14 @@ export interface AdminDayClass {
   /** Present when isRescheduled = true */
   rescheduleId?: string;
 }
+
+/** One admin/superadmin action in the activity log (Settings > Logs). */
+export interface ActivityLog {
+  id: string;
+  userName: string;
+  userRole: string;
+  activity: 'add' | 'edit' | 'delete';
+  area: string;
+  description: string;
+  createdAt: string;
+}
