@@ -43,6 +43,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
     );
   }
 
+  // Staff messages go only to students: their own students for a teacher, any
+  // student for an admin. The address used to be taken from the request as-is,
+  // so any staff session could send school-branded email/SMS to anyone.
+  if (user && !publicFns.includes(name)) {
+    const denied = await checkRecipients(name, body as Record<string, unknown>, user);
+    if (denied) return NextResponse.json({ success: false, error: denied }, { status: 403 });
+  }
+
   try {
     const res = await (async () => { switch (name) {
       case 'send-reset-access-code':          return await handleSendResetCode(body);
@@ -71,6 +79,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ nam
     console.error(`[notify/${name}]`, err);
     return NextResponse.json({ success: false, error: 'An error occurred. Please try again.' }, { status: 500 });
   }
+}
+
+// ── Recipient checks ────────────────────────────────────────────────────────
+
+// Functions that message one student, and which body field holds the address.
+const SINGLE_RECIPIENT: Record<string, { field: 'studentEmail' | 'studentPhone'; kind: 'email' | 'phone' }> = {
+  'send-attendance-alert-email': { field: 'studentEmail', kind: 'email' },
+  'send-attendance-alert-sms':   { field: 'studentPhone', kind: 'phone' },
+  'send-invoice-email':          { field: 'studentEmail', kind: 'email' },
+  'send-invoice-sms':            { field: 'studentPhone', kind: 'phone' },
+  'send-invoice-changed-sms':    { field: 'studentPhone', kind: 'phone' },
+  'send-grade-email':            { field: 'studentEmail', kind: 'email' },
+  'send-grade-sms':              { field: 'studentPhone', kind: 'phone' },
+  'send-grade-changed-sms':      { field: 'studentPhone', kind: 'phone' },
+  'send-class-update-email':     { field: 'studentEmail', kind: 'email' },
+  'send-class-update-sms':       { field: 'studentPhone', kind: 'phone' },
+};
+
+/** Returns an error message when the caller may not send this message, else null. */
+async function checkRecipients(name: string, body: Record<string, unknown>, user: { id: string; role: string }): Promise<string | null> {
+  const isTeacher = user.role === 'teacher';
+
+  if (name === 'send-announcement-email' || name === 'send-announcement-sms') {
+    // Teachers announce to a class they teach; audiences like "everyone" are admin work.
+    if (!isTeacher) return null;
+    if (body.audience !== 'class_specific' || typeof body.classId !== 'string') return 'Teachers can only notify their own classes';
+    const { rows } = await query(`SELECT 1 FROM classes WHERE id::text = $1 AND teacher_id = $2`, [body.classId, user.id]);
+    return rows.length ? null : 'Teachers can only notify their own classes';
+  }
+
+  const spec = SINGLE_RECIPIENT[name];
+  if (!spec) return null;
+  const value = typeof body[spec.field] === 'string' ? (body[spec.field] as string).trim() : '';
+  if (!value) return null; // the handler rejects missing fields itself
+
+  // Students the caller may message.
+  const { rows } = await query<{ email: string | null; phone: string | null }>(
+    isTeacher
+      ? `SELECT DISTINCT p.email, p.phone FROM profiles p
+           JOIN class_enrollments ce ON ce.student_id = p.id
+           JOIN classes c ON c.id = ce.class_id
+          WHERE p.role = 'student' AND c.teacher_id = $1`
+      : `SELECT p.email, p.phone FROM profiles p WHERE p.role = 'student' AND $1::text IS NOT NULL`,
+    [user.id]
+  );
+  const ok = spec.kind === 'email'
+    ? rows.some((r) => r.email && r.email.toLowerCase().trim() === value.toLowerCase())
+    : rows.some((r) => r.phone && normalizePhone(r.phone) === normalizePhone(value));
+  return ok ? null : 'Recipient is not one of your students';
 }
 
 // ════════════════════════════════════════════════════════════════════════════
