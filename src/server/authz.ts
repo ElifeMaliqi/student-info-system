@@ -122,6 +122,32 @@ export interface AuthzDecision {
   message?: string;
   /** Limits on embedded rows, passed to executeQuery. */
   embedPolicy?: EmbedPolicy;
+  /**
+   * Limit the rows to calendar events the user created or was invited to, by
+   * this column (`id` on calendar_events, `event_id` on participants). The
+   * caller looks the event ids up and adds the filter.
+   */
+  eventScope?: 'id' | 'event_id';
+  /**
+   * Event ids an insert into calendar_event_participants adds people to. The
+   * caller checks the user created every one of them (otherwise anyone could
+   * add themselves to a private event and then read it).
+   */
+  ownEventIds?: unknown[];
+}
+
+function participantInsertCheck(table: string, action: string, req: DbQueryRequest): unknown[] | undefined {
+  if (table !== 'calendar_event_participants' || (action !== 'insert' && action !== 'upsert')) return undefined;
+  return bodyRows(req).map((r) => r.event_id);
+}
+
+// Calendar events are private to their creator and participants (the rule the
+// original database policies described; those policies are not enforced).
+function calendarEventScope(table: string, action: string): AuthzDecision['eventScope'] {
+  if (action !== 'select') return undefined;
+  if (table === 'calendar_events') return 'id';
+  if (table === 'calendar_event_participants') return 'event_id';
+  return undefined;
 }
 
 const DENY: AuthzDecision = { allowed: false, status: 403, message: 'Forbidden' };
@@ -207,6 +233,11 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
     return { allowed: true };
   }
 
+  // An RSVP update can't move the row to another event or person.
+  if (table === 'calendar_event_participants' && action === 'update') {
+    if (bodyKeys(req).some((k) => k === 'event_id' || k === 'user_id')) return DENY;
+  }
+
   if (role === 'teacher') {
     if (isWrite(action)) {
       if (!TEACHER_WRITE_TABLES.has(table)) return DENY;
@@ -228,10 +259,10 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
         if (bodyRows(req).some((r) => 'teacher_id' in r && r.teacher_id !== user.id)) return DENY;
         if (action === 'update' || action === 'delete') injectEqFilter(req, 'teacher_id', user.id);
       }
-      return { allowed: true };
+      return { allowed: true, ownEventIds: participantInsertCheck(table, action, req) };
     }
     if (TEACHER_READ_DENY.has(table)) return DENY;
-    return { allowed: true };
+    return { allowed: true, eventScope: calendarEventScope(table, action) };
   }
 
   if (role === 'student') {
@@ -245,7 +276,7 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
       } else if (table === 'calendar_event_participants' && (action === 'update' || action === 'delete')) {
         injectEqFilter(req, 'user_id', user.id);
       }
-      return { allowed: true };
+      return { allowed: true, ownEventIds: participantInsertCheck(table, action, req) };
     }
 
     // SELECT
@@ -261,6 +292,7 @@ export function authorizeDbRequest(user: AuthzUser, req: DbQueryRequest): AuthzD
     return {
       allowed: true,
       embedPolicy: { scope, profileColumns: { selfId: user.id, allowed: STUDENT_VISIBLE_PROFILE_COLUMNS } },
+      eventScope: calendarEventScope(table, action),
     };
   }
 

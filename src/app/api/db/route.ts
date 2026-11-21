@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getBearerToken, verifyToken } from '../../../server/auth';
-import { withUserContext } from '../../../server/db';
+import { query, withUserContext } from '../../../server/db';
 import { executeQuery, type EmbedPolicy } from '../../../server/query-executor';
 import {
   authorizeDbRequest,
@@ -121,6 +121,24 @@ export async function POST(req: NextRequest) {
     // Authenticated: enforce role-based access (may inject ownership filters).
     const decision = authorizeDbRequest(user, body);
     embedPolicy = decision.embedPolicy;
+    if (decision.allowed && decision.eventScope) {
+      const { rows } = await query<{ id: string }>(
+        `SELECT id FROM calendar_events WHERE created_by = $1
+         UNION SELECT event_id FROM calendar_event_participants WHERE user_id = $1`,
+        [user.id]
+      );
+      body.filters = [...(body.filters || []), { op: 'in', column: decision.eventScope, value: rows.map((r) => r.id) }];
+    }
+    if (decision.allowed && decision.ownEventIds) {
+      const ids = [...new Set(decision.ownEventIds.map(String))];
+      const { rows } = await query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM calendar_events WHERE id::text = ANY($1::text[]) AND created_by = $2`,
+        [ids, user.id]
+      );
+      if (!ids.length || rows[0]?.n !== ids.length) {
+        return NextResponse.json({ data: null, error: { message: 'Forbidden' } }, { status: 403 });
+      }
+    }
     if (!decision.allowed) {
       return NextResponse.json(
         { data: null, error: { message: decision.message || 'Forbidden' } },
