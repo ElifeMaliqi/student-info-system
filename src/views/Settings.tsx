@@ -251,6 +251,18 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     }
   };
 
+  // Save for Profile and Platform, shown in their card header like every other section's Save.
+  const profilePlatformSave = (
+    <button
+      onClick={() => void handleSave()}
+      disabled={saving}
+      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30 shrink-0"
+    >
+      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+      {t('settings.save')}
+    </button>
+  );
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -447,16 +459,6 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{isAdminRole ? t('settings.title') : t('settings.profile')}</h1>
           <p className="text-white/50 text-sm">{isAdminRole ? t('settings.desc') : t('settings.profile_desc')}</p>
         </div>
-        {activeSection !== 'data' && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] self-start sm:self-auto disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {t('settings.save')}
-          </button>
-        )}
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8">
@@ -488,10 +490,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
             <>
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
                 <div>
-                  <h2 className="font-display text-xl font-medium mb-4">
-                    <User className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                    {t('settings.profile')}
-                  </h2>
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <h2 className="font-display text-xl font-medium">
+                      <User className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                      {t('settings.profile')}
+                    </h2>
+                    {profilePlatformSave}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Email — read-only */}
                     <div className="space-y-2">
@@ -567,10 +572,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               {/* Contact Info */}
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
                 <div>
-                  <h2 className="font-display text-xl font-medium mb-4">
-                    <Building className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                    {t('settings.inst_profile')}
-                  </h2>
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <h2 className="font-display text-xl font-medium">
+                      <Building className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                      {t('settings.inst_profile')}
+                    </h2>
+                    {profilePlatformSave}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.inst_name')}</label>
