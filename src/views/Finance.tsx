@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, type FormEvent } from 'react';
+import { SearchSelect } from '../components/SearchSelect';
+import { SortHeader, type SortDir } from '../components/SortHeader';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CreditCard, Search, CheckCircle, Clock,
@@ -53,6 +55,8 @@ export default function Finance() {
 
   // Only admins/superadmins may import payment documents.
   const canImportDocs = user?.role === 'admin' || user?.role === 'superadmin';
+  // Admins don't get Invoice Settings or the totals cards; superadmins do.
+  const isAdmin = user?.role === 'admin';
 
   // Optional admin note for whichever popup/form is open.
   const [note, setNote] = useState<NoteValue>(EMPTY_NOTE);
@@ -287,6 +291,8 @@ export default function Finance() {
     return { months, years, classes, teachers };
   }, [invoices]);
 
+  const [dueSort, setDueSort] = useState<SortDir | null>(null);
+
   const filtered = useMemo(() => {
     let list = invoices;
     if (statusFilter !== 'all') list = list.filter(i => i.status === statusFilter);
@@ -302,8 +308,36 @@ export default function Finance() {
         (i.teacherName || '').toLowerCase().includes(q)
       );
     }
+    // Due-date sort from the table header; null keeps the default (newest month first).
+    if (dueSort) {
+      const dir = dueSort === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        if (!a.dueDate) return 1;   // invoices without a due date always go last
+        if (!b.dueDate) return -1;
+        return dir * a.dueDate.localeCompare(b.dueDate);
+      });
+    }
     return list;
-  }, [invoices, statusFilter, filterMonth, filterYear, filterClass, filterTeacher, search]);
+  }, [invoices, statusFilter, filterMonth, filterYear, filterClass, filterTeacher, search, dueSort]);
+
+  // Totals cards: all invoices by default; when a month is picked in the table filter,
+  // only that month (and that year too, if a year is picked). Same rules as getStats.
+  const shownStats = useMemo(() => {
+    if (!filterMonth) return stats;
+    let totalPaid = 0, pending = 0, overdue = 0, invoiceCount = 0;
+    for (const inv of invoices) {
+      if (inv.month !== Number(filterMonth)) continue;
+      if (filterYear && inv.year !== Number(filterYear)) continue;
+      invoiceCount++;
+      if (inv.status === 'paid') totalPaid += inv.amount;
+      else if (inv.status === 'overdue') overdue += inv.amount;
+      else pending += inv.amount;
+    }
+    return { totalPaid, pending, overdue, invoiceCount };
+  }, [stats, invoices, filterMonth, filterYear]);
+  const statsPeriod = filterMonth
+    ? ` · ${t(`months.${MONTH_KEYS[Number(filterMonth) - 1]}`)}${filterYear ? ` ${filterYear}` : ''}`
+    : '';
 
   const hasActiveFilters = statusFilter !== 'all' || !!filterMonth || !!filterYear || !!filterClass || !!filterTeacher || !!search.trim();
 
@@ -342,13 +376,8 @@ export default function Finance() {
     try {
       const options = await api.finance.getActiveEnrollmentOptions();
       setEnrollmentOptions(options);
-
-      const first = options[0];
-      setCreateForm(prev => {
-        if (!first) return { ...prev, enrollmentId: '' };
-        const title = prev.title || `${first.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}`;
-        return { ...prev, enrollmentId: first.enrollmentId, title };
-      });
+      // Nothing preselected: the admin searches for the student and picks one.
+      setCreateForm(prev => ({ ...prev, enrollmentId: '', title: '' }));
     } catch (err) {
       console.error(err);
     } finally {
@@ -738,7 +767,7 @@ export default function Finance() {
               Import Document
             </button>
           )}
-          {(!permOverridden || canCreate) && (
+          {!isAdmin && (!permOverridden || canCreate) && (
             <button onClick={openSettings} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2">
               <Settings2 className="w-4 h-4" />
               Invoice Settings
@@ -747,38 +776,60 @@ export default function Finance() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {!isAdmin && <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20"><CreditCard className="w-6 h-6 text-emerald-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.totalPaid)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.total_collected')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.totalPaid)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.total_collected')}{statsPeriod}</div>
           </div>
         </div>
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20"><Clock className="w-6 h-6 text-amber-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.pending)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.pending_payments')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.pending)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.pending_payments')}{statsPeriod}</div>
           </div>
         </div>
         <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center border border-red-500/20"><AlertCircle className="w-6 h-6 text-red-400" /></div>
           <div>
-            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(stats.overdue)}</div>
-            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.overdue_amount')}</div>
+            <div className="text-2xl font-display font-medium tracking-tight mb-0.5">{fmtMoney(shownStats.overdue)}</div>
+            <div className="text-[11px] font-medium text-white/40 uppercase tracking-wider">{t('finance.overdue_amount')}{statsPeriod}</div>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
-        <div className="flex flex-col gap-4 mb-6 shrink-0">
-          <div className="flex flex-col md:flex-row gap-4 justify-between">
-            <div className="relative w-full md:w-96 group">
+        {/* Filters: search + dropdowns + export on one row, status pills below. */}
+        <div className="flex flex-col gap-3 mb-5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72 group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-              <input type="text" placeholder={t('finance.search')} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
+              <input type="text" placeholder={t('finance.search')} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/5 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all" />
             </div>
-            <button onClick={handleExportCsv} disabled={filtered.length === 0} className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start">
+            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('finance.all_months')}</option>
+              {filterOptions.months.map(m => <option key={m} value={m}>{t(`months.${MONTH_KEYS[m - 1]}`)}</option>)}
+            </select>
+            <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('finance.all_years')}</option>
+              {filterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('finance.all_classes')}</option>
+              {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)} className="glass-select select-auto select-compact">
+              <option value="">{t('finance.all_teachers')}</option>
+              {filterOptions.teachers.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {hasActiveFilters && (
+              <button onClick={clearAllFilters} className="text-xs text-white/30 hover:text-white transition-colors px-1">
+                {t('common.clear_all')}
+              </button>
+            )}
+            <button onClick={handleExportCsv} disabled={filtered.length === 0} className="ml-auto px-3.5 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30">
               <Download className="w-4 h-4" />
               {t('common.export_csv')}
             </button>
@@ -790,31 +841,6 @@ export default function Finance() {
                 {s === 'all' ? t('finance.all') : t(STATUS_LABEL[s])}
               </button>
             ))}
-
-            <div className="w-px h-5 bg-white/10 mx-1" />
-
-            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('finance.all_months')}</option>
-              {filterOptions.months.map(m => <option key={m} value={m}>{t(`months.${MONTH_KEYS[m - 1]}`)}</option>)}
-            </select>
-            <select value={filterYear} onChange={e => setFilterYear(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('finance.all_years')}</option>
-              {filterOptions.years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-            <select value={filterClass} onChange={e => setFilterClass(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('finance.all_classes')}</option>
-              {filterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)} className="glass-select px-3 py-1.5 rounded-lg text-xs">
-              <option value="">{t('finance.all_teachers')}</option>
-              {filterOptions.teachers.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-
-            {hasActiveFilters && (
-              <button onClick={clearAllFilters} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
-                {t('common.clear_all')}
-              </button>
-            )}
           </div>
         </div>
         <div className="overflow-x-auto flex-1">
@@ -835,7 +861,14 @@ export default function Finance() {
                   <th className="pb-3 font-medium">{t('finance.col_teacher')}</th>
                   <th className="pb-3 font-medium">{t('finance.col_month')}</th>
                   <th className="pb-3 font-medium">{t('finance.col_year')}</th>
-                  <th className="pb-3 font-medium">{t('finance.due_date')}</th>
+                  <th className="pb-3 font-medium">
+                    <SortHeader
+                      label={t('finance.due_date')}
+                      active={dueSort !== null}
+                      dir={dueSort ?? 'asc'}
+                      onClick={() => setDueSort(d => (d === 'asc' ? 'desc' : 'asc'))}
+                    />
+                  </th>
                   <th className="pb-3 font-medium">{t('finance.amount')}</th>
                   <th className="pb-3 font-medium">{t('table.status')}</th>
                   <th className="pb-3 font-medium text-right">{t('table.action')}</th>
@@ -1013,26 +1046,24 @@ export default function Finance() {
                     <>
                       <div className="space-y-1.5">
                         <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Student / Class</label>
-                        <select
+                        <SearchSelect
+                          options={enrollmentOptions.map(opt => ({
+                            value: opt.enrollmentId,
+                            label: opt.studentName,
+                            sublabel: [opt.className, opt.studentEmail].filter(Boolean).join(' · '),
+                          }))}
                           value={createForm.enrollmentId}
-                          onChange={e => {
-                            const enrollmentId = e.target.value;
+                          onChange={enrollmentId => {
                             const selected = enrollmentOptions.find(opt => opt.enrollmentId === enrollmentId);
                             setCreateForm(prev => ({
                               ...prev,
                               enrollmentId,
-                              title: selected ? `${selected.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}` : prev.title,
+                              title: selected ? `${selected.className} - ${MONTH_NAMES[Number(prev.month) - 1]} ${prev.year}` : '',
                             }));
                           }}
-                          className="glass-select w-full px-3 py-2.5 rounded-xl text-sm"
-                        >
-                          {enrollmentOptions.length === 0 && <option value="">No active enrollments</option>}
-                          {enrollmentOptions.map(opt => (
-                            <option key={opt.enrollmentId} value={opt.enrollmentId}>
-                              {opt.studentName} - {opt.className}
-                            </option>
-                          ))}
-                        </select>
+                          placeholder={enrollmentOptions.length === 0 ? 'No active enrollments' : 'Search student by name, class or email…'}
+                          emptyText="No student matches"
+                        />
                       </div>
 
                       <div className="space-y-1.5">
@@ -1076,7 +1107,7 @@ export default function Finance() {
 
                 <div className="px-5 py-4 border-t border-white/8 flex gap-3">
                   <button onClick={() => setShowCreateInvoice(false)} disabled={creatingInvoice} className="flex-1 px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors disabled:opacity-50">Cancel</button>
-                  <button onClick={createManualInvoice} disabled={creatingInvoice || loadingCreateOptions || enrollmentOptions.length === 0} className="flex-1 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                  <button onClick={createManualInvoice} disabled={creatingInvoice || loadingCreateOptions || !createForm.enrollmentId} className="flex-1 bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                     {creatingInvoice && <Loader2 className="w-4 h-4 animate-spin" />}
                     Create Invoice
                   </button>
@@ -1096,7 +1127,10 @@ export default function Finance() {
                 <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
                   <div>
                     <h2 className="text-sm font-bold text-white">Invoice Status</h2>
-                    <p className="text-[11px] text-white/40 mt-0.5">{statusInvoice.title} - {statusInvoice.studentName}</p>
+                    <p className="text-[11px] text-white/40 mt-0.5">
+                      {statusInvoice.title} - {statusInvoice.studentName}
+                      {statusInvoice.studentAge != null && ` (${t('finance.age_yrs').replace('{age}', String(statusInvoice.studentAge))})`}
+                    </p>
                   </div>
                   <button onClick={() => setStatusInvoice(null)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-all"><X className="w-4 h-4" /></button>
                 </div>
@@ -1105,6 +1139,13 @@ export default function Finance() {
                     <span className="text-sm text-white/60">Current Status</span>
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium uppercase tracking-wider border ${STATUS_BADGE[statusInvoice.status]}`}>{t(STATUS_LABEL[statusInvoice.status])}</span>
                   </div>
+                  {statusInvoice.statusChangedAt && (
+                    <p className="text-[11px] text-white/40 -mt-2 px-1">
+                      {t('finance.status_changed_by')
+                        .replace('{name}', statusInvoice.statusChangedBy || t('finance.system'))
+                        .replace('{date}', new Date(statusInvoice.statusChangedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}
+                    </p>
+                  )}
                   <NoteField value={note} onChange={setNote} />
                   <div className="space-y-1.5">
                     <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest">Mark Status As:</label>

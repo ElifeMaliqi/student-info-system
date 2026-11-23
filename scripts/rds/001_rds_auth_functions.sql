@@ -34,13 +34,15 @@ DECLARE
 BEGIN
   v_caller := COALESCE(caller_id, current_app_user_id());
 
-  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_caller AND role = 'admin') THEN
+  IF NOT EXISTS (SELECT 1 FROM profiles WHERE id = v_caller AND role IN ('admin', 'superadmin')) THEN
     RAISE EXCEPTION 'Only admins can approve registrations';
   END IF;
 
   SELECT * INTO app FROM registration_applications WHERE id = application_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Application not found'; END IF;
   IF app.status != 'pending' THEN RAISE EXCEPTION 'Application is already %', app.status; END IF;
+  -- Only students and teachers are ever created by approving a registration.
+  IF app.role NOT IN ('student', 'teacher') THEN RAISE EXCEPTION 'Registrations can only be for students or teachers'; END IF;
   IF EXISTS (SELECT 1 FROM profiles WHERE lower(email) = lower(app.email)) THEN
     RAISE EXCEPTION 'A user with this email already exists';
   END IF;

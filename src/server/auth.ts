@@ -35,7 +35,19 @@ export interface AuthUser {
   id: string;
   email: string;
   role: string;
+  /**
+   * Set when a superadmin is impersonating this user. `id`/`role` above are the
+   * impersonated user's, so every route acts exactly as that user would.
+   */
+  impersonation?: {
+    byId: string;
+    byName: string;
+    asName: string;
+  };
 }
+
+const IMPERSONATION_PURPOSE = 'impersonation';
+const IMPERSONATION_EXPIRY = '1h';
 
 export interface AuthSession {
   access_token: string;
@@ -86,6 +98,36 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
     const { payload } = await jwtVerify(token, getSecret(), { issuer: JWT_ISSUER });
     const id = payload.sub as string;
     if (!id) return null;
+
+    const purpose = (payload as { purpose?: string }).purpose;
+    // A password-reset link is not a sign-in.
+    if (purpose === 'password-reset') return null;
+
+    if (purpose === IMPERSONATION_PURPOSE) {
+      // Valid only while the impersonator is still a superadmin and the target
+      // is not one (superadmins can't be impersonated).
+      const byId = (payload as { imp?: unknown }).imp;
+      if (typeof byId !== 'string' || !byId) return null;
+      const { rows } = await query<{ id: string; email: string; role: string; as_name: string; by_id: string; by_name: string }>(
+        `SELECT t.id, t.email, t.role,
+                trim(coalesce(t.first_name, '') || ' ' || coalesce(t.last_name, '')) AS as_name,
+                i.id AS by_id,
+                trim(coalesce(i.first_name, '') || ' ' || coalesce(i.last_name, '')) AS by_name
+         FROM profiles t
+         JOIN profiles i ON i.id = $2 AND i.role = 'superadmin'
+         WHERE t.id = $1 AND t.role <> 'superadmin'`,
+        [id, byId]
+      );
+      const r = rows[0];
+      if (!r) return null;
+      return {
+        id: r.id,
+        email: r.email,
+        role: r.role,
+        impersonation: { byId: r.by_id, byName: r.by_name, asName: r.as_name },
+      };
+    }
+
     const { rows } = await query<{ id: string; email: string; role: string }>(
       'SELECT id, email, role FROM profiles WHERE id = $1',
       [id]
@@ -94,6 +136,22 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Short-lived token that signs a superadmin in as another user. The caller must
+ * already have checked that `byId` is a real (not impersonating) superadmin.
+ */
+export async function generateImpersonationToken(
+  target: { id: string; email: string; role: string },
+  byId: string
+): Promise<string> {
+  return new SignJWT({ sub: target.id, email: target.email, role: target.role, imp: byId, purpose: IMPERSONATION_PURPOSE })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setIssuer(JWT_ISSUER)
+    .setExpirationTime(IMPERSONATION_EXPIRY)
+    .sign(getSecret());
 }
 
 export async function updatePassword(userId: string, newPassword: string): Promise<void> {

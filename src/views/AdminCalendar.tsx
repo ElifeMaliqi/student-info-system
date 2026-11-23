@@ -273,16 +273,6 @@ function inputCls(extra = '') {
   return `w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-[#fc0ce4]/50 focus:bg-[#fc0ce4]/5 transition-all ${extra}`;
 }
 
-// ── Attendance status badge ────────────────────────────────────────────────────
-
-function AttBadge({ status }: { status?: string }) {
-  const { t } = useLanguage();
-  if (status === 'present') return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-400/15 text-emerald-400 font-medium">{t('status.present')}</span>;
-  if (status === 'late')    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/15 text-amber-400 font-medium">{t('status.late')}</span>;
-  if (status === 'absent')  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-400/15 text-red-400 font-medium">{t('status.absent')}</span>;
-  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-white/25 font-medium">{t('status.unrecorded')}</span>;
-}
-
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type Participant = { email: string; name?: string; userId?: string };
@@ -339,6 +329,10 @@ export default function AdminCalendar() {
   const [detailClass,      setDetailClass     ] = useState<AdminDayClass | null>(null);
   const [detailStudents,   setDetailStudents  ] = useState<StudentRow[]>([]);
   const [detailAttendance, setDetailAttendance] = useState<Record<string, string>>({});
+  // Admins/superadmins take attendance here too, and can override a teacher's mark.
+  const [detailAttDate, setDetailAttDate] = useState('');
+  const [attSaving, setAttSaving] = useState<Record<string, boolean>>({});
+  const [attError, setAttError] = useState('');
   const [detailLoading,    setDetailLoading   ] = useState(false);
 
   // Single-class reschedule inline form
@@ -491,10 +485,17 @@ export default function AdminCalendar() {
     setRescheduleReason('');
     setCancelReason('');
     setRescheduleForm({ date: '', startTime: cls.startTime, endTime: cls.endTime });
+    setAttError('');
+    setAttSaving({});
+    // Attendance is kept under the day the class actually takes place — the day
+    // being viewed (a rescheduled class's new date), the same date the teacher's
+    // calendar uses, so an admin mark overrides the teacher's.
+    const attDate = adminDayOpen ? toInputDate(adminDayOpen) : cls.originalDate;
+    setDetailAttDate(attDate);
     try {
       const [students, attendance] = await Promise.all([
         api.classAttendance.getStudentsForClass(cls.classId),
-        api.classAttendance.getForClassDate(cls.classId, cls.originalDate),
+        api.classAttendance.getForClassDate(cls.classId, attDate),
       ]);
       setDetailStudents(students);
       setDetailAttendance(attendance as Record<string, string>);
@@ -503,6 +504,34 @@ export default function AdminCalendar() {
       setDetailStudents([]); setDetailAttendance({});
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function markAttendance(student: StudentRow, status: 'present' | 'late' | 'absent') {
+    if (!detailClass || !detailAttDate) return;
+    const prev = detailAttendance[student.id];
+    if (prev === status) return;
+    setAttError('');
+    setDetailAttendance(a => ({ ...a, [student.id]: status }));
+    setAttSaving(sv => ({ ...sv, [student.id]: true }));
+    try {
+      await api.classAttendance.mark(detailClass.classId, student.id, detailAttDate, status);
+      await saveNote(
+        'academics',
+        prev
+          ? `Attendance changed – ${student.name}: ${detailClass.className} ${detailAttDate} (${prev} → ${status})`
+          : `Attendance added – ${student.name}: ${detailClass.className} ${detailAttDate} (${status})`,
+        null,
+      );
+    } catch (e) {
+      setDetailAttendance(a => {
+        const next = { ...a };
+        if (prev) next[student.id] = prev; else delete next[student.id];
+        return next;
+      });
+      setAttError(e instanceof Error ? e.message : 'Failed to save attendance');
+    } finally {
+      setAttSaving(sv => ({ ...sv, [student.id]: false }));
     }
   }
 
@@ -1005,8 +1034,13 @@ export default function AdminCalendar() {
                       {/* Students & attendance */}
                       <div>
                         <p className="text-[11px] font-semibold text-white/25 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                          <Users className="w-3 h-3" /> Students
+                          <Users className="w-3 h-3" /> Students · Attendance
                         </p>
+                        {attError && (
+                          <p className="mb-2 flex items-center gap-1.5 text-xs text-red-400">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {attError}
+                          </p>
+                        )}
                         {detailLoading ? (
                           <div className="flex items-center justify-center py-8">
                             <Loader2 className="w-4 h-4 text-[#fc0ce4] animate-spin" />
@@ -1024,7 +1058,29 @@ export default function AdminCalendar() {
                                   }
                                 </div>
                                 <p className="flex-1 text-sm text-white/70 truncate">{s.name}</p>
-                                <AttBadge status={detailAttendance[s.id]} />
+                                {attSaving[s.id] ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-white/30 shrink-0" />
+                                ) : (
+                                  <div className="flex gap-1.5 shrink-0">
+                                    {([
+                                      { st: 'present', Icon: Check, label: t('status.present'), on: 'bg-emerald-500/25 text-emerald-400 border-emerald-500/40', hover: 'hover:bg-emerald-500/15 hover:text-emerald-400' },
+                                      { st: 'late', Icon: Minus, label: t('status.late'), on: 'bg-amber-500/25 text-amber-400 border-amber-500/40', hover: 'hover:bg-amber-500/15 hover:text-amber-400' },
+                                      { st: 'absent', Icon: X, label: t('status.absent'), on: 'bg-red-500/25 text-red-400 border-red-500/40', hover: 'hover:bg-red-500/15 hover:text-red-400' },
+                                    ] as const).map(({ st, Icon, label, on, hover }) => (
+                                      <button
+                                        key={st}
+                                        onClick={() => void markAttendance(s, st)}
+                                        title={label}
+                                        aria-label={label}
+                                        className={`w-7 h-7 rounded-full flex items-center justify-center border transition-all ${
+                                          detailAttendance[s.id] === st ? on : `bg-white/5 text-white/30 border-transparent ${hover}`
+                                        }`}
+                                      >
+                                        <Icon className="w-3.5 h-3.5" />
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

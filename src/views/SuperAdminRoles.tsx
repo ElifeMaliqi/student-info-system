@@ -15,7 +15,6 @@ const AVAILABLE_MODULES = [
   'programs',
   'classes',
   'announcements',
-  'analytics',
   'settings',
   'grades',
   'finance',
@@ -202,7 +201,8 @@ export const SuperAdminRoles: React.FC = () => {
 
       <div className="grid gap-4">
         {roles.map(role => {
-          const visiblePermissions = (role.permissions || []).filter(permission => permission.actions.length > 0);
+          // Modules no longer in the app (e.g. the removed Analytics page) aren't shown.
+          const visiblePermissions = (role.permissions || []).filter(permission => permission.actions.length > 0 && AVAILABLE_MODULES.includes(permission.module));
           return (
             <div key={role.id} className="glass-card rounded-2xl p-5">
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">

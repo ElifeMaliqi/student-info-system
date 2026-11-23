@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { SortIcon } from '../components/SortHeader';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Calendar as CalendarIcon, CheckCircle2, XCircle, Clock, AlertTriangle,
   Search, Download, X, Loader2, Upload, FileSpreadsheet,
-  GraduationCap, ArrowUpDown,
+  GraduationCap,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser, useModulePermissions } from '../context/UserContext';
@@ -208,7 +209,7 @@ export default function Attendance() {
         className={`flex items-center gap-1 transition-colors ${active ? 'text-[#fc0ce4]' : 'hover:text-white'}`}
       >
         {label}
-        <ArrowUpDown className={`w-3 h-3 ${active ? 'opacity-100' : 'opacity-40'}`} />
+        <SortIcon active={active} dir={sortDir} />
       </button>
     );
   }
@@ -360,7 +361,7 @@ export default function Attendance() {
             <select
               value={filterMonth}
               onChange={e => { setFilterMonth(e.target.value); setFilterDate(''); }}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_months')}</option>
               {MONTH_KEYS.map((mk, i) => (
@@ -374,7 +375,7 @@ export default function Attendance() {
             <select
               value={filterYear}
               onChange={e => { setFilterYear(e.target.value); setFilterDate(''); }}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_years')}</option>
               {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
@@ -386,7 +387,7 @@ export default function Attendance() {
             <select
               value={filterClass}
               onChange={e => setFilterClass(e.target.value)}
-              className="glass-select pl-3 py-2.5 rounded-xl text-sm"
+              className="glass-select select-auto"
             >
               <option value="">{t('attendance.all_classes')}</option>
               {classOptions.map(c => <option key={c} value={c}>{c}</option>)}

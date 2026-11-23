@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getBearerToken, verifyToken } from '../../../../server/auth';
+import { logImpersonatedAction } from '../../../../server/impersonation';
 import { withUserContext } from '../../../../server/db';
 import { PRIVILEGED_ROLES } from '../../../../server/authz';
 import { parseInvoiceDocx } from '../../../../server/docx-invoice';
@@ -142,6 +143,9 @@ export async function POST(req: NextRequest) {
       };
     });
 
+    if (result.http === 200 && (result.body as { imported?: boolean }).imported) {
+      await logImpersonatedAction(user, 'add', 'Payment document imported while impersonating');
+    }
     return NextResponse.json(result.body, { status: result.http });
   } catch (e) {
     console.error('[/api/invoices/import]', e);

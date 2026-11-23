@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getBearerToken, generateResetToken, loginWithPassword, updatePassword, verifyResetToken, verifyToken } from '../../../../server/auth';
+import { getBearerToken, generateImpersonationToken, generateResetToken, loginWithPassword, updatePassword, verifyResetToken, verifyToken } from '../../../../server/auth';
+import { publicErrorMessage, query } from '../../../../server/db';
 import { rateLimit, clientIp } from '../../../../server/rate-limit';
 import { appUrl } from '../../../../server/app-url';
 import { Resend } from 'resend';
@@ -96,7 +97,7 @@ export async function POST(
       });
     } catch (e) {
       return NextResponse.json(
-        { data: null, error: { message: e instanceof Error ? e.message : 'Login failed' } },
+        { data: null, error: { message: publicErrorMessage(e, 'Login failed') } },
         { status: 401 }
       );
     }
@@ -111,9 +112,78 @@ export async function POST(
       data: {
         session: { access_token: token, user: { id: user.id, email: user.email } },
         user: { id: user.id, email: user.email },
+        impersonator: user.impersonation ? { id: user.impersonation.byId, name: user.impersonation.byName } : null,
       },
       error: null,
     });
+  }
+
+  // Superadmin signs in as another user. Body: { userId } or { email }.
+  if (action === 'impersonate') {
+    const token = getBearerToken(req.headers.get('authorization'));
+    const caller = token ? await verifyToken(token) : null;
+    if (!caller) {
+      return NextResponse.json({ data: null, error: { message: 'Not authenticated' } }, { status: 401 });
+    }
+    if (caller.role !== 'superadmin' || caller.impersonation) {
+      return NextResponse.json({ data: null, error: { message: 'Only a superadmin can impersonate users.' } }, { status: 403 });
+    }
+
+    const { userId, email } = body as { userId?: unknown; email?: unknown };
+    type Target = { id: string; email: string; role: string; first_name: string | null; last_name: string | null };
+    const cols = 'id, email, role, first_name, last_name';
+    let targets: Target[] = [];
+    if (typeof userId === 'string' && /^[0-9a-f-]{36}$/i.test(userId)) {
+      ({ rows: targets } = await query<Target>(`SELECT ${cols} FROM profiles WHERE id = $1`, [userId]));
+    } else if (typeof email === 'string' && email.trim()) {
+      ({ rows: targets } = await query<Target>(`SELECT ${cols} FROM profiles WHERE lower(email) = lower($1)`, [email.trim()]));
+    } else {
+      return NextResponse.json({ data: null, error: { message: 'userId or email is required.' } }, { status: 400 });
+    }
+    if (targets.length !== 1) {
+      return NextResponse.json({ data: null, error: { message: 'No account found for this user.' } }, { status: 404 });
+    }
+    const target = targets[0];
+    if (target.role === 'superadmin') {
+      return NextResponse.json({ data: null, error: { message: 'Superadmin accounts cannot be impersonated.' } }, { status: 403 });
+    }
+
+    const name = `${target.first_name ?? ''} ${target.last_name ?? ''}`.trim();
+    try {
+      await query(
+        `INSERT INTO activity_logs (user_id, user_name, user_role, activity, area, description)
+         SELECT p.id, trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), p.role, 'edit', 'impersonation', $2
+         FROM profiles p WHERE p.id = $1`,
+        [caller.id, `Impersonation started – ${name} (${target.role})`]
+      );
+    } catch (err) {
+      console.error('[impersonate] Failed to log activity:', err);
+    }
+
+    const impersonationToken = await generateImpersonationToken(target, caller.id);
+    return NextResponse.json({
+      data: { token: impersonationToken, user: { id: target.id, email: target.email, role: target.role, name } },
+      error: null,
+    });
+  }
+
+  // Called with the impersonation token when the superadmin switches back.
+  if (action === 'stop-impersonation') {
+    const token = getBearerToken(req.headers.get('authorization'));
+    const user = token ? await verifyToken(token) : null;
+    if (user?.impersonation) {
+      try {
+        await query(
+          `INSERT INTO activity_logs (user_id, user_name, user_role, activity, area, description)
+           SELECT p.id, trim(coalesce(p.first_name, '') || ' ' || coalesce(p.last_name, '')), p.role, 'edit', 'impersonation', $2
+           FROM profiles p WHERE p.id = $1`,
+          [user.impersonation.byId, `Impersonation ended – ${user.impersonation.asName} (${user.role})`]
+        );
+      } catch (err) {
+        console.error('[stop-impersonation] Failed to log activity:', err);
+      }
+    }
+    return NextResponse.json({ data: {}, error: null });
   }
 
   if (action === 'logout') {
@@ -126,12 +196,15 @@ export async function POST(
     if (!authUser) {
       return NextResponse.json({ data: null, error: { message: 'Not authenticated' } }, { status: 401 });
     }
+    if (authUser.impersonation) {
+      return NextResponse.json({ data: null, error: { message: "A user's password can't be changed while impersonating them." } }, { status: 403 });
+    }
     try {
       await updatePassword(authUser.id, (body as { password: string }).password);
       return NextResponse.json({ data: { user: { id: authUser.id } }, error: null });
     } catch (e) {
       return NextResponse.json(
-        { data: null, error: { message: e instanceof Error ? e.message : 'Update failed' } },
+        { data: null, error: { message: publicErrorMessage(e, 'Update failed') } },
         { status: 400 }
       );
     }
@@ -142,6 +215,9 @@ export async function POST(
     const authUser = token ? await verifyToken(token) : null;
     if (!authUser) {
       return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
+    }
+    if (authUser.impersonation) {
+      return NextResponse.json({ error: { message: "A user's password can't be changed while impersonating them." } }, { status: 403 });
     }
 
     const resetToken = await generateResetToken(authUser.id);

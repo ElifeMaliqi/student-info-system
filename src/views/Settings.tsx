@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail, Receipt, Plus, Trash2 } from 'lucide-react';
+import { Save, Database, User, Building, Lock, CheckCircle, AlertCircle, Loader2, Download, Phone, MapPin, Clock, Upload, MessageSquare, Mail, Receipt, Plus, Trash2, History } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
 import { api } from '../services/api';
 import { exportCsv } from '../utils/csv';
 import { NoteField, EMPTY_NOTE, saveNote, type NoteValue } from '../components/NoteField';
+import { ActivityLogTable } from '../components/ActivityLogTable';
 
 interface AppSettings {
   id: string;
@@ -24,6 +25,8 @@ interface AppSettings {
 
 export default function Settings({ role }: { role: 'admin' | 'teacher' | 'student' | 'superadmin' }) {
   const isAdminRole = role === 'admin' || role === 'superadmin';
+  // Platform, message/email templates, invoices, locations and data tabs are superadmin-only.
+  const isSuperadmin = role === 'superadmin';
   const [activeSection, setActiveSection] = useState('profile');
   const { t } = useLanguage();
   const { user, setUser } = useUser();
@@ -95,13 +98,19 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
     { id: 'invoices', label: t('settings.invoices'), icon: Receipt },
     { id: 'locations', label: t('settings.locations'), icon: MapPin },
     { id: 'data', label: t('settings.data'), icon: Database },
+    { id: 'logs', label: t('settings.logs'), icon: History },
   ];
 
   const userSections = [
     { id: 'profile', label: t('settings.profile'), icon: User },
   ];
 
-  const sections = isAdminRole ? adminSections : userSections;
+  const SUPERADMIN_ONLY_SECTIONS = new Set(['platform', 'messages', 'emails', 'invoices', 'locations', 'data', 'logs']);
+  const sections = isSuperadmin
+    ? adminSections
+    : isAdminRole
+      ? adminSections.filter(s => !SUPERADMIN_ONLY_SECTIONS.has(s.id))
+      : userSections;
 
   // Load data
   useEffect(() => {
@@ -241,6 +250,18 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
       setPwResetLoading(false);
     }
   };
+
+  // Save for Profile and Platform, shown in their card header like every other section's Save.
+  const profilePlatformSave = (
+    <button
+      onClick={() => void handleSave()}
+      disabled={saving}
+      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[#fc0ce4]/10 to-[#949ce4]/10 border border-[#fc0ce4]/20 text-[#fc0ce4] text-xs font-semibold hover:opacity-80 transition-all disabled:opacity-30 shrink-0"
+    >
+      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+      {t('settings.save')}
+    </button>
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -438,16 +459,6 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">{isAdminRole ? t('settings.title') : t('settings.profile')}</h1>
           <p className="text-white/50 text-sm">{isAdminRole ? t('settings.desc') : t('settings.profile_desc')}</p>
         </div>
-        {activeSection !== 'data' && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-gradient-to-r from-[#fc0ce4] to-[#949ce4] text-white px-6 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 hover:opacity-90 transition-all shadow-[0_0_20px_rgba(252,12,228,0.2)] self-start sm:self-auto disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {t('settings.save')}
-          </button>
-        )}
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8">
@@ -479,10 +490,13 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
             <>
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
                 <div>
-                  <h2 className="font-display text-xl font-medium mb-4">
-                    <User className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                    {t('settings.profile')}
-                  </h2>
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <h2 className="font-display text-xl font-medium">
+                      <User className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                      {t('settings.profile')}
+                    </h2>
+                    {profilePlatformSave}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Email — read-only */}
                     <div className="space-y-2">
@@ -553,15 +567,18 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== PLATFORM SETTINGS (admin only) ===== */}
-          {activeSection === 'platform' && isAdminRole && (
+          {activeSection === 'platform' && isSuperadmin && (
             <>
               {/* Contact Info */}
               <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
                 <div>
-                  <h2 className="font-display text-xl font-medium mb-4">
-                    <Building className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
-                    {t('settings.inst_profile')}
-                  </h2>
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <h2 className="font-display text-xl font-medium">
+                      <Building className="w-5 h-5 inline-block mr-2 text-[#fc0ce4]" />
+                      {t('settings.inst_profile')}
+                    </h2>
+                    {profilePlatformSave}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
                       <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">{t('settings.inst_name')}</label>
@@ -640,7 +657,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== MESSAGE TEMPLATES (admin only) ===== */}
-          {activeSection === 'messages' && isAdminRole && (
+          {activeSection === 'messages' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <h2 className="font-display text-xl font-medium mb-1">
@@ -707,7 +724,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== EMAIL TEMPLATES (admin only) ===== */}
-          {activeSection === 'emails' && isAdminRole && (
+          {activeSection === 'emails' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <h2 className="font-display text-xl font-medium mb-1">
@@ -788,7 +805,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== INVOICE PRICING (admin only) ===== */}
-          {activeSection === 'invoices' && isAdminRole && (
+          {activeSection === 'invoices' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <div className="flex items-start justify-between gap-4 mb-1">
@@ -898,7 +915,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== LOCATIONS (admin only) ===== */}
-          {activeSection === 'locations' && isAdminRole && (
+          {activeSection === 'locations' && isSuperadmin && (
             <div className="space-y-6">
               <div className="glass-card rounded-3xl p-6 lg:p-8">
                 <div className="flex items-start justify-between gap-4 mb-1">
@@ -961,7 +978,7 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
           )}
 
           {/* ===== DATA EXPORT (admin only) ===== */}
-          {activeSection === 'data' && isAdminRole && (
+          {activeSection === 'data' && isSuperadmin && (
             <div className="glass-card rounded-3xl p-6 lg:p-8 space-y-8">
               <div>
                 <h2 className="font-display text-xl font-medium mb-2">
@@ -998,6 +1015,9 @@ export default function Settings({ role }: { role: 'admin' | 'teacher' | 'studen
               </div>
             </div>
           )}
+
+          {/* ===== LOGS (superadmin only) ===== */}
+          {activeSection === 'logs' && isSuperadmin && <ActivityLogTable />}
         </div>
       </div>
     </motion.div>

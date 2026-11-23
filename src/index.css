@@ -102,6 +102,23 @@ body {
   color: #ffffff;
 }
 
+/* Filter-toolbar dropdowns. .glass-select is unlayered CSS, so Tailwind utilities
+   (w-auto, px-3, text-xs...) can't override it; these two-class rules can.
+   select-auto: size to the content instead of taking a full row.
+   select-compact: smaller toolbar size, same height as the toolbar search box. */
+.glass-select.select-auto {
+  width: auto;
+  max-width: 16rem;
+}
+
+.glass-select.select-compact {
+  font-size: 0.75rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+
 /* Typography */
 .text-gradient {
   background: linear-gradient(135deg, #fc0ce4 0%, #949ce4 100%);

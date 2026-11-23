@@ -38,11 +38,23 @@ export async function withUserContext<T>(
   fn: (client: pg.PoolClient) => Promise<T>
 ): Promise<T> {
   const client = await getPool().connect();
+  // Session-level (is_local = false): set_app_user() uses a transaction-local
+  // setting, which vanished as soon as its own autocommit statement ended, so
+  // current_app_user_id() was always NULL in the queries that followed. The
+  // value is cleared again before the connection returns to the pool so it
+  // can't leak into a later query from another user or the background sync.
   try {
-    await client.query('SELECT set_app_user($1)', [userId]);
+    await client.query(`SELECT set_config('app.user_id', $1, false)`, [userId ?? '']);
     return await fn(client);
   } finally {
-    client.release();
+    try {
+      await client.query(`SELECT set_config('app.user_id', '', false)`);
+      client.release();
+    } catch (err) {
+      // e.g. fn left an aborted transaction open: drop this connection instead
+      // of returning it to the pool with the user id still set.
+      client.release(err as Error);
+    }
   }
 }
 
@@ -55,4 +67,24 @@ export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
     return withUserContext(userId ?? null, (client) => client.query<T>(text, params));
   }
   return getPool().query<T>(text, params);
+}
+
+/**
+ * The error text a browser may see. Our own messages (thrown in app code, or
+ * RAISE EXCEPTION in our database functions) and duplicate-key errors (the app
+ * matches on their constraint names) pass through; any other database or
+ * connection error, which can name tables, columns or servers, is replaced by
+ * a plain message and logged here instead.
+ */
+export function publicErrorMessage(e: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (!(e instanceof Error)) return fallback;
+  const { code, detail } = e as Error & { code?: unknown; detail?: unknown };
+  if (typeof code !== 'string') return e.message;
+  if (code === 'P0001') return e.message;
+  if (code === '23505') return typeof detail === 'string' && detail ? `${e.message} (${detail})` : e.message;
+  console.error('[db error]', code, e.message, detail ?? '');
+  if (code === '23503') return 'This item is still linked to other records.';
+  if (code === '23502') return 'A required field is missing.';
+  if (code === '23514' || code.startsWith('22')) return 'One of the values is not valid.';
+  return fallback;
 }

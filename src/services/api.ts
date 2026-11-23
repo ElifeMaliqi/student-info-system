@@ -1,4 +1,4 @@
-import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote } from '../types';
+import { Student, User, Role, Invoice, InvoiceSettings, SettingsStudent, Announcement, AttendanceRecord, Grade, Program, RegistrationApplication, CalendarEvent, CalendarParticipant, Class, ClassSession, ClassEnrollment, GradeTable, GradeTableEntry, AdminDayClass, TeacherOverview, TeacherClassAttendance, AdminNote, ActivityLog } from '../types';
 import { supabase } from '../lib/supabase';
 import { effectiveAge, priceForAge, parseAgePrices, type AgePrice } from '../utils/age';
 
@@ -57,7 +57,13 @@ export const api = {
     uploadIdDocument: async (file: File): Promise<string> => {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/upload/id-document', { method: 'POST', body: form });
+      // Signed-in staff (manual enrollment) aren't held to the public upload limit.
+      const token = typeof window !== 'undefined' ? localStorage.getItem('fma_sis_token') : null;
+      const res = await fetch('/api/upload/id-document', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || !body.url) throw new Error(body.error || 'Failed to upload ID document');
       return body.url as string;
@@ -66,7 +72,13 @@ export const api = {
     // Our stored ID documents need the admin's token, which a plain link can't send.
     // The tab is opened before the fetch so popup blockers don't stop it.
     openIdDocument: async (url: string): Promise<void> => {
-      if (!url.startsWith('/api/upload/id-document')) { window.open(url, '_blank', 'noopener,noreferrer'); return; }
+      if (!/^\/api\/upload\/id-document\?file=[0-9a-f-]{36}\.(jpg|png|pdf)$/.test(url)) {
+        // Older documents may be plain https links; never open anything else
+        // (a javascript: link would run inside this admin session).
+        if (!/^https:\/\//i.test(url)) throw new Error('Invalid document link');
+        window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
       const tab = window.open('', '_blank');
       const res = await fetch(url, { headers: getAuthHeaders() });
       if (!res.ok) { tab?.close(); throw new Error('Failed to open ID document'); }
@@ -539,11 +551,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            INSERT INTO invoices
-              (enrollment_id, student_id, class_id, invoice_id, title, month, year, due_date, amount, discount_percent, status, is_manual)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'not_paid', true)
-          `,
+          queryName: 'finance.insertManualInvoice',
           params: [
             params.enrollmentId,
             params.studentId,
@@ -646,13 +654,7 @@ export const api = {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({
-              query: `
-                INSERT INTO student_archived_classes (student_id, class_id, class_title, program_id)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (student_id, class_id) DO UPDATE SET
-                  class_title = EXCLUDED.class_title,
-                  program_id  = EXCLUDED.program_id
-              `,
+              queryName: 'finance.snapshotArchivedClass',
               params: [row.student_id, row.class_id, row.class_title, row.program_id],
             }),
           });
@@ -712,7 +714,7 @@ export const api = {
         .from('invoices')
         .select(`
           *,
-          student:profiles!invoices_student_id_fkey(first_name, last_name),
+          student:profiles!invoices_student_id_fkey(first_name, last_name, age, date_of_birth),
           class:classes!invoices_class_id_fkey(
             title,
             teacher:profiles!classes_teacher_id_fkey(first_name, last_name)
@@ -728,6 +730,19 @@ export const api = {
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
+
+      // Who last changed each status, as "E. Maliqi". Staff views only; students never see it.
+      const changerNames: Record<string, string> = {};
+      const changerIds = studentUserId
+        ? []
+        : [...new Set((data || []).map((inv: any) => inv.status_changed_by).filter(Boolean))] as string[];
+      if (changerIds.length > 0) {
+        const { data: changers } = await supabase.from('profiles').select('id, first_name, last_name').in('id', changerIds);
+        for (const p of (changers || []) as any[]) {
+          const first = (p.first_name || '').trim();
+          changerNames[p.id] = `${first ? `${first[0].toUpperCase()}. ` : ''}${(p.last_name || '').trim()}`.trim();
+        }
+      }
 
       return (data || []).map((inv: any) => ({
         id: inv.id,
@@ -746,6 +761,9 @@ export const api = {
         discountPercent: parseFloat(inv.discount_percent || '0'),
         status: inv.status as Invoice['status'],
         isManual: inv.is_manual === true,
+        studentAge: inv.student ? effectiveAge(inv.student.age, inv.student.date_of_birth) : null,
+        statusChangedAt: inv.status_changed_at ?? null,
+        statusChangedBy: inv.status_changed_by ? changerNames[inv.status_changed_by] ?? null : null,
       }));
     },
 
@@ -1365,6 +1383,51 @@ export const api = {
         gradedAt: e.graded_at ? formatDate(e.graded_at) : null,
         note: e.note || null,
       }));
+    },
+  },
+
+  logs: {
+    /** Records an admin action in the activity log. The server adds the user and Add/Edit/Delete. */
+    create: async (area: string, description: string): Promise<void> => {
+      const res = await fetch('/api/logs', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ area, description }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Failed to log activity');
+      }
+    },
+
+    /** One page of the activity log, newest first (superadmins only), with optional filters. */
+    getPage: async (opts: { page?: number; user?: string; activity?: string; from?: string; to?: string } = {}): Promise<{
+      rows: ActivityLog[]; total: number; page: number; pageSize: number; users: string[];
+    }> => {
+      const qs = new URLSearchParams();
+      if (opts.page && opts.page > 1) qs.set('page', String(opts.page));
+      if (opts.user) qs.set('user', opts.user);
+      if (opts.activity) qs.set('activity', opts.activity);
+      if (opts.from) qs.set('from', opts.from);
+      if (opts.to) qs.set('to', opts.to);
+      const res = await fetch(`/api/logs${qs.toString() ? `?${qs}` : ''}`, { headers: getAuthHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to load logs');
+      return {
+        rows: (json.rows as any[]).map(r => ({
+          id: r.id,
+          userName: r.user_name,
+          userRole: r.user_role,
+          activity: r.activity,
+          area: r.area,
+          description: r.description,
+          createdAt: r.created_at,
+        })),
+        total: json.total ?? 0,
+        page: json.page ?? 1,
+        pageSize: json.pageSize ?? 25,
+        users: json.users ?? [],
+      };
     },
   },
 
@@ -2227,27 +2290,24 @@ export const api = {
      *  that account too — the same delete as Remove on the Students / Teachers pages
      *  (a teacher who still has classes is refused). Other accounts are never touched. */
     deleteWithAccount: async (app: { id: string; email: string; role: string }): Promise<void> => {
-      const post = async (query: string, params: unknown[]) => {
+      const post = async (queryName: string, params: unknown[]) => {
         const response = await fetch('/api/db', {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ query, params }),
+          body: JSON.stringify({ queryName, params }),
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to delete registration');
         return (result.rows || []) as any[];
       };
 
-      const [profile] = await post(
-        `SELECT id, role FROM profiles WHERE lower(email) = lower($1) LIMIT 1`,
-        [app.email],
-      );
+      const [profile] = await post('registrations.findProfileByEmail', [app.email]);
       if (profile && profile.role === app.role) {
         if (app.role === 'student') await api.teacher.removeStudentAccount(profile.id);
         else if (app.role === 'teacher') await api.users.deleteTeacher(profile.id);
       }
 
-      await post(`DELETE FROM registration_applications WHERE id = $1`, [app.id]);
+      await post('registrations.deleteApplication', [app.id]);
     },
 
     // Push imported CSV details onto the student's (auto-approved) application so
@@ -2308,10 +2368,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `SELECT DISTINCT lower(p.email) AS email
-                  FROM class_enrollments ce
-                  JOIN profiles p ON p.id = ce.student_id
-                  WHERE p.email IS NOT NULL`,
+          queryName: 'registrations.enrolledStudentEmails',
           params: [],
         }),
       });
@@ -2365,12 +2422,6 @@ export const api = {
 
       if (!userId) {
         // New user — create via RPC
-        const { data: appForPass } = await supabase
-          .from('registration_applications')
-          .select('email, password_hash')
-          .eq('id', applicationId)
-          .maybeSingle();
-
         const { data, error } = await supabase.rpc('approve_registration_application', {
           application_id: applicationId,
         });
@@ -2381,28 +2432,15 @@ export const api = {
 
         // Ensure auth_users (public schema) has the correct password.
         // The RPC may have written to a different table or double-hashed the password.
-        // If password_hash is already bcrypt (starts with $2a/$2b/$2y$) use it directly;
-        // otherwise hash it now.
-        if (userId && appForPass?.email && appForPass?.password_hash) {
+        // The server copies the application's password onto the login itself, so the
+        // password hash never reaches the browser.
+        if (userId) {
           await fetch('/api/db', {
             method: 'POST',
             headers: getAuthHeaders(),
             body: JSON.stringify({
-              query: `
-                INSERT INTO auth_users (id, email, encrypted_password)
-                VALUES (
-                  $1,
-                  lower(trim($2)),
-                  CASE WHEN $3 ~ '^\\$2[aby]\\$'
-                    THEN $3
-                    ELSE crypt($3, gen_salt('bf'))
-                  END
-                )
-                ON CONFLICT (id) DO UPDATE SET
-                  encrypted_password = EXCLUDED.encrypted_password,
-                  updated_at = NOW()
-              `,
-              params: [userId, appForPass.email, appForPass.password_hash],
+              queryName: 'registrations.syncLoginPassword',
+              params: [userId, applicationId],
             }),
           });
         }
@@ -2485,7 +2523,7 @@ export const api = {
       email: string;
       firstName: string;
       lastName: string;
-      parentFirstName: string;
+      parentFirstName?: string;
       phone: string;
       secondaryPhone?: string;
       location: string;
@@ -2534,7 +2572,7 @@ export const api = {
         email:             enrollData.email,
         first_name:        enrollData.firstName,
         last_name:         enrollData.lastName,
-        parent_first_name: enrollData.parentFirstName,
+        parent_first_name: enrollData.parentFirstName || null,
         password_hash:     tempPassword,
         role:              'student',
         program:           enrollData.program,
@@ -2558,7 +2596,7 @@ export const api = {
           email:             enrollData.email,
           first_name:        enrollData.firstName,
           last_name:         enrollData.lastName,
-          parent_first_name: enrollData.parentFirstName,
+          parent_first_name: enrollData.parentFirstName || null,
           password_hash:     tempPassword,
           role:              'student',
           program:           enrollData.program,
@@ -2596,13 +2634,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            INSERT INTO auth_users (id, email, encrypted_password)
-            VALUES ($1, lower(trim($2)), crypt($3, gen_salt('bf')))
-            ON CONFLICT (id) DO UPDATE SET
-              encrypted_password = EXCLUDED.encrypted_password,
-              updated_at = NOW()
-          `,
+          queryName: 'registrations.setLoginPassword',
           params: [createdUserId, enrollData.email, tempPassword],
         }),
       });
@@ -4231,11 +4263,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            INSERT INTO system_roles (name, description, is_system_role)
-            VALUES ($1, $2, false)
-            RETURNING id, name, description, is_system_role, created_at, updated_at
-          `,
+          queryName: 'roles.create',
           params: [name, description || null],
         }),
       });
@@ -4249,26 +4277,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            SELECT r.id, r.name, r.description, r.is_system_role, r.created_at, r.updated_at,
-                   COALESCE(
-                     json_agg(
-                       json_build_object(
-                         'id', rp.id,
-                         'role_id', rp.role_id,
-                         'module', rp.module,
-                         'actions', rp.actions,
-                         'created_at', rp.created_at,
-                         'updated_at', rp.updated_at
-                       )
-                     ) FILTER (WHERE rp.id IS NOT NULL),
-                     '[]'::json
-                   ) as permissions
-            FROM system_roles r
-            LEFT JOIN role_permissions rp ON r.id = rp.role_id
-            GROUP BY r.id
-            ORDER BY r.is_system_role DESC, r.name
-          `,
+          queryName: 'roles.getAll',
         }),
       });
       if (!response.ok) throw new Error(`Failed to fetch roles`);
@@ -4276,38 +4285,12 @@ export const api = {
       return result.rows.map(mapSystemRole);
     },
 
-    getById: async (roleId: string) => {
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: `
-            SELECT r.id, r.name, r.description, r.is_system_role, r.created_at, r.updated_at,
-                   json_agg(json_build_object('id', rp.id, 'module', rp.module, 'actions', rp.actions)) FILTER (WHERE rp.id IS NOT NULL) as permissions
-            FROM system_roles r
-            LEFT JOIN role_permissions rp ON r.id = rp.role_id
-            WHERE r.id = $1
-            GROUP BY r.id
-          `,
-          params: [roleId],
-        }),
-      });
-      if (!response.ok) throw new Error(`Failed to fetch role`);
-      const result = await response.json();
-      return result.rows[0] ? mapSystemRole(result.rows[0]) : null;
-    },
-
     update: async (roleId: string, name: string, description?: string) => {
       const response = await fetch('/api/db', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            UPDATE system_roles
-            SET name = $1, description = $2, updated_at = now()
-            WHERE id = $3 AND is_system_role = false
-            RETURNING id, name, description, is_system_role, created_at, updated_at
-          `,
+          queryName: 'roles.update',
           params: [name, description || null, roleId],
         }),
       });
@@ -4321,11 +4304,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            DELETE FROM system_roles
-            WHERE id = $1 AND is_system_role = false
-            RETURNING id
-          `,
+          queryName: 'roles.delete',
           params: [roleId],
         }),
       });
@@ -4344,7 +4323,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `DELETE FROM role_permissions WHERE role_id = $1`,
+          queryName: 'roles.clearPermissions',
           params: [roleId],
         }),
       });
@@ -4356,14 +4335,12 @@ export const api = {
       if (nonEmpty.length === 0) return [];
 
       // Step 2: insert new permissions (no conflict possible — old rows are gone)
-      const placeholders = nonEmpty.map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3}::jsonb)`).join(', ');
-      const params = [roleId, ...nonEmpty.flatMap(p => [p.module, JSON.stringify(p.actions)])];
       const insResp = await fetch('/api/db', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `INSERT INTO role_permissions (role_id, module, actions) VALUES ${placeholders} RETURNING id, module, actions`,
-          params,
+          queryName: 'roles.insertPermissions',
+          params: [roleId, JSON.stringify(nonEmpty.map(p => ({ module: p.module, actions: p.actions })))],
         }),
       });
       if (!insResp.ok) {
@@ -4382,39 +4359,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            WITH new_profile AS (
-              INSERT INTO profiles (id, email, first_name, last_name, role, must_change_password)
-              VALUES (gen_random_uuid(), lower(trim($1)), $2, $3, $4, true)
-              RETURNING id, email, first_name, last_name, role, is_archived, must_change_password, created_at, updated_at
-            ),
-            new_auth AS (
-              INSERT INTO auth_users (id, email, encrypted_password)
-              SELECT id, email, crypt($5, gen_salt('bf')) FROM new_profile
-              RETURNING id, encrypted_password
-            ),
-            -- No ON CONFLICT clauses here. ON CONFLICT (col) is rejected outright
-            -- when the database lacks a unique constraint on that column, which
-            -- fails the whole statement, and the live RDS schema has already
-            -- drifted from the repo once. The students row is keyed on a fresh
-            -- uuid so it cannot conflict; the registration row is skipped with
-            -- NOT EXISTS, which behaves the same with or without the constraint.
-            student_row AS (
-              INSERT INTO students (user_id, status)
-              SELECT id, 'active' FROM new_profile WHERE role = 'student'
-              RETURNING user_id
-            ),
-            reg_app AS (
-              INSERT INTO registration_applications
-                (email, first_name, last_name, password_hash, role, status, reviewed_at)
-              SELECT np.email, $2, $3, na.encrypted_password, np.role, 'approved', NOW()
-              FROM new_profile np
-              JOIN new_auth na ON na.id = np.id
-              WHERE np.role IN ('student', 'teacher')
-                AND NOT EXISTS (SELECT 1 FROM registration_applications r WHERE r.email = np.email)
-            )
-            SELECT * FROM new_profile
-          `,
+          queryName: 'users.create',
           params: [email, firstName, lastName, role, password],
         }),
       });
@@ -4428,53 +4373,14 @@ export const api = {
       return result.rows[0];
     },
 
-    delete: async (userId: string): Promise<void> => {
+    getAll: async (filters?: { role?: string; isArchived?: boolean }) => {
       const response = await fetch('/api/db', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          // Also remove the registration record (keyed by email) so a deleted
-          // user no longer appears in the Registrations tabs.
-          query: `
-            WITH target AS (SELECT email FROM profiles WHERE id = $1),
-                 del_reg AS (DELETE FROM registration_applications WHERE email IN (SELECT email FROM target))
-            DELETE FROM profiles WHERE id = $1
-          `,
-          params: [userId],
+          queryName: 'users.getAll',
+          params: [filters?.role ?? null, filters?.isArchived ?? null],
         }),
-      });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error?.message || error.message || 'Failed to delete user');
-      }
-    },
-
-    getAll: async (filters?: { role?: string; isArchived?: boolean }) => {
-      let query = `
-        SELECT p.id, p.email, p.first_name, p.last_name, p.role, p.system_role_id, p.is_archived, 
-               p.must_change_password, p.created_at, p.updated_at, sr.name as role_name
-        FROM profiles p
-        LEFT JOIN system_roles sr ON p.system_role_id = sr.id
-        WHERE 1=1
-      `;
-      const params: any[] = [];
-
-      if (filters?.role) {
-        query += ` AND p.role = $${params.length + 1}`;
-        params.push(filters.role);
-      }
-
-      if (filters?.isArchived !== undefined) {
-        query += ` AND p.is_archived = $${params.length + 1}`;
-        params.push(filters.isArchived);
-      }
-
-      query += ` ORDER BY p.created_at DESC`;
-
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ query, params }),
       });
       if (!response.ok) throw new Error(`Failed to fetch users`);
       const result = await response.json();
@@ -4507,58 +4413,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            WITH cls AS (
-              SELECT teacher_id, COUNT(*)::int AS class_count
-              FROM classes
-              GROUP BY teacher_id
-            ),
-            stu AS (
-              SELECT c.teacher_id, COUNT(DISTINCT e.student_id)::int AS student_count
-              FROM classes c
-              JOIN class_enrollments e ON e.class_id = c.id
-              WHERE e.status = 'active'
-              GROUP BY c.teacher_id
-            ),
-            hrs AS (
-              SELECT c.teacher_id,
-                     SUM(EXTRACT(EPOCH FROM (s.end_time - s.start_time)) / 3600.0)::float AS weekly_hours
-              FROM classes c
-              JOIN class_sessions s ON s.class_id = c.id
-              GROUP BY c.teacher_id
-            ),
-            per_class AS (
-              SELECT c.id, c.teacher_id, c.title,
-                     COUNT(a.class_id)::int AS marks,
-                     COUNT(a.class_id) FILTER (WHERE a.status IN ('present', 'late'))::int AS attended
-              FROM classes c
-              LEFT JOIN class_attendance a ON a.class_id = c.id
-              GROUP BY c.id, c.teacher_id, c.title
-            ),
-            att AS (
-              SELECT teacher_id,
-                     SUM(marks)::int    AS marks,
-                     SUM(attended)::int AS attended,
-                     json_agg(json_build_object('id', id, 'title', title, 'marks', marks, 'attended', attended)
-                              ORDER BY title) AS classes
-              FROM per_class
-              GROUP BY teacher_id
-            )
-            SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.avatar_url,
-                   COALESCE(cls.class_count, 0)   AS class_count,
-                   COALESCE(stu.student_count, 0) AS student_count,
-                   COALESCE(hrs.weekly_hours, 0)  AS weekly_hours,
-                   COALESCE(att.marks, 0)         AS marks,
-                   COALESCE(att.attended, 0)      AS attended,
-                   COALESCE(att.classes, '[]'::json) AS classes
-            FROM profiles p
-            LEFT JOIN cls ON cls.teacher_id = p.id
-            LEFT JOIN stu ON stu.teacher_id = p.id
-            LEFT JOIN hrs ON hrs.teacher_id = p.id
-            LEFT JOIN att ON att.teacher_id = p.id
-            WHERE p.role = 'teacher' AND COALESCE(p.is_archived, false) = false
-            ORDER BY p.first_name, p.last_name
-          `,
+          queryName: 'users.teacherOverview',
           params: [],
         }),
       });
@@ -4594,11 +4449,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            SELECT p.id, p.first_name, p.last_name, p.email, p.phone, p.avatar_url, p.created_at
-            FROM profiles p
-            WHERE p.id = $1 AND p.role = 'teacher'
-          `,
+          queryName: 'users.teacherProfile',
           params: [teacherId],
         }),
       });
@@ -4622,12 +4473,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `
-            SELECT c.id, c.title, c.teacher_id, p.first_name, p.last_name
-            FROM classes c
-            JOIN profiles p ON p.id = c.teacher_id
-            ORDER BY c.title
-          `,
+          queryName: 'users.classesWithTeacher',
           params: [],
         }),
       });
@@ -4646,40 +4492,22 @@ export const api = {
      *  teacher signs in with the new address. */
     updateTeacher: async (teacherId: string, updates: { firstName: string; lastName: string; email: string; phone?: string }): Promise<void> => {
       const email = updates.email.trim().toLowerCase();
-      const post = async (query: string, params: unknown[]) => {
+      const post = async (queryName: string, params: unknown[]) => {
         const response = await fetch('/api/db', {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ query, params }),
+          body: JSON.stringify({ queryName, params }),
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.error) throw new Error(result.error?.message || 'Failed to update teacher');
         return (result.rows || []) as any[];
       };
 
-      const taken = await post(
-        `SELECT 1 FROM profiles WHERE lower(email) = $1 AND id <> $2
-         UNION ALL
-         SELECT 1 FROM auth_users WHERE lower(email) = $1 AND id <> $2
-         LIMIT 1`,
-        [email, teacherId],
-      );
+      const taken = await post('users.emailTakenByOther', [email, teacherId]);
       if (taken.length > 0) throw new Error('That email is already used by another account.');
 
       const rows = await post(
-        `WITH old AS (
-           SELECT email FROM profiles WHERE id = $1 AND role = 'teacher'
-         ),
-         au AS (
-           UPDATE auth_users SET email = $4 WHERE id = $1 AND EXISTS (SELECT 1 FROM old)
-         ),
-         ra AS (
-           UPDATE registration_applications SET email = $4 WHERE email = (SELECT email FROM old)
-         )
-         UPDATE profiles
-         SET first_name = $2, last_name = $3, email = $4, phone = $5, updated_at = now()
-         WHERE id = $1 AND role = 'teacher'
-         RETURNING id`,
+        'users.updateTeacher',
         [teacherId, updates.firstName, updates.lastName, email, updates.phone || null],
       );
       if (rows.length === 0) throw new Error('Teacher not found.');
@@ -4692,7 +4520,7 @@ export const api = {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          query: `UPDATE classes SET teacher_id = $1, updated_at = now() WHERE id = ANY($2::uuid[])`,
+          queryName: 'users.assignClassesToTeacher',
           params: [teacherId, classIds],
         }),
       });
@@ -4707,125 +4535,6 @@ export const api = {
       });
       if (error) throw new Error(error.message);
       if (!data?.success) throw new Error(data?.message || 'Failed to delete teacher account.');
-    },
-
-    getById: async (userId: string) => {
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: `
-            SELECT p.id, p.email, p.first_name, p.last_name, p.role, p.system_role_id, p.is_archived,
-                   p.must_change_password, p.created_at, p.updated_at, sr.name as role_name
-            FROM profiles p
-            LEFT JOIN system_roles sr ON p.system_role_id = sr.id
-            WHERE p.id = $1
-          `,
-          params: [userId],
-        }),
-      });
-      if (!response.ok) throw new Error(`Failed to fetch user`);
-      const result = await response.json();
-      const row = result.rows[0];
-      return row ? {
-        id: row.id,
-        email: row.email,
-        firstName: row.first_name,
-        lastName: row.last_name,
-        role: row.role,
-        roleId: row.system_role_id,
-        roleName: row.role_name,
-        isArchived: row.is_archived,
-        mustChangePassword: row.must_change_password,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      } : null;
-    },
-
-    update: async (userId: string, updates: { firstName?: string; lastName?: string; role?: string; mustChangePassword?: boolean; systemRoleId?: string | null }) => {
-      const setClauses: string[] = [];
-      const params: (string | boolean | null)[] = [];
-
-      if (updates.firstName) {
-        setClauses.push(`first_name = $${params.length + 1}`);
-        params.push(updates.firstName);
-      }
-      if (updates.lastName) {
-        setClauses.push(`last_name = $${params.length + 1}`);
-        params.push(updates.lastName);
-      }
-      if (updates.role) {
-        setClauses.push(`role = $${params.length + 1}`);
-        params.push(updates.role);
-      }
-      if (updates.mustChangePassword !== undefined) {
-        setClauses.push(`must_change_password = $${params.length + 1}`);
-        params.push(updates.mustChangePassword);
-      }
-      if ('systemRoleId' in updates) {
-        setClauses.push(`system_role_id = $${params.length + 1}`);
-        params.push(updates.systemRoleId ?? null);
-      }
-
-      if (setClauses.length === 0) return null;
-
-      setClauses.push(`updated_at = now()`);
-      params.push(userId);
-
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: `
-            UPDATE profiles
-            SET ${setClauses.join(', ')}
-            WHERE id = $${params.length}
-            RETURNING id, email, first_name, last_name, role, is_archived, must_change_password, created_at, updated_at
-          `,
-          params,
-        }),
-      });
-      if (!response.ok) throw new Error(`Failed to update user`);
-      const result = await response.json();
-      return result.rows[0];
-    },
-
-    deactivate: async (userId: string) => {
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: `
-            UPDATE profiles
-            SET is_archived = true, archived_at = now(), updated_at = now()
-            WHERE id = $1
-            RETURNING id, is_archived
-          `,
-          params: [userId],
-        }),
-      });
-      if (!response.ok) throw new Error(`Failed to deactivate user`);
-      const result = await response.json();
-      return result.rows[0];
-    },
-
-    reactivate: async (userId: string) => {
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          query: `
-            UPDATE profiles
-            SET is_archived = false, archived_at = NULL, updated_at = now()
-            WHERE id = $1
-            RETURNING id, is_archived
-          `,
-          params: [userId],
-        }),
-      });
-      if (!response.ok) throw new Error(`Failed to reactivate user`);
-      const result = await response.json();
-      return result.rows[0];
     },
 
     // CSV template generation for bulk user creation

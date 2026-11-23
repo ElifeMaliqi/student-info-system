@@ -2,23 +2,30 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, User, Mail, Phone, Calendar, MapPin, FileText, AlertCircle, Loader2, Archive, ArchiveRestore, Trash2, VenetianMask } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
-import { useModulePermissions } from '../context/UserContext';
+import { useModulePermissions, useUser } from '../context/UserContext';
 import { api } from '../services/api';
-import { RegistrationApplication, Class } from '../types';
+import { RegistrationApplication, Class, UserWithRole } from '../types';
 import { Skeleton } from '../components/Skeleton';
 import { effectiveAge } from '../utils/age';
 import { NoteField, EMPTY_NOTE, saveNote, useConfirm, type NoteValue } from '../components/NoteField';
+import { supabase } from '../lib/supabase';
 
 export default function RegistrationApplications() {
   const { t } = useLanguage();
+  const { user } = useUser();
   const { isOverridden: permOverridden, canUpdate, canDelete } = useModulePermissions('registrations');
   const [applications, setApplications] = useState<RegistrationApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<RegistrationApplication | null>(null);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'archived' | 'missing'>('all');
-  const [roleTab, setRoleTab] = useState<'student' | 'teacher'>('student');
+  const [roleTab, setRoleTab] = useState<'student' | 'teacher' | 'admin'>('student');
+  // Admin accounts have no registration application, so the Admins tab (superadmin
+  // only) lists their profiles instead. Loaded the first time the tab opens.
+  const isSuperadmin = user?.role === 'superadmin';
+  const [admins, setAdmins] = useState<UserWithRole[] | null>(null);
+  const [adminsError, setAdminsError] = useState('');
   const [enrolledEmails, setEnrolledEmails] = useState<Set<string>>(new Set());
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'reject' | 'archive' | null>(null);
@@ -37,6 +44,13 @@ export default function RegistrationApplications() {
   }, []);
 
   useEffect(() => { setNote(EMPTY_NOTE); }, [confirmAction, selectedApp?.id]);
+
+  useEffect(() => {
+    if (roleTab !== 'admin' || admins !== null) return;
+    api.users.getAll({ role: 'admin', isArchived: false })
+      .then(setAdmins)
+      .catch((e) => { setAdmins([]); setAdminsError(e instanceof Error ? e.message : 'Failed to load admins'); });
+  }, [roleTab, admins]);
 
   const loadApplications = async () => {
     try {
@@ -189,6 +203,29 @@ export default function RegistrationApplications() {
     }
   };
 
+  // Superadmin only: switch this browser to the user's account (the server checks
+  // the role too). Logged on the server; full reload so nothing stays loaded as
+  // the superadmin.
+  const doImpersonate = async (key: string, target: { userId?: string; email?: string }, name: string, e?: { stopPropagation: () => void }) => {
+    e?.stopPropagation();
+    const confirmed = await ask({
+      title: t('impersonate.confirm_title').replace('{name}', name),
+      message: t('impersonate.confirm_msg'),
+      confirmLabel: t('impersonate.button'),
+      danger: false,
+      withNote: false,
+    });
+    if (!confirmed) return;
+    setProcessingId(key);
+    const { error } = await supabase.auth.startImpersonation(target);
+    if (error) {
+      setProcessingId(null);
+      alert(error.message);
+      return;
+    }
+    window.location.assign('/dashboard');
+  };
+
   // Students and teachers are listed separately; every filter works within the chosen group.
   const roleApps = applications.filter(a => a.role === roleTab);
 
@@ -229,14 +266,14 @@ export default function RegistrationApplications() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight mb-1">
-            {t('registrations.title')}
+            {user?.role === 'superadmin' ? t('nav.users') : t('registrations.title')}
           </h1>
           <p className="text-white/50 text-sm">
             {t('registrations.desc')}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        {roleTab !== 'admin' && <div className="flex flex-wrap gap-2">
           {(['all', 'pending', 'approved', 'rejected'] as const).map((f) => (
             <button
               key={f}
@@ -272,11 +309,11 @@ export default function RegistrationApplications() {
             <Archive className="w-3.5 h-3.5" />
             {t('registrations.archived')} ({archivedApps.length})
           </button>
-        </div>
+        </div>}
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(['student', 'teacher'] as const).map((r) => (
+        {(isSuperadmin ? (['student', 'teacher', 'admin'] as const) : (['student', 'teacher'] as const)).map((r) => (
           <button
             key={r}
             onClick={() => setRoleTab(r)}
@@ -286,12 +323,60 @@ export default function RegistrationApplications() {
                 : 'bg-white/5 text-white/50 hover:text-white hover:bg-white/10'
             }`}
           >
-            {r === 'student' ? t('nav.students') : t('nav.teachers')}
+            {r === 'student' ? t('nav.students') : r === 'teacher' ? t('nav.teachers') : t('registrations.admins')}
           </button>
         ))}
       </div>
 
-      {isLoading ? (
+      {roleTab === 'admin' ? (
+        admins === null ? (
+          <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-white/40" /></div>
+        ) : admins.length === 0 ? (
+          <div className="glass-card p-12 rounded-2xl text-center">
+            <AlertCircle className="w-12 h-12 text-white/20 mx-auto mb-4" />
+            <p className="text-white/50">{adminsError || t('registrations.no_admins')}</p>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {admins.map((a) => (
+              <div key={a.id} className="glass-card p-6 rounded-2xl">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#fc0ce4] to-[#949ce4] flex items-center justify-center flex-shrink-0">
+                    <User className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-medium text-lg">{a.firstName} {a.lastName}</h3>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full border border-white/10 bg-white/5 text-white/70">
+                        admin
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-white/60">
+                      <Mail className="w-4 h-4" />
+                      {a.email}
+                    </div>
+                    {a.createdAt && (
+                      <div className="mt-2 text-xs text-white/40">
+                        {t('registrations.created')} {new Date(a.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </div>
+                    )}
+                  </div>
+                  {isSuperadmin && (
+                    <button
+                      onClick={(e) => doImpersonate(a.id, { userId: a.id }, `${a.firstName} ${a.lastName}`, e)}
+                      disabled={!!processingId}
+                      className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                      title={t('impersonate.button')}
+                    >
+                      {processingId === a.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <VenetianMask className="w-5 h-5" />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : isLoading ? (
         <div className="space-y-4">
           {Array.from({ length: 3 }).map((_, i) => (
             <div key={i} className="glass-card p-6 rounded-2xl">
@@ -382,6 +467,16 @@ export default function RegistrationApplications() {
                 </div>
 
                 <div className="flex gap-2">
+                {isSuperadmin && app.status === 'approved' && (
+                  <button
+                    onClick={(e) => doImpersonate(app.id, { email: app.email }, `${app.firstName} ${app.lastName}`, e)}
+                    disabled={!!processingId}
+                    className="p-2 rounded-xl bg-white/5 text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                    title={t('impersonate.button')}
+                  >
+                    {processingId === app.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <VenetianMask className="w-5 h-5" />}
+                  </button>
+                )}
                 {app.status === 'pending' && !app.isArchived && (
                   <div className="flex gap-2">
                     {(!permOverridden || canUpdate) && (

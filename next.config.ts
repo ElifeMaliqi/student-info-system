@@ -14,6 +14,22 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'api.dicebear.com' },
     ],
   },
+  // The Registrations page became the superadmin "Users" page; keep old links working.
+  async redirects() {
+    return [
+      { source: '/registrations', destination: '/users', permanent: false },
+      // The Analytics page (a copy of the Dashboard) was removed.
+      { source: '/analytics', destination: '/dashboard', permanent: false },
+    ];
+  },
+  // Avatars uploaded after the last build aren't in the static public/ file list,
+  // so serve them through the avatar route instead (files present at build time
+  // are still served statically; rewrites only apply when no file matches).
+  async rewrites() {
+    return [
+      { source: '/uploads/avatars/:file', destination: '/api/upload/avatar?file=:file' },
+    ];
+  },
   async headers() {
     return [
       {

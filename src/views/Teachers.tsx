@@ -27,7 +27,8 @@ export default function Teachers() {
   const router = useRouter();
   const { user } = useUser();
   const { isOverridden: permOverridden, canUpdate: canEdit, canDelete: canRemove } = useModulePermissions('users');
-  const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  // Only superadmins may edit or remove teachers; admins get a read-only list.
+  const isPrivileged = user?.role === 'superadmin';
 
   const [teachers, setTeachers] = useState<TeacherOverview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -145,7 +146,7 @@ export default function Teachers() {
                   <th className="pb-3 font-medium">{t('teachers.col_hours')}</th>
                   <th className="pb-3 font-medium">{t('teachers.col_attendance')}</th>
                   <th className="pb-3 font-medium">{t('teachers.col_contact')}</th>
-                  <th className="pb-3 font-medium">{t('teachers.col_action')}</th>
+                  {isPrivileged && <th className="pb-3 font-medium">{t('teachers.col_action')}</th>}
                 </tr>
               </thead>
               <tbody className="text-sm">
@@ -185,9 +186,9 @@ export default function Teachers() {
                         </a>
                       ) : <span className="text-white/30">–</span>}
                     </td>
-                    <td className="py-4 pr-2" onClick={(e) => e.stopPropagation()}>
+                    {isPrivileged && <td className="py-4 pr-2" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-2">
-                        {isPrivileged && (!permOverridden || canEdit) && (
+                        {(!permOverridden || canEdit) && (
                           <button
                             onClick={() => handleEditOpen(teacher)}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-white/10 hover:bg-white/5 transition-colors"
@@ -197,7 +198,7 @@ export default function Teachers() {
                             {t('teachers.edit')}
                           </button>
                         )}
-                        {isPrivileged && (!permOverridden || canRemove) && (
+                        {(!permOverridden || canRemove) && (
                           <button
                             onClick={() => void handleRemove(teacher)}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs border border-red-500/25 text-red-300 hover:bg-red-500/10 transition-colors"
@@ -208,7 +209,7 @@ export default function Teachers() {
                           </button>
                         )}
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>

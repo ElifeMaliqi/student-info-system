@@ -101,7 +101,7 @@ export default function StudentAttendance() {
           <select
             value={filterClass}
             onChange={e => setFilterClass(e.target.value)}
-            className="glass-select px-4 py-2.5 rounded-xl text-sm"
+            className="glass-select select-auto"
           >
             <option value="">All classes</option>
             {classes.map(c => (

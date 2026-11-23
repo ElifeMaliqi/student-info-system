@@ -14,10 +14,17 @@ export interface NoteValue {
 export const EMPTY_NOTE: NoteValue = { text: '', isPrivate: false };
 
 /**
- * Saves the optional admin note for an action that already succeeded. Empty notes
- * are skipped. A failed note save never undoes or blocks the action itself.
+ * Called after every admin action that already succeeded: records it in the
+ * activity log (Settings > Logs, superadmins) and saves the optional admin note.
+ * Empty notes are skipped. A failed log or note save never undoes or blocks the
+ * action itself.
  */
 export async function saveNote(area: string, action: string, note: NoteValue | null | undefined) {
+  try {
+    await api.logs.create(area, action);
+  } catch (err) {
+    console.error('Failed to log activity:', err);
+  }
   if (!note || !note.text.trim()) return;
   try {
     await api.notes.create(area, action, note);

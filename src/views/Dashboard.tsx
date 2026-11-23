@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { Users, CalendarCheck, CreditCard, BookOpen, TrendingUp, ArrowUpRight, MoreHorizontal, AlertCircle, GraduationCap } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
+import { useUser } from '../context/UserContext';
 import { Skeleton } from '../components/Skeleton';
 import { supabase } from '../lib/supabase';
 
@@ -32,6 +33,7 @@ interface AttentionData {
 
 export default function Dashboard() {
   const { t } = useLanguage();
+  const { user } = useUser();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState<DashStats>({ totalStudents: 0, totalClasses: 0, totalTeachers: 0, monthlyRevenue: 0 });
@@ -221,9 +223,11 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between mb-6 shrink-0">
             <h2 className="font-display text-lg font-medium">{t('dash.recent_enrollments')}</h2>
-            <button onClick={() => router.push('/registrations')} className="text-xs font-medium text-white/50 hover:text-[#fc0ce4] flex items-center gap-1 transition-colors">
-              {t('dash.view_all')} <ArrowUpRight className="w-3 h-3" />
-            </button>
+            {user?.role === 'superadmin' && (
+              <button onClick={() => router.push('/users')} className="text-xs font-medium text-white/50 hover:text-[#fc0ce4] flex items-center gap-1 transition-colors">
+                {t('dash.view_all')} <ArrowUpRight className="w-3 h-3" />
+              </button>
+            )}
           </div>
           
           <div className="overflow-x-auto pb-4 custom-scrollbar flex-1 -mx-6 px-6">

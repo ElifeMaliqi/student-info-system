@@ -107,6 +107,8 @@ export default function Students() {
   const { user } = useUser();
   // Only admins/superadmins may edit or delete student records.
   const isPrivileged = user?.role === 'admin' || user?.role === 'superadmin';
+  // Only superadmins may change a student's monthly price; admins see it disabled.
+  const isSuperadmin = user?.role === 'superadmin';
   const [view, setView] = useState<'list' | 'add' | 'success'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -808,7 +810,6 @@ export default function Students() {
 
     if (!form.firstName.trim())  { setEnrollError(t('students.err_first_name')); return; }
     if (!form.lastName.trim())   { setEnrollError(t('students.err_last_name')); return; }
-    if (!form.parentFirstName.trim()) { setEnrollError(t('students.err_parent')); return; }
     if (!form.age && !form.dateOfBirth) { setEnrollError('Age is required.'); return; }
     const enrollAgeError = validateAgeInput(form.age, form.dateOfBirth);
     if (enrollAgeError) { setEnrollError(enrollAgeError); return; }
@@ -826,7 +827,7 @@ export default function Students() {
         email:            form.email.trim().toLowerCase(),
         firstName:        form.firstName.trim(),
         lastName:         form.lastName.trim(),
-        parentFirstName:  form.parentFirstName.trim(),
+        parentFirstName:  form.parentFirstName.trim() || undefined,
         phone:            form.phone.trim(),
         secondaryPhone:   form.secondaryPhone.trim() || undefined,
         location:         form.location,
@@ -909,17 +910,6 @@ export default function Students() {
         <div className="glass-card rounded-3xl p-6 lg:p-8">
           <form className="space-y-6" onSubmit={handleAdminEnroll}>
 
-            {enrollError && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                {enrollError}
-              </motion.div>
-            )}
-
             {/* Name row */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -942,7 +932,7 @@ export default function Students() {
 
             {/* Parent name */}
             <div className="space-y-2">
-              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name *</label>
+              <label className="text-[11px] font-semibold text-white/60 uppercase tracking-widest ml-1">Parent's First Name</label>
               <input
                 type="text" value={form.parentFirstName}
                 onChange={e => setField('parentFirstName', e.target.value)}
@@ -1088,8 +1078,18 @@ export default function Students() {
 
             {isPrivileged && <NoteField value={note} onChange={setNote} />}
 
-            {/* Footer actions */}
-            <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
+            {/* Footer actions — validation/enrollment errors show here, next to Cancel */}
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-white/5">
+              {enrollError && (
+                <motion.div
+                  initial={{ opacity: 0, x: 8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="flex items-start gap-2 mr-auto sm:mr-0 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  {enrollError}
+                </motion.div>
+              )}
               <button
                 type="button"
                 onClick={() => { setView('list'); setEnrollError(''); setForm(BLANK_FORM); setDocFile(null); }}
@@ -1157,49 +1157,47 @@ export default function Students() {
       </div>
 
       <div className="glass-card rounded-3xl p-6 overflow-hidden flex flex-col">
-        <div className="flex flex-col gap-4 justify-between mb-6 shrink-0">
-          <div className="flex flex-col md:flex-row gap-4 justify-between">
-            <div className="relative w-full md:w-96 group">
+        <div className="flex flex-col gap-3 justify-between mb-5 shrink-0">
+          {/* Filters: search + dropdowns + export on one row. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72 group">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30 group-focus-within:text-[#fc0ce4] transition-colors" />
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(1);
                 }}
-                placeholder={t('students.search')} 
-                className="w-full bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
+                placeholder={t('students.search')}
+                className="w-full bg-white/5 border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-[#fc0ce4]/40 focus:bg-[#fc0ce4]/5 focus:shadow-[0_0_15px_rgba(252,12,228,0.1)] transition-all"
               />
             </div>
-            <button 
-              onClick={handleExport}
-              disabled={filteredStudents.length === 0}
-              className="px-4 py-2.5 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30 self-start"
-            >
-              <Download className="w-4 h-4" />
-              Export CSV
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2 items-center">
-            <select value={filterProgram} onChange={e => { setFilterProgram(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+            <select value={filterProgram} onChange={e => { setFilterProgram(e.target.value); setCurrentPage(1); }} className="glass-select select-auto select-compact">
               <option value="">All Degrees</option>
               {studentFilterOptions.programs.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+            <select value={filterClass} onChange={e => { setFilterClass(e.target.value); setCurrentPage(1); }} className="glass-select select-auto select-compact">
               <option value="">All Classes</option>
               {studentFilterOptions.classes.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={filterLocation} onChange={e => { setFilterLocation(e.target.value); setCurrentPage(1); }} className="glass-select px-3 py-1.5 rounded-lg text-xs">
+            <select value={filterLocation} onChange={e => { setFilterLocation(e.target.value); setCurrentPage(1); }} className="glass-select select-auto select-compact">
               <option value="">{t('students.all_locations')}</option>
               {studentFilterOptions.locations.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
             {hasStudentFilters && (
-              <button onClick={clearStudentFilters} className="text-xs text-white/30 hover:text-white transition-colors ml-1">
+              <button onClick={clearStudentFilters} className="text-xs text-white/30 hover:text-white transition-colors px-1">
                 Clear all
               </button>
             )}
+            <button
+              onClick={handleExport}
+              disabled={filteredStudents.length === 0}
+              className="ml-auto px-3.5 py-2 rounded-xl border border-white/10 text-sm font-medium hover:bg-white/5 transition-colors flex items-center gap-2 disabled:opacity-30"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
           </div>
 
           {isPrivileged && (!permOverridden || canRemove) && selectedStudents.length > 0 && (
@@ -2088,9 +2086,11 @@ export default function Students() {
                     placeholder={pricing
                       ? `${t('price.placeholder')}: ${priceForAge(effectiveAge(editForm.age, editForm.dateOfBirth), pricing.agePrices, pricing.defaultAmount).toFixed(2)}`
                       : t('price.placeholder')}
-                    className="glass-input w-full px-3 py-2.5 rounded-xl text-sm"
+                    disabled={!isSuperadmin}
+                    title={isSuperadmin ? undefined : t('price.superadmin_only')}
+                    className={`glass-input w-full px-3 py-2.5 rounded-xl text-sm ${isSuperadmin ? '' : 'opacity-50 cursor-not-allowed'}`}
                   />
-                  <p className="text-[10px] text-white/30 mt-1 ml-1">{t('price.auto_hint')}</p>
+                  <p className="text-[10px] text-white/30 mt-1 ml-1">{isSuperadmin ? t('price.auto_hint') : t('price.superadmin_only')}</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
